@@ -1,10 +1,18 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
-const NAV_ITEMS = ["Product", "Journal", "About", "Careers"] as const;
+/* Product, About and Careers stay on "#" until those pages exist — linking them
+   at 404s is worse than linking them nowhere. */
+const NAV_ITEMS = [
+  { label: "Product", href: "#" },
+  { label: "Journal", href: "/journal" },
+  { label: "About", href: "#" },
+  { label: "Careers", href: "#" },
+] as const;
 
 /* -------------------------------------------------------------------------- */
 /*  Header nav — bar 1320×60, wordmark left, links right                        */
@@ -17,18 +25,20 @@ export function SiteNav() {
     // Transparent so it can sit directly on the hero sky.
     <header className="w-full">
       <div className="flex h-[60px] items-center justify-between">
-        <Wordmark className="text-[26px]" />
+        <Link href="/" aria-label="Aetherfield, home">
+          <Wordmark className="text-[26px]" />
+        </Link>
 
         {/* Desktop */}
         <nav className="hidden items-center gap-7 md:flex">
           {NAV_ITEMS.map((item) => (
-            <a
-              key={item}
-              href="#"
+            <Link
+              key={item.label}
+              href={item.href}
               className="font-sans text-nav font-bold text-ink hover:text-muted"
             >
-              {item}
-            </a>
+              {item.label}
+            </Link>
           ))}
           <LinkButton href="#">Get started</LinkButton>
         </nav>
@@ -60,13 +70,16 @@ export function SiteNav() {
       {open ? (
         <nav className="pb-6 md:hidden">
           {NAV_ITEMS.map((item) => (
-            <a
-              key={item}
-              href="#"
+            // A client-side navigation doesn't unmount the panel, so close it
+            // here or the new page arrives with the menu still over it.
+            <Link
+              key={item.label}
+              href={item.href}
+              onClick={() => setOpen(false)}
               className="block border-b border-border py-5 font-sans text-[40px] leading-none font-bold"
             >
-              {item}
-            </a>
+              {item.label}
+            </Link>
           ))}
           <Button className="mt-6 h-[52px] w-full">Get started</Button>
         </nav>
@@ -105,7 +118,8 @@ export function SiteFooter() {
     <footer className="overflow-hidden bg-brand text-brand-ink">
       <div className="mx-auto flex max-w-page flex-col items-center gap-3 px-5 lg:px-6 py-6 text-center sm:flex-row sm:items-baseline sm:justify-between sm:text-left">
         <nav className="flex flex-wrap justify-center gap-x-7 gap-y-2">
-          {[...NAV_ITEMS, "Get started"].map((item) => (
+          {/* Labels only: the footer's link targets are unchanged pending review. */}
+          {[...NAV_ITEMS.map((i) => i.label), "Get started"].map((item) => (
             <a
               key={item}
               href="#"
