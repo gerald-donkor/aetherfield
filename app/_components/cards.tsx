@@ -1,3 +1,4 @@
+import Image from "next/image";
 import {
   ArrowUpRight,
   Button,
@@ -15,18 +16,64 @@ export type Article = {
   category: string;
   readTime: string;
   description?: string;
+  /** Editorial photograph. Falls back to the grey Placeholder when absent. */
+  src?: string;
+  alt?: string;
 };
 
-/** Stacked / feature. Image 612×356, then title → meta → description. */
-export function ArticleCardStacked({ article }: { article: Article }) {
-  return (
-    <article className="max-w-[612px]">
-      <Placeholder ratio="612 / 356" />
-      <h3 className="mt-6 font-sans text-p1 font-bold">{article.title}</h3>
+/**
+ * Stacked / feature. Image 612×356, then title → meta → description.
+ * `href` makes the whole card one link; without it the card is inert, which is
+ * how the styleguide renders it.
+ */
+export function ArticleCardStacked({
+  article,
+  href,
+  priority = false,
+  className = "",
+}: {
+  article: Article;
+  href?: string;
+  priority?: boolean;
+  className?: string;
+}) {
+  const body = (
+    <>
+      {article.src ? (
+        <Image
+          src={article.src}
+          alt={article.alt ?? ""}
+          width={768}
+          height={768}
+          sizes="(max-width: 1024px) 100vw, 612px"
+          priority={priority}
+          className="aspect-[612/356] w-full object-cover"
+        />
+      ) : (
+        <Placeholder ratio="612 / 356" />
+      )}
+      <h3 className="mt-6 font-sans text-p1 font-bold group-hover:underline">
+        {article.title}
+      </h3>
       <Meta className="mt-2" items={[article.category, article.readTime]} />
       {article.description ? (
         <p className="mt-5 font-serif text-p2">{article.description}</p>
       ) : null}
+    </>
+  );
+
+  return (
+    <article className={className}>
+      {href ? (
+        <a
+          href={href}
+          className="group block focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        >
+          {body}
+        </a>
+      ) : (
+        body
+      )}
     </article>
   );
 }

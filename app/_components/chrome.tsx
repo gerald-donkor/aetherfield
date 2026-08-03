@@ -79,13 +79,19 @@ export function SiteNav() {
 /*  CTA band — 1280×358, surface, square corners, centred                       */
 /* -------------------------------------------------------------------------- */
 
-export function CtaBand({ headline }: { headline: string }) {
+export function CtaBand({
+  headline,
+  action = "Request a demo",
+}: {
+  headline: string;
+  action?: string;
+}) {
   return (
     <section className="flex flex-col items-center justify-center bg-surface px-6 py-[110px] text-center">
       <h2 className="display-fluid-h4 max-w-[980px] font-sans font-bold text-balance">
         {headline}
       </h2>
-      <Button className="mt-[38px]">Request a demo</Button>
+      <Button className="mt-[38px]">{action}</Button>
     </section>
   );
 }

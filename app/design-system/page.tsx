@@ -227,7 +227,7 @@ export default function Page() {
       {/* ---- Cards ---- */}
       <Section label="Components · Article cards">
         <Row note="Stacked — image 612×356">
-          <ArticleCardStacked article={ARTICLE} />
+          <ArticleCardStacked article={ARTICLE} className="max-w-[612px]" />
         </Row>
         <Row note="Horizontal — 620×150">
           <ArticleCardHorizontal article={ARTICLE} />
