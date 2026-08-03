@@ -12,6 +12,9 @@
   --color-brand: #fff546;
   --color-brand-ink: #66640f;
   --color-rule: #e9e9e9;
+  /* Home page surfaces, sampled from the comps */
+  --color-dawn: #fef3df; /* warm foot of the hero gradient */
+  --color-cream: #eee8d7; /* textured principles section */
 
   /* ---- Families ---- */
   --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
@@ -39,7 +42,8 @@
   --text-caption--line-height: 1;
 
   /* ---- Layout ---- */
-  --container-frame: 1280px;
+  --container-frame: 1280px; /* styleguide */
+  --container-page: 1280px; /* marketing pages: 1232 content + 24px gutters */
 
   /* ---- Radius ---- */
   --radius-card: 16px;
@@ -66,8 +70,40 @@ body {
 @utility display-fluid-h3 {
   font-size: clamp(34px, 4vw, 56px);
 }
+/* Section headings. The comps don't follow one fluid curve — they step
+   24 / 30 / 40 across mobile, tablet and desktop, so the utility does too. */
 @utility display-fluid-h4 {
-  font-size: clamp(28px, 2.9vw, 40px);
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  @media (width >= 768px) {
+    font-size: 30px;
+  }
+  @media (width >= 1024px) {
+    font-size: clamp(30px, 3.1vw, 40px);
+  }
+}
+
+/* Hero sky: sampled top-to-bottom from the comp — accent-soft blue falling to
+   a warm dawn cream, then a hard cut to white. */
+@utility hero-sky {
+  background-image: linear-gradient(
+    to bottom,
+    #abd4fe 0%,
+    #c8dff3 37%,
+    #e9ebe7 74%,
+    var(--color-dawn) 100%
+  );
+}
+
+/* Principles section fabric. A 4-way mirrored tile of the comp's texture, drawn
+   at its native 1x scale so the halftone screen stays fine instead of being
+   magnified into a visible grid. */
+@utility cream-fabric {
+  background-color: var(--color-cream);
+  background-image: url("/assets/generated/texture-cream.jpg");
+  background-size: 2560px 220px;
+  background-repeat: repeat;
 }
 
 /* Footer duotone band — the reference uses a halftone-screened photograph of

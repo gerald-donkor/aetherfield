@@ -27,11 +27,13 @@ Nine swatches, laid out at `x = 20 + 120n`, each `105 × 105`.
 | `--color-brand` | `#FFF546` | Signature yellow — footer field, highlight blocks |
 | `--color-brand-ink` | `#66640F` | Olive — the **only** text colour used on `--color-brand` |
 
-Supporting value found in the layout (not a swatch):
+Supporting values found in the layouts (not swatches):
 
 | Token | Hex | Role |
 | --- | --- | --- |
 | `--color-rule` | `#E9E9E9` | Full-bleed section rules between styleguide sections |
+| `--color-dawn` | `#FEF3DF` | Warm foot of the home hero gradient (top is `--color-accent-soft`) |
+| `--color-cream` | `#EEE8D7` | Base under the home page's textured principles section |
 
 **Rules**
 
@@ -89,11 +91,20 @@ text-matrix baselines.
 
 | Token | Value |
 | --- | --- |
-| Design frame | 1400 px |
-| Content container | 1280 px |
-| Desktop gutter | 40 px |
-| Mobile frame / gutter | 375 px / 20 px |
-| Mobile breakpoint | 768 px |
+| Styleguide frame | 1400 px |
+| Marketing page container | 1232 px content, capped at a 1280 px frame |
+| Gutter | 20 px to tablet, 24 px on desktop |
+| Comp breakpoints | 375 / 800 / 1280 |
+| Tailwind breakpoints used | `md` 768, `lg` 1024 |
+
+Display type does not follow a single fluid curve. The comps step it per
+breakpoint, so the utilities do too:
+
+| Role | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| Hero H1 (serif) | 36 | 64 | 80 |
+| Split heading (`Built for clarity`) | 36 | 62 | 76 |
+| Section heading (`display-fluid-h4`) | 24 | 30 | 40 |
 
 ### 1.4 Radius, border, elevation
 

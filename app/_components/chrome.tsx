@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
@@ -13,7 +14,8 @@ export function SiteNav() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="w-full bg-white">
+    // Transparent so it can sit directly on the hero sky.
+    <header className="w-full">
       <div className="flex h-[60px] items-center justify-between">
         <Wordmark className="text-[26px]" />
 
@@ -80,7 +82,7 @@ export function SiteNav() {
 export function CtaBand({ headline }: { headline: string }) {
   return (
     <section className="flex flex-col items-center justify-center bg-surface px-6 py-[110px] text-center">
-      <h2 className="display-fluid-h4 max-w-[860px] font-sans leading-none font-bold text-balance">
+      <h2 className="display-fluid-h4 max-w-[980px] font-sans font-bold text-balance">
         {headline}
       </h2>
       <Button className="mt-[38px]">Request a demo</Button>
@@ -95,8 +97,8 @@ export function CtaBand({ headline }: { headline: string }) {
 export function SiteFooter() {
   return (
     <footer className="overflow-hidden bg-brand text-brand-ink">
-      <div className="flex flex-col gap-4 px-6 py-6 sm:flex-row sm:items-baseline sm:justify-between sm:px-10">
-        <nav className="flex flex-wrap gap-x-7 gap-y-2">
+      <div className="mx-auto flex max-w-page flex-col items-center gap-3 px-5 lg:px-6 py-6 text-center sm:flex-row sm:items-baseline sm:justify-between sm:text-left">
+        <nav className="flex flex-wrap justify-center gap-x-7 gap-y-2">
           {[...NAV_ITEMS, "Get started"].map((item) => (
             <a
               key={item}
@@ -110,8 +112,18 @@ export function SiteFooter() {
         <p className="font-serif text-p2">© 2025 · All rights reserved</p>
       </div>
 
-      {/* Duotone image band */}
-      <div className="duotone-band mx-6 h-[190px] sm:mx-10 sm:h-[430px]" />
+      {/* Halftone-screened fabric band */}
+      <div className="mx-auto max-w-page px-5 lg:px-6">
+        <Image
+          src="/assets/generated/texture-brand.png"
+          alt=""
+          width={1800}
+          height={409}
+          sizes="100vw"
+          aria-hidden
+          className="h-[120px] w-full object-cover sm:h-[210px] lg:h-[280px]"
+        />
+      </div>
 
       {/* Oversized wordmark, bleeding edge to edge and cropped at the baseline.
           Drawn as SVG text so it fills the block width exactly at any viewport
