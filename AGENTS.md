@@ -22,6 +22,16 @@ olive `--color-brand-ink` text, the halftone fabric band
 wordmark is drawn as SVG `<text>` with `textLength` on purpose, so it fills the
 block width exactly at any viewport; a viewport-unit font size clips it.
 
+**The wordmark block is measured, not eyeballed.** `viewBox="0 0 1000 165"` is
+the tight glyph box — cap height plus the round letters' overshoot at
+`fontSize` 222 — so the SVG carries no padding of its own and the surrounding
+`px-5` / `pb-5` / `mt-4 sm:mt-5` are the only spacing. That is what holds the
+comps' constant 20px gutter and 20px of yellow below the baseline at 375, 800
+and 1280 while the type scales with the viewport. `textLength` is 1013 from
+`x="-1.6"`, not 1000 from 0: 1000 is the *advance* width, so a flat 1000 leaves
+the ink inset ~14px on the right by the `d`'s side bearing. Verified against all
+three comps — glyph height 55 / 125 / 204, insets 20 on both sides at each.
+
 If a design genuinely calls for a different footer, ask first rather than
 editing this one.
 

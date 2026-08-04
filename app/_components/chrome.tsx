@@ -145,28 +145,40 @@ export function SiteFooter() {
         />
       </div>
 
-      {/* Oversized wordmark, bleeding edge to edge and cropped at the baseline.
-          Drawn as SVG text so it fills the block width exactly at any viewport
-          instead of depending on a viewport-unit font size. */}
-      <svg
-        viewBox="0 0 1000 150"
-        role="img"
-        aria-label="Aetherfield"
-        className="mt-4 block w-full sm:mt-8"
-      >
-        <text
-          x="0"
-          y="147"
-          textLength="1000"
-          lengthAdjust="spacingAndGlyphs"
-          fontSize="199"
-          fontWeight="800"
-          fill="currentColor"
-          style={{ fontFamily: "var(--font-sans)" }}
+      {/* Oversized wordmark, sharing the band's 20px gutter and cropped at the
+          baseline. Drawn as SVG text so it fills the block width exactly at any
+          viewport instead of depending on a viewport-unit font size.
+
+          The viewBox is the tight glyph box — 165 units is exactly cap height
+          plus the round letters' overshoot at this size, so the block carries no
+          padding of its own. That is what keeps the 20px of yellow underneath
+          constant at 375, 800 and 1280, as measured off the three comps. */}
+      <div className="mx-auto max-w-page px-5 pb-5">
+        <svg
+          viewBox="0 0 1000 165"
+          role="img"
+          aria-label="Aetherfield"
+          className="mt-4 block w-full sm:mt-5"
         >
-          Aetherfield
-        </text>
-      </svg>
+          {/* textLength is the advance width, which includes the A's left and
+              the d's right side bearing — laying it out at a flat 1000 leaves
+              the ink visibly inset on the right. Overshooting to 1013 from
+              x=-1.6 puts the ink itself flush with both gutters, as in the
+              comps. Bearings scale with the glyphs, so this holds at any width. */}
+          <text
+            x="-1.6"
+            y="162.5"
+            textLength="1013"
+            lengthAdjust="spacingAndGlyphs"
+            fontSize="222"
+            fontWeight="800"
+            fill="currentColor"
+            style={{ fontFamily: "var(--font-sans)" }}
+          >
+            Aetherfield
+          </text>
+        </svg>
+      </div>
     </footer>
   );
 }
