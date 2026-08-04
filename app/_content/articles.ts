@@ -98,7 +98,7 @@ export type ArticleBody = {
    these slugs; everything else in ARTICLES 404s until its prose is written. */
 export const ARTICLE_BODIES: Record<string, ArticleBody> = {
   "how-to-build-a-climate-ready-data-stack": {
-    published: "May 7, 2028",
+    published: "May 7, 2026",
     author: "Lana Terra",
     lede: "Climate action is only as strong as the data that informs it. But most data stacks weren't designed with emissions, supply chains, or climate modeling in mind. Teams are often stuck retrofitting existing systems or relying on brittle workarounds to generate insights. It's time to rethink our infrastructure—starting with the foundation.",
     hero: {
@@ -125,6 +125,37 @@ export const ARTICLE_BODIES: Record<string, ArticleBody> = {
       {
         heading: "From Stack to Story",
         body: "At the end of the day, data infrastructure is only valuable if it drives action. A climate-ready stack enables teams to monitor progress, identify trade-offs, and make informed decisions at speed. With the right foundations in place, sustainability becomes more than a report—it becomes a capability.",
+      },
+    ],
+  },
+  "sustainability-isnt-a-side-project-making-impact-operational": {
+    published: "May 31, 2026",
+    author: "Gail Force",
+    lede: "Too often, sustainability lives on the edge of the org chart—under-resourced, reactive, and disconnected from the core business. But real impact isn't an initiative, it's an operating principle. From product decisions to procurement flows, we'll explore what it takes to embed sustainability into the systems that shape everyday work.",
+    hero: {
+      src: "/assets/generated/article-impact-hero.png",
+      alt: "Ferns and moss on a shaded rock face, rendered as a blue halftone over cream",
+    },
+    sections: [
+      {
+        heading: "The Risk of Isolation",
+        body: "When sustainability is framed as a special project, it stays optional. It doesn't scale, and it rarely survives resource cuts. Real impact demands more than executive sponsorship or a glossy strategy deck—it requires integration into the systems that run the business.",
+      },
+      {
+        heading: "Connect to Core Workflows",
+        body: "The most successful sustainability programs live inside decision-making, not adjacent to it. That means embedding carbon data in procurement reviews, emissions factors in product roadmaps, and impact metrics in business KPIs. Alignment isn't just helpful—it's how things get done.",
+      },
+      {
+        heading: "Mind the Gaps",
+        body: "Even teams with good intentions can fall into operational gaps. Sustainability may be owned by one team, but its success hinges on others—like finance, legal, ops, and product—adopting the same standards and workflows. Clear roles, shared tooling, and open feedback loops close the gap between ambition and execution.",
+      },
+      {
+        heading: "Systems Over Sprints",
+        body: "Impact doesn't come from one-off campaigns. It comes from systems that make the right choice the easy choice—again and again. Whether through automation, governance, or smart defaults, sustainability needs to show up where decisions are made, not just where reports are written.",
+      },
+      {
+        heading: "Make It Stick",
+        body: "Operationalizing sustainability means designing for durability. It means building programs that don't require daily heroics to sustain and that evolve with the business over time. When impact becomes part of how work works, momentum follows.",
       },
     ],
   },

@@ -202,6 +202,102 @@ inherited rather than introduced:
 It was left alone rather than made configurable, since it is correct where it
 already ships.
 
+## Article 2 — "Sustainability Isn't a Side Project" (`/article/sustainability-isnt-a-side-project-making-impact-operational`)
+
+**A data change, not a page.** The comp
+(`public/assets/pages/04-article2/screen-sizes/`) has the same masthead, rail,
+lede + rule, five `heading + body` sections and recent-articles band as article 1,
+at the same geometry — hero `1240×500 +20+460` / `760×307 +20+412` /
+`335×136 +20+306`, cards `403×235` ×3 / `760×443` / `335×195`. So the whole
+change is one `ARTICLE_BODIES` key plus one generated hero. No new components,
+no layout edits.
+
+**`article-impact-hero.png`** is `public/assets/images/Image-7.png` — the same
+photograph the article's card already uses — as a blue halftone cut out over
+cream. Three steps, because it is a composite, not a single duotone pass:
+
+```
+# 1. backdrop mask: threshold the studio backdrop, keep only the two regions
+#    that touch the corners (a plain threshold also catches bright fern tips)
+magick public/assets/images/Image-7.png -colorspace Gray -threshold 75% \
+  -morphology Close Disk:3 -morphology Open Disk:3 -alpha off -type TrueColor \
+  -fill red -draw "color 764,3 floodfill" -draw "color 3,764 floodfill" \
+  -fill black +opaque red -fill white -opaque red \
+  -colorspace Gray -resize 1240x500! -threshold 50% mask.png
+# 2. blue-on-white halftone
+magick public/assets/images/Image-7.png -colorspace Gray -resize 1240x500! \
+  -sigmoidal-contrast 8,50% -ordered-dither h4x4a \
+  +level-colors '#2683EB','#FFFFFF' ink.png
+# 3. cream paper field, grain damped to the comp's amplitude
+magick public/assets/generated/texture-cream.jpg \
+  -resize 1240x500^ -gravity center -extent 1240x500 \
+  \( +clone -blur 0x10 \) -compose blend -define compose:args=75 -composite cream.png
+# 4. composite
+magick ink.png cream.png mask.png -composite \
+  -colors 64 -define png:compression-level=9 \
+  public/assets/generated/article-impact-hero.png
+```
+
+Load-bearing details:
+
+- **The highlight is white, the corners are cream — that is two layers, not one
+  `+level-colors`.** Sampled off `Desktop.png -crop 1240x500+20+460`: interior
+  halftone highlights are `#FBFCFF`, the corner wedges `#EDE5D2`–`#F9F0DD` with
+  a soft paper mottle. A single cream-highlight duotone makes the fern
+  highlights cream too and reads muddy.
+- **The dot colour `#2683EB` is exactly `--color-accent`** — no new token.
+- **`-type TrueColor` before the floodfill.** Drawing red into a Gray image
+  silently makes it grey and the `+opaque` pair then does the wrong thing.
+- **The cream grain is measured.** `texture-cream.jpg` upscaled to 500 tall has
+  σ ≈ 9.3 against the comp's σ ≈ 2.5–3.2 at the same mean (≈236); the 75 % blend
+  with its own blur brings it to 3.2 without shifting hue.
+- **`-colors 64`** for the same reason as article 1 — a hard dot screen rings
+  under JPEG, and the palette cut is free. 36 KB.
+
+Unlike `article-climate-hero.png` this is generated from the source photograph,
+so it is resolution-honest rather than a 1x crop of the comp.
+
+**Known deviation — the hero's framing.** The comp's hero is *not* a crop of
+Image-7: its four cream-wedge edge crossings (left 224/500, right 328/500, top
+1007/1240, bottom 260/1240) are mutually unsatisfiable by any affine
+crop-and-stretch of the square — solving them gives a window 1.6× the source
+width. A brute-force sweep over ~1000 crop windows (plus the 180° variants)
+scores the full square at RMSE 0.273 against the comp's cream mask, versus 0.266
+for the best crop found — i.e. nothing is meaningfully better. The shipped asset
+therefore squashes the whole square, which matches the comp on the top and
+bottom crossings (within ~3 %) and on the diagonal's direction, but shows
+smaller cream wedges on the left and right edges. The comp was almost certainly
+free-transformed in Figma. Replace this if the designer's transform is ever
+recovered.
+
+**Measured against the comps** at 375 / 800 / 1280: hero box lands at `+20+460`
+(desktop, exact), `+20+412` (tablet, exact) and `+20+341` vs `+20+306` (mobile);
+recent-articles cards are size-exact at all three (`400×232` / `760×443` /
+`335×195`). The vertical drifts are the two already recorded for article 1 —
+desktop runs ~76px short and mobile ~387px long, from the wide Archivo cut and
+the 20px `--text-p1`/`--text-p2` floor. Record, don't chase.
+
+The `published` date reads **May 31, 2028** in the comp; the entry ships **May
+31, 2026** to match the site-wide 2026 convention (article 1 moved from 2028 to
+2026 in the same commit).
+
+# Content and asset conventions
+
+**Photography comes from `public/assets/images`.** Every image a page needs is
+sourced from that folder and treated in-repo into `public/assets/generated` when
+the comp shows a duotone, halftone or crop, with the exact `magick` command
+recorded here. Cropping artwork straight out of a comp is a fallback for when
+the source photograph genuinely is not in that folder (as with
+`article-climate-hero.png`), not the default.
+
+**An article title referenced by its image or its comp is a slug.** When the
+user points at an article by title or by pointing at a comp, its route is
+`/article/<slugified title>` — lowercased, apostrophes and punctuation dropped,
+spaces and colons to hyphens, e.g. "Sustainability Isn't a Side Project: Making
+Impact Operational" → `sustainability-isnt-a-side-project-making-impact-operational`.
+Do not invent a shorter slug; match the entry already in `ARTICLES` when one
+exists.
+
 # 1. Workflow
 
 For every implementation request:
@@ -244,3 +340,53 @@ Scripts that currently exist in `package.json`:
 - `npm run typecheck` — `tsc --noEmit`
 
 Report the exact command output; never claim a check passed without running it.
+
+# 3. Automation
+
+Steps that have already been worked out by hand. Start from the command, not the
+investigation.
+
+**A comp folder maps to a route by name.** `public/assets/pages/NN-<name>/screen-sizes/`
+is the design source. `04-article2` is the second article, so the work is a
+content entry against `/article/[slug]`, not a new route. Read the folder before
+asking what to build.
+
+**Comp geometry is measured, never eyeballed.** One command gives the hero and
+card boxes at a breakpoint:
+
+```
+magick <comp>.png -colorspace Gray -threshold 95% -negate \
+  -define connected-components:verbose=true \
+  -define connected-components:area-threshold=25000 \
+  -connected-components 8 null:
+```
+
+Run it against the render and the comp and diff the box list. Area threshold
+25000 at 1280, 40000 at 800, 15000 at 375.
+
+**Screenshotting the render** — Playwright is not a project dependency but its
+browsers are cached; drive `playwright-core` out of the npx cache
+(`/home/gdk26/.npm/_npx/*/node_modules/playwright-core`) against `npm run start`,
+`deviceScaleFactor: 1`, `fullPage: true`, at 375 / 800 / 1280.
+
+**Identifying which photograph a treated comp image came from is a search, not a
+guess.** Blur, greyscale and downsample both to ~124×50 and rank
+`magick compare -metric RMSE` across `public/assets/images`. To settle a *crop*,
+build a binary mask of the distinguishing feature — for a duotone that is the
+warm/cool split, `-fx "(r-b)>0.05?1:0"` — and sweep crop windows against it.
+Overlay the mask in red over the comp to confirm it before trusting the sweep.
+
+**`txt:` pixel dumps are depth-dependent.** `magick … txt:-` prints 0–255 for an
+8-bit image and 0–65535 for 16-bit. Add `-depth 16` before `txt:-` so probes can
+assume one scale.
+
+**Article prose is transcribed from the desktop comp at 200 % zoom**, split into
+two crops so the text is legible in one pass.
+
+**A new article that reuses `/article/[slug]` is a data change**: one
+`ARTICLE_BODIES` key plus one generated hero. Reach for new components only when
+the comp shows an element the route does not already render.
+
+**Standing instruction:** each session, watch for steps repeated by hand and add
+the mechanical ones here, so later sessions start from the command rather than
+the investigation.
