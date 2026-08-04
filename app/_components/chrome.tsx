@@ -14,6 +14,12 @@ const NAV_ITEMS = [
   { label: "Careers", href: "#" },
 ] as const;
 
+/* The same gutters `Container` sets in home/sections.tsx, inlined rather than
+   imported: that module is not a client module, and pulling it in here would
+   drag the hero dashboard and the article list into the client bundle for the
+   sake of one wrapper. Keep the two in step if the gutters ever change. */
+const CONTAINER = "mx-auto w-full max-w-page px-5 lg:px-6";
+
 /* -------------------------------------------------------------------------- */
 /*  Header nav — bar 1320×60, wordmark left, links right                        */
 /* -------------------------------------------------------------------------- */
@@ -22,9 +28,18 @@ export function SiteNav() {
   const [open, setOpen] = useState(false);
 
   return (
-    // Transparent so it can sit directly on the hero sky.
-    <header className="w-full">
-      <div className="flex h-[60px] items-center justify-between">
+    // Pinned, full-bleed frosted glass: the page scrolls underneath it. The
+    // fill is translucent so content smears through rather than being hidden —
+    // over the white page top the bar reads as invisible. No border, no shadow:
+    // the blur just stops at the bottom edge.
+    //
+    // 30 % white over a 32px blur, fitted to the screencast rather than a comp:
+    // at the t=88s frame both the bar's average tone across its width and the
+    // softness of the card-image edges under it are at their closest here.
+    // Where backdrop-filter is unsupported the bar falls back to a near-opaque
+    // white so the links stay legible.
+    <header className="sticky top-0 z-50 w-full bg-white/85 backdrop-blur-[32px] supports-[backdrop-filter]:bg-white/30">
+      <div className={`${CONTAINER} flex h-[60px] items-center justify-between`}>
         <Link href="/" aria-label="Aetherfield, home">
           <Wordmark className="text-[26px]" />
         </Link>
@@ -66,23 +81,30 @@ export function SiteNav() {
         </button>
       </div>
 
-      {/* Mobile panel: 40px items, hairline separators, full-width CTA */}
+      {/* Mobile panel: 40px items, hairline separators, full-width CTA.
+          Opaque, because the panel now overlays the page instead of pushing it
+          down — prose must not read through it. It scrolls if it outgrows the
+          viewport below the 60px bar. */}
       {open ? (
-        <nav className="pb-6 md:hidden">
-          {NAV_ITEMS.map((item) => (
-            // A client-side navigation doesn't unmount the panel, so close it
-            // here or the new page arrives with the menu still over it.
-            <Link
-              key={item.label}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="block border-b border-border py-5 font-sans text-[40px] leading-none font-bold"
-            >
-              {item.label}
-            </Link>
-          ))}
-          <Button className="mt-6 h-[52px] w-full">Get started</Button>
-        </nav>
+        <div
+          className={`${CONTAINER} max-h-[calc(100dvh-60px)] overflow-y-auto bg-white pb-6 md:hidden`}
+        >
+          <nav>
+            {NAV_ITEMS.map((item) => (
+              // A client-side navigation doesn't unmount the panel, so close it
+              // here or the new page arrives with the menu still over it.
+              <Link
+                key={item.label}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className="block border-b border-border py-5 font-sans text-[40px] leading-none font-bold"
+              >
+                {item.label}
+              </Link>
+            ))}
+            <Button className="mt-6 h-[52px] w-full">Get started</Button>
+          </nav>
+        </div>
       ) : null}
     </header>
   );

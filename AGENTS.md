@@ -35,6 +35,52 @@ three comps — glyph height 55 / 125 / 204, insets 20 on both sides at each.
 If a design genuinely calls for a different footer, ask first rather than
 editing this one.
 
+## Site header (`SiteNav`)
+
+The header is **sticky, full-bleed frosted glass**: `sticky top-0 z-50` on a
+full-width `<header>`, with the row inside it holding the page gutters. It
+never hides, shrinks or changes state on scroll — one constant bar.
+
+**The glass is `bg-white/30` over `backdrop-blur-[32px]`**, no border and no
+shadow, with a `bg-white/85` fallback where `backdrop-filter` is unsupported.
+Those two numbers are **matched against the screencast
+`~/Videos/Screencasts/navbar-demo.webm`, not a comp** — there is no static comp
+of the bar over content. Method, so it can be redone: extract the t=88s frame
+(`ffmpeg -ss 88`, 1280-wide prototype at frame scale 0.987), render
+`/article/how-to-build-a-climate-ready-data-stack` scrolled to the same place,
+then sweep tint × radius against two metrics — the bar's average tone across
+its width (16×1 downsample, isolates tint from structure) and the softness of
+the card-image edge under it (a horizontal profile across the first image
+gutter, isolates radius). Tone bottoms out at 30 % white, edge softness at
+28–36px; 32px is the midpoint. At the matched frame the moss under the bar
+samples `#7C7E6D` against the demo's `#8A8E79`.
+
+**The pages render `SiteNav` outside `Container`.** `sticky` only travels
+within its parent, so a one-child `<Container><SiteNav /></Container>` wrapper
+unpins the bar the moment that wrapper scrolls off. `SiteNav` therefore carries
+its own gutters: the `Container` class string is **inlined** in `chrome.tsx` as
+`CONTAINER` rather than imported, because `chrome.tsx` is a client module and
+importing from `home/sections.tsx` would pull the hero dashboard and the
+article list into the client bundle. Keep the two in step.
+
+**The homepage sky was detached from its `relative isolate` wrapper** for the
+same reason — `SiteNav` sat inside it alongside the hero and would have unpinned
+below the fold. The band is now a document-level `absolute inset-x-0 top-0
+-z-10` sibling: with no positioned ancestor it resolves against the initial
+containing block, so `top-0` is still the page top and it still paints behind
+the nav and hero. Verified: `/` at 375, 800 and 1280 is **pixel-identical below
+the 60px bar** before and after.
+
+**Known consequence:** the bar is invisible over white, but on `/` at scroll 0
+it sits over the hero sky, so its 30 % white tint reads as a slightly lighter
+band across the top 60px. That is inherent to a constant translucent bar — the
+demo has no unscrolled/scrolled state to switch between — and it is the only
+homepage pixel change.
+
+The mobile panel now overlays content instead of pushing it, so it is opaque
+`bg-white` and scrolls at `max-h-[calc(100dvh-60px)]`. Items, separators and
+CTA are unchanged.
+
 ## Journal index (`/journal`)
 
 `app/journal/page.tsx` with its sections in `app/_components/journal/sections.tsx`.
@@ -149,8 +195,8 @@ For every implementation request:
 4. Ask a focused question only if the task has meaningful ambiguity. Do not ask questions when reasonable assumptions can be made without affecting the implementation outcome.
 5. Create a detailed prompt file in `prompts/` per the contract in section 4.
 6. Ask: `I prepared the implementation prompt at prompts/<file-name>.md. Is this good to execute?`
-7. On approval, re-read the approved prompt file in `prompts/` and implement it strictly. Implement only after user approval. Entering `y` or `Y` = `Approved. Execute.`
-8. Run available checks (section 2).
+7. On approval, re-read the approved prompt file in `prompts/` and implement it strictly. Implement only after user approval. Entering `y` or `Y` = `Approved. Execute.`  
+8. Run available checks (section 2). Then finally, add all that was implemented to this `AGENTS.md`
 9. Share exact steps to test or run the completed feature.
 10. Commit the resulting change to `main`, unprompted. Every executed prompt ends in a commit—never leave implemented work uncommitted. Do not push unless asked.
 

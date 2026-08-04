@@ -12,9 +12,9 @@ export const metadata: Metadata = {
 export default function Page() {
   return (
     <>
-      <Container>
-        <SiteNav />
-      </Container>
+      {/* SiteNav carries its own gutters and is sticky: it must not sit inside
+          a one-child wrapper, or it unpins as soon as that wrapper scrolls off. */}
+      <SiteNav />
 
       <main>
         {/* The stamp butts straight up against the 60px nav — no top margin. */}

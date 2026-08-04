@@ -6,7 +6,6 @@ import {
   RecentArticles,
 } from "../../_components/article/sections";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
-import { Container } from "../../_components/home/sections";
 import {
   ARTICLE_BODIES,
   FEATURED_ARTICLES,
@@ -45,9 +44,9 @@ export default async function Page({ params }: { params: Params }) {
 
   return (
     <>
-      <Container>
-        <SiteNav />
-      </Container>
+      {/* SiteNav carries its own gutters and is sticky: it must not sit inside
+          a one-child wrapper, or it unpins as soon as that wrapper scrolls off. */}
+      <SiteNav />
 
       {/* No CtaBand here — the comp runs the recent-articles band into the
           footer directly. */}
