@@ -98,6 +98,26 @@ body {
   }
 }
 
+/* Careers masthead. Sizes are the article-title curve (36 / 64 / 80), but the
+   comps set the two lines much tighter than that page does — baseline pitch
+   measured 29 / 59 / 77, i.e. 0.81 / 0.92 / 0.96 em. The curve is not one
+   ratio, so the leading is authored per step alongside the size. A separate
+   utility rather than display-article-title plus a leading-* override: two
+   same-weight utility classes on one element leave the winner to source order,
+   which Tailwind does not pin down. */
+@utility display-careers-title {
+  font-size: 36px;
+  line-height: 29px;
+  @media (width >= 768px) {
+    font-size: 64px;
+    line-height: 59px;
+  }
+  @media (width >= 1024px) {
+    font-size: clamp(64px, 6.25vw, 80px);
+    line-height: 77px;
+  }
+}
+
 /* "Recent articles" band heading. A second utility rather than an extension of
    display-article-title: the two step differently (32 / 50 / 60 against
    36 / 64 / 80), so folding them together would need a modifier per breakpoint

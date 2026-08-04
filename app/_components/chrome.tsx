@@ -5,13 +5,13 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
-/* Product, About and Careers stay on "#" until those pages exist — linking them
-   at 404s is worse than linking them nowhere. */
+/* Product and About stay on "#" until those pages exist — linking them at 404s
+   is worse than linking them nowhere. */
 const NAV_ITEMS = [
   { label: "Product", href: "#" },
   { label: "Journal", href: "/journal" },
   { label: "About", href: "#" },
-  { label: "Careers", href: "#" },
+  { label: "Careers", href: "/careers" },
 ] as const;
 
 /* The same gutters `Container` sets in home/sections.tsx, inlined rather than

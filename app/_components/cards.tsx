@@ -139,14 +139,47 @@ export function JobCard({
   type,
   location,
   body,
+  action = "View role",
+  open = false,
 }: {
   role: string;
   type: string;
   location: string;
   body: string;
+  action?: string;
+  /** Dashed outline over the page instead of a white fill — the open
+      application card at the foot of `/careers`. */
+  open?: boolean;
 }) {
   return (
-    <article className="max-w-[820px] rounded-card bg-white p-10 ring-1 ring-border sm:ring-0">
+    <article
+      className={`relative max-w-[820px] rounded-card p-6 sm:p-10 ${
+        open ? "" : "bg-white"
+      }`}
+    >
+      {/* CSS `border-dashed` draws Chrome's own ~2/2 pattern at 1px and cannot
+          be tuned; the comp measures 7 on / 9 off. So the frame is drawn.
+          strokeWidth 2 on the viewport boundary is deliberate: the SVG clips
+          the outer half, leaving exactly the 1px the comp draws, with no
+          fractional x="0.5" geometry that browsers disagree on. */}
+      {open ? (
+        <svg
+          aria-hidden
+          className="pointer-events-none absolute inset-0 size-full text-ink"
+        >
+          <rect
+            x="0"
+            y="0"
+            width="100%"
+            height="100%"
+            rx="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeDasharray="7 9"
+          />
+        </svg>
+      ) : null}
       <div className="sm:flex sm:items-start sm:justify-between sm:gap-10">
         <div>
           <h3 className="font-sans text-p1 font-bold">{role}</h3>
@@ -155,7 +188,7 @@ export function JobCard({
         </div>
         {/* Desktop: pinned top-right. Mobile: falls to the bottom-left. */}
         <Button size="compact" className="mt-6 shrink-0 sm:mt-0">
-          View role
+          {action}
         </Button>
       </div>
     </article>

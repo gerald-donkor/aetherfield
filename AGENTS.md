@@ -498,6 +498,105 @@ line by line against `08-article6/Desktop.png`. Record, don't chase.
 Dates ship as 2026 (`July 1`, `July 11`, `August 4`) where the comps read 2028,
 per the site-wide convention.
 
+## Careers page (`/careers`)
+
+`app/careers/page.tsx` with its sections in `app/_components/careers/sections.tsx`
+and its listings in `app/_content/jobs.ts`. Comps:
+`public/assets/pages/10-careers/screen-sizes/`. Reuses `SiteNav`, `Container`
+and `SiteFooter`; **there is no `CtaBand`** — the last card runs into the
+footer, as on `/article/[slug]`. Layout only: no new photography, no generated
+assets, no `magick`.
+
+**The background is `hero-sky` on `<main>`, not a wrapper.** Sampled down the
+desktop comp's left gutter the gradient *is* the existing utility (`#A9D3FF` /
+`#C9DFF4` / `#E8EBE7` / `#FFF4DF` at 0 / 37 / 74 / 100 %, within 1–2 levels of
+`hero-sky`'s stops) — do not author a second gradient. It has to paint behind
+the sticky bar, and a wrapper around `SiteNav` unpins the bar the moment the
+wrapper scrolls off (the reason already recorded for the homepage sky). So
+`main` is a *sibling* of the header, pulled up under it and padded back down:
+`hero-sky -mt-[60px] pt-[60px] pb-[120px]`. `z-50` on the header keeps it over
+the overlap and the 100 % stop lands on the footer's top edge, as in all three
+comps. The 120px foot is measured — the dashed card → footer gap is 121px at
+375, 800 *and* 1280, one of the few numbers this page holds constant.
+
+**`@utility display-careers-title`** in `app/globals.css`: the article-title
+sizes (36 / 64 / 80) with a much tighter, per-step leading — measured baseline
+pitch **29 / 59 / 77**, i.e. 0.81 / 0.92 / 0.96 em, so the leading is authored
+alongside each size rather than derived from one ratio. A separate utility
+rather than `display-article-title` + `leading-*`, because two same-weight
+utility classes on one element leave the winner to source order.
+
+**The masthead is two `block` spans, not one `<br>`.** Line 1 is Newsreader and
+line 2 Archivo — the page's one signature move, and what the comp draws
+(verified on a 3× crop of `Desktop.png -crop 400x150+450+140`: Archivo's
+flat-terminal `a` and the wordmark's `fi`, at a much lighter weight than the
+extrabold footer wordmark). With both fonts on **one** line box Chrome unions
+the Newsreader strut with the taller Archivo inline box and the pair runs 8px
+past the authored leading (h1 measured 251 tall where 89 + 77 + 77 = 243). One
+block per line puts each line box back at exactly the leading.
+
+**The masthead padding and the title→list gap are fitted, and only these two.**
+Everything below follows from the 16px card gaps. `pt-[66px] sm:pt-[89px]
+lg:pt-[88px]` on the `h1` — the three are *not* one number because the cap-top
+inset from the content box differs per step (+1 / −2 / −3 at 1280 / 800 / 375).
+`mt-8` on the list: solving each breakpoint alone wants 30 / 33 / 32, and a flat
+32 lands every card-1 top within 2px, so it ships as one token.
+
+**`JobCard` got three edits** (`app/_components/cards.tsx`) — it existed for the
+styleguide and `/careers` is its first real use:
+
+1. **`p-6 sm:p-10`, not a flat `p-10`.** Measured content inset is 40 at 1280
+   and 800 but **24 at 375**.
+2. **`ring-1 ring-border sm:ring-0` dropped.** No comp ever showed it; the
+   mobile comp goes straight from sky to white with no ring row. This also
+   changes `/design-system`, which is the styleguide and should show what ships.
+3. **New optional `action = "View role"` and `open = false`.**
+
+**The dashed frame is an SVG, not `border-dashed`.** Measured on the comp's top
+border at y 1010: **7px on / 9px off, pitch 16, solid `#000`, 1px, radius 16,
+interior transparent** (the gradient reads through identically inside and out —
+verified on the render too, `p{640,1120}` == `p{100,1120}`). CSS
+`border-dashed` gives Chrome's own ~2/2 pattern at 1px and cannot be tuned.
+`strokeWidth="2"` with the rect on the viewport boundary is deliberate: the SVG
+clips the outer half, leaving exactly 1px, with no fractional `x="0.5"` /
+`calc()` geometry browsers disagree on. Verified in the render — a single row of
+ink at y 1036, runs 26–32 then 42–48.
+
+`SiteNav`'s `Careers` item moved from `"#"` to `"/careers"`; Product and About
+are still the only unbuilt destinations. Nothing else in `chrome.tsx` changed.
+
+### Measured against the comps
+
+| | 1280 | 800 | 375 |
+| --- | --- | --- | --- |
+| title line 1, cap top | 149 → **149** | 147 → **147** | 123 → **123** |
+| card 1 | `820×218+230+332` → `+334` | `760×218+20+300` → `+299` | `335×276+20+216` → `335×320+20+216` |
+| card 2 | `820×194+230+566` → `820×218+230+568` | `+534` → `+533` | `+508` → `+552` |
+| card 3 | `820×218+230+776` → `+802` | `+768` → `+767` | `+800` → `+864` |
+| dashed card | `820×194+230+1010` → `820×170+230+1036` | `760×170+20+1002` → `+1001` | `+1092` → `335×224+20+1200` |
+| footer top | 1324 → **1326** | 1292 → **1291** | 1430 → 1544 |
+
+Tablet is essentially exact everywhere. The deviations are the two already on
+file plus one comp artefact:
+
+- **Card role and body type.** The comp sets the desktop role at ~25px over a
+  ~17px serif body; `--text-p1` / `--text-p2` are a fixed 20px and every settled
+  page ships that way, so cards run larger and wrap differently — card 2 takes
+  one extra line at 1280 (218 against the comp's 194), which is where card 3's
+  +26 comes from. Mobile cards run 320/296/320/224 against 276/276/276/218, and
+  that is the whole +114 at the footer. Same call as `/journal` and articles 1–6.
+- **Title ink runs wide** — 341 / 392 at 1280 against the comp's 326 / 354 — the
+  wide Archivo cut recorded for the article pages.
+- **The desktop dashed card is 194 in the comp but 170 natural.** At 800 the
+  same card measures 170 and its padding closes exactly on one body line; at
+  1280 the designer appears to have reused card 2's 194px frame, leaving 24px
+  unexplained. The natural height ships.
+
+**Flag, shipped as drawn:** the open-application card carries a real role's meta
+— "Full-time · Denver, CO" — which reads like comp placeholder left in by
+mistake. The comp is the source of truth, so it ships; drop the line if the
+designer confirms.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -657,6 +756,34 @@ two crops so the text is legible in one pass.
 **A new article that reuses `/article/[slug]` is a data change**: one
 `ARTICLE_BODIES` key plus one generated hero. Reach for new components only when
 the comp shows an element the route does not already render.
+
+**Fitting a heading's top padding needs an ink-row profile, not a box list.**
+Connected components gives card boxes but not a cap top. Count ink pixels per
+row over a crop, and read the first non-zero row:
+
+```
+magick <img> -alpha off -crop WxH+X+Y +repage -colorspace Gray -threshold 50% \
+  -negate txt:- | awk 'NR>1 { split($1,a,","); if (substr($2,2)+0>0) r[a[2]]++ } \
+  END { for (k in r) printf "%d %d\n", k, r[k] }' | sort -n
+```
+
+Run it on the comp and the render at the same crop. **The cap-top inset from
+the element's content box is not one number across breakpoints** — on the
+careers masthead it is +1 / −2 / −3 at 1280 / 800 / 375, so solve the padding
+per step rather than fitting one and scaling it.
+
+**Cap tops across two different fonts are not a baseline pitch.** A serif line
+over a sans line have different cap-height-to-baseline offsets, so an ink-top
+difference overstates the leading. Measure ink *bottoms* on lines with no
+descenders instead.
+
+**`pkill -f "next start"` kills the tool's own shell** (exit 144, and the rest
+of the command never runs). Kill by port instead:
+`PID=$(ss -ltnp | grep ':3001' | sed -n 's/.*pid=\([0-9]*\).*/\1/p'); kill $PID`.
+
+**Define shell helpers as files, not functions.** The tool shell is zsh and
+`name() { … }` collides with its aliases (`cc`, and others) — write the helper
+to the scratchpad with `chmod +x` and call it by path.
 
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
