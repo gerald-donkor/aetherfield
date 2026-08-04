@@ -84,6 +84,36 @@ body {
   }
 }
 
+/* Article masthead title. Measured 36 / 64 / 80 off the three article comps —
+   the same three steps the homepage H1 uses, so the curve is shared rather than
+   re-derived. 6.25vw hits exactly 64 at 1024 and 80 at 1280. */
+@utility display-article-title {
+  font-size: 36px;
+  line-height: 1;
+  @media (width >= 768px) {
+    font-size: 64px;
+  }
+  @media (width >= 1024px) {
+    font-size: clamp(64px, 6.25vw, 80px);
+  }
+}
+
+/* "Recent articles" band heading. A second utility rather than an extension of
+   display-article-title: the two step differently (32 / 50 / 60 against
+   36 / 64 / 80), so folding them together would need a modifier per breakpoint
+   and stop reading as one curve. Cap heights measured 24 / 37 / 44. */
+@utility display-band-h2 {
+  font-size: 32px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  @media (width >= 768px) {
+    font-size: 50px;
+  }
+  @media (width >= 1024px) {
+    font-size: clamp(50px, 4.7vw, 60px);
+  }
+}
+
 /* Hero sky: sampled top-to-bottom from the comp — accent-soft blue falling to
    a warm dawn cream, then a hard cut to white. */
 @utility hero-sky {

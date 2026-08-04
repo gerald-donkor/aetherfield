@@ -28,7 +28,10 @@ const SWATCHES = [
   { name: "brand-ink", hex: "#66640F", role: "Ink on brand" },
 ];
 
+/* Sample content for the card specimens — the styleguide renders them inert,
+   so the slug is never linked, but the type carries it. */
 const ARTICLE: Article = {
+  slug: "how-to-build-a-climate-ready-data-stack",
   title: "How to Build a Climate-Ready Data Stack",
   category: "Tooling",
   readTime: "4 min",

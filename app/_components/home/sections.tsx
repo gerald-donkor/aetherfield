@@ -1,4 +1,6 @@
 import Image from "next/image";
+import Link from "next/link";
+import { FEATURED_ARTICLES } from "../../_content/articles";
 import { Button, Meta } from "../primitives";
 import { HeroDashboard } from "./dashboard";
 
@@ -258,27 +260,6 @@ export function CaseStudy() {
 /*  Journal                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const ARTICLES = [
-  {
-    title: "How to Build a Climate-Ready Data Stack",
-    category: "Insights",
-    readTime: "4 min",
-    src: "/assets/images/Image-3.png",
-  },
-  {
-    title: "Sustainability Isn't a Side Project: Making Impact Operational",
-    category: "Strategy",
-    readTime: "7 min",
-    src: "/assets/images/Image-7.png",
-  },
-  {
-    title: "Inside the Aetherfield Model: How We Turn Data Into Action",
-    category: "Insights",
-    readTime: "5 min",
-    src: "/assets/images/Image-6.png",
-  },
-];
-
 /** The Journal mark: a flattened diamond with the masthead set inside it. */
 function JournalMark() {
   return (
@@ -376,14 +357,16 @@ export function Journal() {
               From the journal
             </h2>
             <ul className="mt-6 border-t border-border">
-              {ARTICLES.map((a) => (
-                <li key={a.title} className="border-b border-border py-5">
-                  <a
-                    href="#"
+              {FEATURED_ARTICLES.map((a) => (
+                <li key={a.slug} className="border-b border-border py-5">
+                  <Link
+                    href={`/article/${a.slug}`}
                     className="group grid gap-4 md:grid-cols-[164px_1fr] md:items-start md:gap-6"
                   >
+                    {/* src is optional on Article for the styleguide's inert
+                        specimens; every real entry carries one. */}
                     <Image
-                      src={a.src}
+                      src={a.src!}
                       alt=""
                       width={328}
                       height={200}
@@ -396,7 +379,7 @@ export function Journal() {
                       </h3>
                       <Meta className="mt-2" items={[a.category, a.readTime]} />
                     </div>
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>

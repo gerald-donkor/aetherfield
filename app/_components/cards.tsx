@@ -1,4 +1,6 @@
 import Image from "next/image";
+import Link from "next/link";
+import type { Article } from "../_content/articles";
 import {
   ArrowUpRight,
   Button,
@@ -11,15 +13,9 @@ import {
 /*  Article card — 3 layouts off one content model                              */
 /* -------------------------------------------------------------------------- */
 
-export type Article = {
-  title: string;
-  category: string;
-  readTime: string;
-  description?: string;
-  /** Editorial photograph. Falls back to the grey Placeholder when absent. */
-  src?: string;
-  alt?: string;
-};
+/* The content model lives with the content. Re-exported here so the card and
+   its type still arrive together for consumers. */
+export type { Article };
 
 /**
  * Stacked / feature. Image 612×356, then title → meta → description.
@@ -65,12 +61,12 @@ export function ArticleCardStacked({
   return (
     <article className={className}>
       {href ? (
-        <a
+        <Link
           href={href}
           className="group block focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
         >
           {body}
-        </a>
+        </Link>
       ) : (
         body
       )}

@@ -1,5 +1,6 @@
 import Image from "next/image";
-import { ArticleCardStacked, type Article } from "../cards";
+import { ARTICLES } from "../../_content/articles";
+import { ArticleCardStacked } from "../cards";
 
 /* -------------------------------------------------------------------------- */
 /*  Masthead stamp                                                              */
@@ -124,63 +125,6 @@ export function JournalStamp() {
 /*  Latest articles                                                             */
 /* -------------------------------------------------------------------------- */
 
-const ARTICLES: Article[] = [
-  {
-    title: "How to Build a Climate-Ready Data Stack",
-    category: "Insights",
-    readTime: "4 min",
-    description:
-      "A practical guide for sustainability teams on integrating emissions, waste, and energy data into modern workflows.",
-    src: "/assets/images/Image-3.png",
-    alt: "Sheer white fabric lifting against an open blue sky",
-  },
-  {
-    title: "Sustainability Isn't a Side Project: Making Impact Operational",
-    category: "Strategy",
-    readTime: "7 min",
-    description:
-      "Why climate goals belong in your core roadmap—not just in the annual ESG report.",
-    src: "/assets/images/Image-7.png",
-    alt: "Ferns and moss growing along a shaded rock face",
-  },
-  {
-    title: "Inside the Aetherfield Model: How We Turn Data Into Action",
-    category: "Insights",
-    readTime: "5 min",
-    description:
-      "A behind-the-scenes look at our platform logic, system architecture, and sustainability reasoning.",
-    src: "/assets/images/Image-6.png",
-    alt: "A person silhouetted against wind turbines at dusk",
-  },
-  {
-    title: "From Spreadsheets to Systems: The Evolution of Climate Reporting",
-    category: "Tooling",
-    readTime: "6 min",
-    description:
-      "Why legacy tools aren't enough—and what the next generation of reporting looks like.",
-    src: "/assets/images/Image-4.png",
-    alt: "Braided glacial meltwater channels seen from the air",
-  },
-  {
-    title: "Carbon Accounting: Myths, Models, and Must-Haves",
-    category: "Tooling",
-    readTime: "6 min",
-    description:
-      "Debunking common assumptions and offering a framework for getting it right.",
-    src: "/assets/images/Image-5.png",
-    alt: "A steep peak rising above a still mountain lake",
-  },
-  {
-    title: "Seeing Clearly: Designing Feedback Loops for Sustainable Growth",
-    category: "Strategy",
-    readTime: "4 min",
-    description:
-      "Building responsive systems that keep sustainability strategy adaptive and actionable.",
-    src: "/assets/images/Image-9.png",
-    alt: "A hand holding a mirrored panel above a green rice field",
-  },
-];
-
 export function LatestArticles() {
   return (
     <section className="mb-14 md:mb-24 lg:mb-40">
@@ -194,7 +138,7 @@ export function LatestArticles() {
           <ArticleCardStacked
             key={article.title}
             article={article}
-            href="#"
+            href={`/article/${article.slug}`}
             priority={i < 2}
           />
         ))}

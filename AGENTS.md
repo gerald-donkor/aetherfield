@@ -78,6 +78,67 @@ mobile, but `--text-p1` / `--text-p2` are a fixed 20px in the design system and
 descriptions wrap one line more than the comp. Changing it is a type-scale
 decision that would also move the settled homepage — raise it before doing so.
 
+## Article content lives in `app/_content/articles.ts`
+
+`ARTICLES` is the one list behind `/`, `/journal` and `/article/[slug]` — the
+`Article` type lives there too and `app/_components/cards.tsx` re-exports it.
+Do not reintroduce a per-page copy. `FEATURED_ARTICLES` is the homepage's first
+three.
+
+Prose is separate: `ARTICLE_BODIES`, keyed by slug. Only slugs with a body are
+prerendered (`WRITTEN_SLUGS` feeds `generateStaticParams`); the other five
+articles are card copy and **404 by design** until their prose is written.
+Keeping bodies out of `ARTICLES` is what stops the two index pages shipping
+article prose they never render.
+
+## Article page (`/article/[slug]`)
+
+`app/article/[slug]/page.tsx` with its sections in
+`app/_components/article/sections.tsx`. Reuses `SiteNav`, `Container` and
+`SiteFooter`. **There is no `CtaBand`** — the comp runs the recent-articles band
+straight into the footer.
+
+Two `@utility` steps were added in `app/globals.css` because neither curve
+already existed: `display-article-title` (36 / 64 / 80) for the masthead, and
+`display-band-h2` (32 / 50 / 60) for "Recent articles". They are separate
+utilities, not one with modifiers, because the two step differently.
+
+**The reading column's 28px leading is set on the prose, not on the token.**
+`--text-p2` is a fixed 20/24 and the settled pages depend on it, so the article's
+line pitch is a `leading-[28px]` on the prose elements. Verified against the
+desktop and tablet comps, where the pitch is 28 in both.
+
+**`article-climate-hero.png`** is cropped out of the desktop comp — the
+photograph is not in `public/assets/images`:
+
+```
+magick public/assets/pages/03-article1/screen-sizes/Desktop.png \
+  -crop 1240x500+20+380 +repage -colors 64 -define png:compression-level=9 \
+  public/assets/generated/article-climate-hero.png
+```
+
+PNG, not JPEG: the image is a hard halftone dot screen and JPEG rings on it.
+Quantising to 64 colours takes it from 791 KB to 179 KB with no visible change.
+**Known limitation:** this is a 1x asset, so it is soft on a 2x display. Replace
+it with the source photograph when one is available.
+
+**Measured against the comps** at 375 / 800 / 1280. Masthead meta, both title
+lines and the hero top all land within 1px at all three; the rail, lede, body
+rule, band heading and card images land within 2px at 1280. Two drifts, both
+inherited rather than introduced:
+
+- The shipped Archivo runs ~18 % wider per unit of cap height than the comps'
+  cut, so paragraphs wrap a line earlier — the desktop body ends ~24px low.
+  This is visible on the settled `/journal` too (its "Latest articles" measures
+  257px wide against the comp's 235 at the same size), so it is a font-loading
+  question for the whole site, not this page.
+- Mobile runs ~380px long, for the 20px `--text-p1` / `--text-p2` reason already
+  recorded above.
+
+`MetaPair`'s built-in 7px label→value gap sits ~6px below the comp on this page.
+It was left alone rather than made configurable, since it is correct where it
+already ships.
+
 # 1. Workflow
 
 For every implementation request:
