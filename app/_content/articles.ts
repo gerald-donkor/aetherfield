@@ -159,6 +159,37 @@ export const ARTICLE_BODIES: Record<string, ArticleBody> = {
       },
     ],
   },
+  "inside-the-aetherfield-model-how-we-turn-data-into-action": {
+    published: "June 16, 2026",
+    author: "Theo Retical",
+    lede: "Data is everywhere, but turning it into meaningful climate action takes more than dashboards. The Aetherfield Model is our response to the noise—a systems-based approach that connects data, decision-making, and delivery. In this piece, we break down how the model works, and why clarity beats complexity every time.",
+    hero: {
+      src: "/assets/generated/article-model-hero.png",
+      alt: "A person silhouetted against wind turbines at dusk, rendered as a blue halftone over cream",
+    },
+    sections: [
+      {
+        heading: "From Signal to Strategy",
+        body: "Sustainability teams are overwhelmed with inputs—from sensor data to survey results to supplier estimates. The Aetherfield Model starts with organizing that noise into coherent signals, aligning teams around a shared understanding of what's true, what matters, and where change is possible.",
+      },
+      {
+        heading: "Build for Real-Time Alignment",
+        body: "Static reports quickly go stale. Instead, the model favors a living system of metrics, alerts, and dashboards that support decision-making in real time. That means connecting teams not just to the data—but to each other. Context travels faster when systems are designed to carry it.",
+      },
+      {
+        heading: "Centered on Causality",
+        body: "Most models focus on correlation. We focus on causality. Aetherfield maps emissions to decisions—showing not just what happened, but why. Whether it's a procurement policy driving Scope 3 emissions or a delivery route inflating Scope 1, the model surfaces cause, not just consequence.",
+      },
+      {
+        heading: "Designed to Evolve",
+        body: "Climate strategy isn't static, and neither is the Aetherfield Model. As standards evolve and business conditions shift, the model updates to reflect new realities. This keeps teams responsive and grounded, without having to rebuild from scratch every quarter.",
+      },
+      {
+        heading: "From Model to Momentum",
+        body: "The value of a model isn't in its elegance—it's in what it unlocks. With Aetherfield, teams don't just analyze—they act. When data, decisions, and direction are tightly aligned, momentum becomes measurable.",
+      },
+    ],
+  },
 };
 
 export function getArticle(slug: string): Article | undefined {

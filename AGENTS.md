@@ -281,6 +281,95 @@ The `published` date reads **May 31, 2028** in the comp; the entry ships **May
 31, 2026** to match the site-wide 2026 convention (article 1 moved from 2028 to
 2026 in the same commit).
 
+## Article 3 — "Inside the Aetherfield Model" (`/article/inside-the-aetherfield-model-how-we-turn-data-into-action`)
+
+**A data change, like article 2.** The comp
+(`public/assets/pages/05-article3/screen-sizes/`) is the same page as articles 1
+and 2 at the same geometry — hero `1240×500 +20+380` desktop / `760×307 +20+412`
+tablet / `335×136 +20+306` mobile, cards `403×235` ×3 / `760×443` / `335×195`.
+One `ARTICLE_BODIES` key plus one generated hero; no components touched. The
+`ARTICLES` entry already existed, so adding the body is what puts the slug in
+`WRITTEN_SLUGS` and stops the homepage's third card 404ing.
+
+**`article-model-hero.png`** is `public/assets/images/Image-6.png` — the
+photograph the article's card already uses — through article 2's three-layer
+blue-halftone-over-cream composite:
+
+```
+C="636x311+0+79"
+magick public/assets/images/Image-6.png -alpha off -crop $C +repage \
+  -colorspace Gray -threshold 62% \
+  -morphology Close Disk:3 -morphology Open Disk:3 \
+  -resize 1240x500! -threshold 50% mask.png
+magick public/assets/images/Image-6.png -alpha off -crop $C +repage \
+  -colorspace Gray -resize 1240x500! \
+  -sigmoidal-contrast 8,50% -ordered-dither h4x4a \
+  +level-colors '#2683EB','#FFFFFF' ink.png
+magick public/assets/generated/texture-cream.jpg \
+  -resize 1240x500^ -gravity center -extent 1240x500 \
+  \( +clone -blur 0x10 \) -compose blend -define compose:args=75 -composite cream.png
+magick ink.png cream.png mask.png -composite \
+  -colors 64 -define png:compression-level=9 \
+  public/assets/generated/article-model-hero.png
+```
+
+36 KB. Ink is `#2683EB` = `--color-accent`; cream field measures σ 3.0 at mean
+230, inside the comp's σ 2.5–3.2.
+
+**The crop is fitted end-to-end, not on the mask.** Unlike article 2 there is no
+studio backdrop to floodfill, so the cream/ink split is a brightness threshold
+and crop and threshold have to be fitted together. Three metrics were tried and
+only the third is trustworthy:
+
+| metric | result |
+| --- | --- |
+| blurred greyscale, `-normalize` both sides | `624x311+0+84`, RMSE 0.142 |
+| comp cream mask via `-fx "(r-b)>0.05?1:0"` | `624x291+0+84` T=58, RMSE 0.307 |
+| **generate the candidate and compare it to the comp** | **`636x311+0+79`, RMSE 0.086** |
+
+`x` pins to `0` at every width tried, so the window is flush with the
+photograph's left edge. The plateau is broad — 0.0857 to 0.087 across ±12px of
+width and height — so do not read precision into the last digit.
+
+**A plain `(r-b)` test does not find the cream; it finds "not solid blue".**
+Sparse halftone still reads warm on average, so that mask scored 0.42 cream when
+the comp's true dot-free area is 0.357. Take a `-statistic Minimum 5x5` first —
+in a dotted region the local minimum is the ink, in cream it is the paper:
+
+```
+magick comp-hero.png -statistic Minimum 5x5 -fx "(r-b)>0.02?1:0" \
+  -colorspace Gray -morphology Close Disk:2 -morphology Open Disk:2 mask.png
+```
+
+**The threshold is 62 %, not the 54 % the end-to-end sweep prefers.** At 124×50
+the RMSE metric cannot tell cream from sparse dots, so it drifts toward flooding
+the sky with cream: 54 % gives 0.46 dot-free area against the comp's 0.357 and
+the sky's dot gradient disappears. 62 % lands at 0.331 for 0.002 of RMSE, and
+it is also where the min-filtered mask sweep independently lands. Cream fraction
+is the honest signal here; use RMSE for the crop and the mask for the threshold.
+
+**Known deviation — the comp's silhouette shapes are not in the photograph.**
+The comp has three tall dot-screened masses the source does not: a full-height
+band left of the head, a triangular "hill" at the right, and a bulge right of
+the head. Contrast-stretching the source sky (`-auto-level -sigmoidal-contrast
+15,50%`) shows a smooth gradient with no cloud structure there, and an RMSE rank
+of every file in `public/assets/images` confirms Image-6 is the source (Image-1
+scores lower only because the comparison is whole-image against a crop). Like
+article 2's hero, the comp was hand-composed in Figma. The shipped asset matches
+it on framing, horizon, all three turbines, palette and dot texture; it does not
+reproduce those masses. Replace it if the designer's file is ever recovered.
+
+**Measured against the comps** at 375 / 800 / 1280, production build: hero top
+edge lands at y 380 (desktop, exact), `760×306 +20+412` (tablet, exact) and
+`+20+341` vs `+20+306` (mobile — the same 35px as article 2); recent-articles
+cards `400×232` / `760×442` / `335×195`. Page height runs 104px short at 1280,
+123px short at 800 and 457px long at 375 — the same two inherited drifts as
+articles 1 and 2 (wide Archivo cut; the 20px `--text-p1`/`--text-p2` floor).
+Record, don't chase.
+
+The `published` date reads **June 16, 2028** in the comp; the entry ships **June
+16, 2026** for the site-wide 2026 convention.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -369,12 +458,42 @@ browsers are cached; drive `playwright-core` out of the npx cache
 (`/home/gdk26/.npm/_npx/*/node_modules/playwright-core`) against `npm run start`,
 `deviceScaleFactor: 1`, `fullPage: true`, at 375 / 800 / 1280.
 
+`playwright-core` is CommonJS — `import { chromium } from …/index.js` throws
+`Named export 'chromium' not found`. Use
+`import pkg from '…/index.js'; const { chromium } = pkg;`.
+
+**Check port 3000 before starting a server.** A `next dev` may already be
+running there; `npm run start` then dies with `EADDRINUSE` and every screenshot
+silently comes from the dev server instead (the dev-tools badge shows up in the
+render and can land in the connected-components list). Start production on a
+free port — `npx next start -p 3001` — and leave the user's dev server alone.
+
 **Identifying which photograph a treated comp image came from is a search, not a
 guess.** Blur, greyscale and downsample both to ~124×50 and rank
-`magick compare -metric RMSE` across `public/assets/images`. To settle a *crop*,
-build a binary mask of the distinguishing feature — for a duotone that is the
-warm/cool split, `-fx "(r-b)>0.05?1:0"` — and sweep crop windows against it.
-Overlay the mask in red over the comp to confirm it before trusting the sweep.
+`magick compare -metric RMSE` across `public/assets/images`. Note the ranking is
+whole-image against a crop, so read it as a shortlist, not a verdict — confirm
+by eye.
+
+**Fitting a crop is a sweep, and the metric matters.** Run three passes,
+coarse → fine → fine, over width / x / height / y, scoring each candidate. Two
+weaker metrics and the one to trust:
+
+- *blurred greyscale, `-normalize` on both sides* — usable when the treatment is
+  a plain duotone, useless without the normalize (a halftone's greyscale range
+  is nothing like the photograph's).
+- *a binary feature mask* — for a cream/ink composite, `-fx "(r-b)>0.05?1:0"`.
+  Overlay it in red over the comp before trusting it.
+- **generate the candidate through the full recipe and compare it to the comp**,
+  both blurred and downsampled to 124×50. This is the honest one: it scores the
+  thing actually being shipped. Article 3's three metrics disagreed by ~12px of
+  crop; only this one is worth reporting.
+
+Downsampled RMSE cannot tell a cream field from sparse halftone dots, so fit
+*coverage-like* parameters (the cream/ink threshold) against a dot-aware mask
+and a target area fraction instead — see article 3.
+
+**`-alpha off` first on `public/assets/images/*.png`.** They carry a 1-bit alpha
+channel that silently flattens greyscale probes and thresholds to white.
 
 **`txt:` pixel dumps are depth-dependent.** `magick … txt:-` prints 0–255 for an
 8-bit image and 0–65535 for 16-bit. Add `-depth 16` before `txt:-` so probes can
