@@ -79,7 +79,16 @@ export function ArticleBodyLayout({ body }: { body: ArticleBody }) {
         </dl>
 
         <div className="mt-10 lg:mt-0">
-          <p className={PROSE}>{body.lede}</p>
+          {/* A multi-paragraph lede breaks on one blank line at the prose
+              pitch — measured at 56px between line boxes on article 5's
+              desktop comp, i.e. 28px of margin on top of the 28px leading. */}
+          {(Array.isArray(body.lede) ? body.lede : [body.lede]).map(
+            (paragraph, i) => (
+              <p key={i} className={i > 0 ? `mt-7 ${PROSE}` : PROSE}>
+                {paragraph}
+              </p>
+            ),
+          )}
 
           {/* Spans the reading column only, not the rail. */}
           <hr className="mt-12 border-0 border-t border-rule" />

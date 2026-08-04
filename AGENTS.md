@@ -370,6 +370,134 @@ Record, don't chase.
 The `published` date reads **June 16, 2028** in the comp; the entry ships **June
 16, 2026** for the site-wide 2026 convention.
 
+## Articles 4, 5 and 6 — the rest of `/journal`
+
+Three more `ARTICLE_BODIES` keys plus three generated heroes, from
+`public/assets/pages/06-article4`, `07-article5` and `08-article6`. All six
+slugs in `ARTICLES` now have prose, so nothing on `/journal` 404s any more.
+
+| # | slug | hero |
+| --- | --- | --- |
+| 4 | `from-spreadsheets-to-systems-the-evolution-of-climate-reporting` | `article-reporting-hero.png` |
+| 5 | `carbon-accounting-myths-models-and-must-haves` | `article-carbon-hero.png` |
+| 6 | `seeing-clearly-designing-feedback-loops-for-sustainable-growth` | `article-loops-hero.png` |
+
+**The one code change is a multi-paragraph lede.** Article 5's standfirst is two
+paragraphs above the rule, so `ArticleBody.lede` is now `string | string[]` and
+`sections.tsx` maps it. The break is **one blank line at the prose pitch** —
+`mt-7` on top of the 28px leading, measured off `07-article5/Desktop.png`, whose
+lede line boxes run 965 / 993 / 1021 / 1049 and then 1105, i.e. 56 = 2 × 28.
+A plain `string` still renders `<p class="font-serif text-p2 leading-[28px]">`
+with no wrapper and no extra class, so articles 1–3 are byte-identical HTML —
+verified by grepping the prerendered `/article/how-to-build-a-climate-ready-data-stack`.
+
+**Straight apostrophes, not curly.** The comps draw curly ones, but articles 1–3
+shipped straight `'` and `"` throughout and read correctly against their comps.
+Consistency across the six articles wins; don't "fix" one article to curly.
+
+### Heroes
+
+**`article-carbon-hero.png` (article 5) — the article 2 three-layer composite.**
+Source `Image-5.png`, the same peak its card uses.
+
+```
+C=740x298+16+228
+magick public/assets/images/Image-5.png -alpha off -crop $C +repage \
+  -colorspace Gray -threshold 78% -morphology Close Disk:3 -morphology Open Disk:3 \
+  -resize 1240x500! -threshold 50% mask.png
+magick public/assets/images/Image-5.png -alpha off -crop $C +repage \
+  -colorspace Gray -resize 1240x500! \
+  -sigmoidal-contrast 8,50% -ordered-dither h4x4a \
+  +level-colors '#2683EB','#FFFFFF' ink.png
+magick public/assets/generated/texture-cream.jpg \
+  -resize 1240x500^ -gravity center -extent 1240x500 \
+  \( +clone -blur 0x10 \) -compose blend -define compose:args=75 -composite \
+  \( +clone -resize 1x1! -resize 1240x500! \) -compose blend -define compose:args=60 -composite \
+  -evaluate multiply 1.033 cream.png
+magick ink.png cream.png mask.png -composite \
+  -colors 64 -define png:compression-level=9 \
+  public/assets/generated/article-carbon-hero.png
+```
+
+- **The crop is fitted on the silhouette, not on tone.** Tone RMSE has a very
+  flat plateau here (0.0558 over W 758–766) and prefers a wider window than the
+  comp; the sky/mountain mask does not. Score = XOR area against the comp's
+  dot-aware cream mask (`-statistic Minimum 5x5` then `-fx "(r-b)>0.02?1:0"`,
+  both at 310×125). Best 1.00 % at `740x298+16+228`, plateau W 736–756, X 10–18,
+  Y 226–228.
+- **`-threshold 78%`** is fitted on cream *area fraction*: it gives 0.4852
+  against the comp's 0.4846, and is also the XOR minimum. 70 % floods the sky
+  and leaves bright rock blobs on the peak.
+- **Two extra cream steps that article 2 does not have.** Article 2's cream is
+  only corner wedges; here it is half the frame, so `texture-cream`'s large-scale
+  mottle reads as diagonal streaks across a sky the comp draws flat. Blending
+  60 % against the texture's own mean (`-resize 1x1! -resize 1240x500!`) takes
+  σ from 2.89 to 1.58 against the comp's 1.49, and `-evaluate multiply 1.033`
+  lifts the mean from 231 to 238 to match. Corner lands `#F8F4E4` against the
+  comp's `#F7EEDB`. The `+clone -blur 0x10` blend at 75 stays exactly as
+  article 2 has it.
+
+**`article-loops-hero.png` (article 6) — ink layer alone, one command.** Source
+`Image-4.png` — *not* article 6's own card photograph (`Image-9`), and the same
+photograph article 4's card uses. That is what the comp shows; do not "fix" it.
+
+```
+magick public/assets/images/Image-4.png -alpha off -crop 744x300+12+234 +repage \
+  -colorspace Gray -resize 1240x500! \
+  -sigmoidal-contrast 8,50% -ordered-dither h4x4a \
+  +level-colors '#2683EB','#FFFFFF' \
+  -colors 64 -define png:compression-level=9 \
+  public/assets/generated/article-loops-hero.png
+```
+
+End-to-end tone RMSE 0.0648 (from 0.1997 at the starting guess), plateau W
+744–750, X 8–14, Y 232–236 — so ±4px, and no more precision than that is
+claimed. The independent NCC search below put the same window at
+`752x304+16+240`; the two agree inside the plateau.
+
+**`article-reporting-hero.png` (article 4) is cropped out of the comp.** Its
+photograph is **not in `public/assets/images`** — see the automation note below
+for the search that settles this. So it takes article 1's fallback:
+
+```
+magick public/assets/pages/06-article4/screen-sizes/Desktop.png \
+  -crop 1240x500+20+460 +repage -colors 64 -define png:compression-level=9 \
+  public/assets/generated/article-reporting-hero.png
+```
+
+**Known limitation:** a 1x asset, soft on a 2x display, exactly as
+`article-climate-hero.png` is. Replace it when the source photograph turns up.
+The comp art is soft and low-detail even at 1:1, consistent with a small crop
+scaled up in Figma, so little is lost.
+
+### Measured against the comps
+
+Hero box, at 375 / 800 / 1280 (comp → render):
+
+| | article 4 | article 5 | article 6 |
+| --- | --- | --- | --- |
+| desktop | `+20+460` → `+24+460` | `+20+380` → `+24+380` | `+20+460` → `+24+460` |
+| tablet | `+20+412` → `+20+412` | `+20+348` → `+20+412` | `+20+412` → `+20+476` |
+| mobile | `+20+342` → `+20+341` | `+20+306` → `+20+341` | `+20+342` → `+20+341` |
+
+Desktop y is exact on all three; the 4px x and the `1232x497` size are
+`Container`'s 24px desktop gutter, already recorded for articles 1–3. The 64px
+tablet drop on articles 5 and 6 is one extra title line from the wide Archivo
+cut — both titles wrap to three lines where the comp gets two. Cards are
+`400×232` ×3 / `760×442-443` ×3 / `335×195` ×3 everywhere, as on articles 1–3.
+
+Page height, render minus comp: **+64 / −11 / +546** (article 4), **−76 / +25 /
++650** (article 5), **−216 / −143 / +305** (article 6). The mobile numbers are
+the 20px `--text-p1`/`--text-p2` floor. **Article 6's −216 at desktop is the
+comp's own trailing whitespace, not a layout drift** — the gap from the last
+body line to the recent-articles cards is 326 / 369 / 426 / 326 / 397 / **532**
+px across comps 1–6, so article 6's comp simply carries ~200px more air before
+the band than article 1's does. The prose is transcribed complete; verified
+line by line against `08-article6/Desktop.png`. Record, don't chase.
+
+Dates ship as 2026 (`July 1`, `July 11`, `August 4`) where the comps read 2028,
+per the site-wide convention.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -473,6 +601,30 @@ guess.** Blur, greyscale and downsample both to ~124×50 and rank
 `magick compare -metric RMSE` across `public/assets/images`. Note the ranking is
 whole-image against a crop, so read it as a shortlist, not a verdict — confirm
 by eye.
+
+**RMSE cannot answer "which photograph", and will confidently lie.** On comp 4
+it ranked `Image-8` first at 0.118 and `Image-9` — a hand holding a mirror in a
+grass field — third, because at 124×50 the score is dominated by mean tone. Use
+**scale-invariant NCC on a coarse tone grid** instead. Dump every source to a
+192×192 ascii PGM (`-compress none -depth 8`) and the comp to a 16×7 tone grid,
+then in plain Python sweep every 62:25 window at every scale with a summed-area
+table and score zero-mean normalised cross-correlation against that grid. NCC is
+invariant to the brightness and contrast the duotone imposes, which is exactly
+what RMSE is not. About 10s per source image at a 4px step; there is no numpy in
+this environment, and none is needed.
+
+Read the result as a **gap, not a ranking**. A true match is unmistakable:
+comp 6 → `Image-4` at 0.980 with second place 0.513; comp 5 → `Image-5` at
+0.996 with second 0.915. Comp 4's field ran 0.90 / 0.89 / 0.88 with the best
+windows collapsing to 32×13 — the overfit signature — and forcing a minimum
+window killed it (0.90 for `Image-6`, a sunset silhouette). **No gap means the
+photograph is not in the folder**; fall back to cropping the comp, as article 1
+and article 4 both do. Always run a comp with a known answer as a control.
+
+**Check the hero's corners before choosing a recipe.** Four flat `#2683EB` /
+`#FFFFFF` corners means the **ink layer alone** — one command, no mask and no
+cream field (articles 4 and 6). Cream in any corner means the three-layer
+composite (articles 2, 3 and 5).
 
 **Fitting a crop is a sweep, and the metric matters.** Run three passes,
 coarse → fine → fine, over width / x / height / y, scoring each candidate. Two
