@@ -41,19 +41,38 @@ The header is **sticky, full-bleed frosted glass**: `sticky top-0 z-50` on a
 full-width `<header>`, with the row inside it holding the page gutters. It
 never hides, shrinks or changes state on scroll — one constant bar.
 
-**The glass is `bg-white/30` over `backdrop-blur-[32px]`**, no border and no
+**The glass is `bg-white/10` over `backdrop-blur-[32px]`**, no border and no
 shadow, with a `bg-white/85` fallback where `backdrop-filter` is unsupported.
-Those two numbers are **matched against the screencast
-`~/Videos/Screencasts/navbar-demo.webm`, not a comp** — there is no static comp
-of the bar over content. Method, so it can be redone: extract the t=88s frame
-(`ffmpeg -ss 88`, 1280-wide prototype at frame scale 0.987), render
-`/article/how-to-build-a-climate-ready-data-stack` scrolled to the same place,
-then sweep tint × radius against two metrics — the bar's average tone across
-its width (16×1 downsample, isolates tint from structure) and the softness of
-the card-image edge under it (a horizontal profile across the first image
-gutter, isolates radius). Tone bottoms out at 30 % white, edge softness at
-28–36px; 32px is the midpoint. At the matched frame the moss under the bar
-samples `#7C7E6D` against the demo's `#8A8E79`.
+Both numbers are **matched against screencasts, not a comp** — there is no
+static comp of the bar over content. The two are fitted on different pages, and
+that is deliberate.
+
+**The blur radius is fitted on `/article/[slug]`**, against the t=88s frame of
+`~/Videos/Screencasts/navbar-demo.webm` (1280-wide prototype, frame scale
+0.987). Extract the frame, render the article page scrolled to the same place —
+align by the recent-article images' bottom edge, not by scroll offset — and
+score the softness of the card-image edge under the bar with a horizontal
+profile across the first image gutter. It bottoms out at 28–36px; 32 is the
+midpoint.
+
+**The tint is fitted on `/`, over the hero sky.** Photographs do not constrain
+it — any lift hides in the image, and fitting the tint on the article band gave
+30 %, which reads as an obvious lighter band across the top of the homepage
+(`Screencast_20260804_115028.webm` shows this). A smooth gradient does
+constrain it. The reference is **the page with no bar at all**: render `/` with
+`background:none; backdrop-filter:none` forced on the `<header>` and compare
+each candidate to it row by row down the 60px the bar occupies. A bare
+`blur(32px)` reproduces a near-linear gradient almost exactly, so the error
+falls monotonically toward zero tint — 6 % → 2.3 mean, 10 % → 4.2, 15 % → 5.9,
+30 % → ~14 levels of 255.
+
+**10 % rather than 0 is a legibility floor, not a fit.** Where the bar crosses
+the third recent-article card's sunset photograph the backdrop is nearly black;
+the black nav links measure 3.0:1 there at 10 % and about 1.5:1 at 0 %. 3.0:1
+clears AA only on the large-bold reading of the nav type — it is the known cost
+of a bar that blends, and the homepage is the stronger constraint. If this ever
+needs to be better, change the backdrop (the card images' crop) rather than
+raising the tint.
 
 **The pages render `SiteNav` outside `Container`.** `sticky` only travels
 within its parent, so a one-child `<Container><SiteNav /></Container>` wrapper
@@ -71,11 +90,9 @@ containing block, so `top-0` is still the page top and it still paints behind
 the nav and hero. Verified: `/` at 375, 800 and 1280 is **pixel-identical below
 the 60px bar** before and after.
 
-**Known consequence:** the bar is invisible over white, but on `/` at scroll 0
-it sits over the hero sky, so its 30 % white tint reads as a slightly lighter
-band across the top 60px. That is inherent to a constant translucent bar — the
-demo has no unscrolled/scrolled state to switch between — and it is the only
-homepage pixel change.
+**The homepage's only pixel change is inside the bar**, and at 10 % it is not
+visible: the shipped bar sits 4.2 levels (max 5.0) from the bare gradient down
+its whole height.
 
 The mobile panel now overlays content instead of pushing it, so it is opaque
 `bg-white` and scrolls at `max-h-[calc(100dvh-60px)]`. Items, separators and

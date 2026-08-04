@@ -33,12 +33,14 @@ export function SiteNav() {
     // over the white page top the bar reads as invisible. No border, no shadow:
     // the blur just stops at the bottom edge.
     //
-    // 30 % white over a 32px blur, fitted to the screencast rather than a comp:
-    // at the t=88s frame both the bar's average tone across its width and the
-    // softness of the card-image edges under it are at their closest here.
-    // Where backdrop-filter is unsupported the bar falls back to a near-opaque
-    // white so the links stay legible.
-    <header className="sticky top-0 z-50 w-full bg-white/85 backdrop-blur-[32px] supports-[backdrop-filter]:bg-white/30">
+    // 10 % white over a 32px blur. The tint is fitted on the hero sky, not on
+    // the article page's photographs: over a smooth gradient any lift reads as
+    // a band, and a bare blur reproduces the gradient almost exactly, so the
+    // tint is as low as legibility allows rather than as low as possible —
+    // 10 % is 4 levels out of 255 on the sky, and keeps the black links off the
+    // near-black sunset photograph on /article/[slug]. Where backdrop-filter is
+    // unsupported the bar falls back to a near-opaque white.
+    <header className="sticky top-0 z-50 w-full bg-white/85 backdrop-blur-[32px] supports-[backdrop-filter]:bg-white/10">
       <div className={`${CONTAINER} flex h-[60px] items-center justify-between`}>
         <Link href="/" aria-label="Aetherfield, home">
           <Wordmark className="text-[26px]" />
