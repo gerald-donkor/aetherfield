@@ -3,13 +3,20 @@
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { SplitText } from "gsap/SplitText";
 
 /* Registered once, at module scope — never inside a render. Every client
    module that animates imports `gsap` from here rather than from the package,
-   so there is exactly one registration site and no ordering question. */
-gsap.registerPlugin(useGSAP, ScrollTrigger);
+   so there is exactly one registration site and no ordering question.
 
-export { gsap, ScrollTrigger, useGSAP };
+   `SplitText` is free as of GSAP 3.13 and is bundled in the public package; it
+   needs no auth token and no registry override. It is used by exactly one
+   module — `home/hero-text.tsx` — and it reaches no other route because
+   nothing outside `home/` imports this file. See AGENTS.md, "The hero's split
+   blur-in", for why the earlier decision not to use it was overridden. */
+gsap.registerPlugin(useGSAP, ScrollTrigger, SplitText);
+
+export { gsap, ScrollTrigger, SplitText, useGSAP };
 
 /* The recording's vocabulary, in one place so the chart and the page reveals
    cannot drift apart: ~0.5s per element, ~0.08s between siblings, decelerating.

@@ -1458,10 +1458,10 @@ called once at module scope in `motion/register.ts` — never in render — and
 `mm.revert()` returned as cleanup. No `markers: true` in committed code.
 ScrollTriggers are created in page order naturally, so no `refreshPriority`.
 
-**`SplitText` was considered and rejected.** It is free as of GSAP 3.13 and
-would be the idiomatic way to stagger the two headings per line, but it mutates
-the DOM after hydration; the two headings that need splitting carry authored
-spans instead.
+~~**`SplitText` was considered and rejected.**~~ **Superseded** — the plugin is
+now used, on the hero and nowhere else, at the user's explicit request. The
+original objection (it mutates the DOM after hydration) is real and is answered
+rather than avoided; see "The hero's split blur-in" below.
 
 **`motion@^13` is in `package.json` and is unused by this work.** The homepage
 is GSAP throughout. Do not mix the two libraries on one page.
@@ -1680,6 +1680,190 @@ becomes `data-journal-mark`, the SVG becomes a client reference, and the page
 chunk is renamed. The other 15 pages are byte-identical once the build id and
 the CSS chunk name are normalised, and **every one of them keeps the identical
 chunk set** — no GSAP leak.
+
+### The journal mark's hover
+
+**The second treatment on the mark, and the site's only JS-driven hover.**
+Prompt 21. The user circled it again in
+`~/Pictures/Screenshots/Screenshot_20260805_212139.png`: *"Let this rotate and
+tilt at 45 degree above when hovered upon."* It lives in the same client leaf as
+the flip (`home/journal-mark.tsx`); `journal.tsx` stays a server component and
+no markup changed at all — the hover is pure JS.
+
+**"45 degrees above" is read as the enter pose, revisited.** Prompt 20
+established that a degree figure from this user is an *on-screen* angle, and
+that the mark's entrance runs from a net −45° up to its resting −8°. So hovering
+sweeps it **back out to −45°** — further counter-clockwise, lifting the
+right-hand tip above the resting line, which is the "above" — plus a reduced
+slice of the same `rotationY` (**12°**, against the entrance's 45) so it leans
+rather than replays the flip. `HOVER_ROTATION` / `HOVER_ROTATION_Y` in the
+module. Two readings rejected, for the same reasons prompt 20 rejected them for
+the entrance: *+45° on screen* crosses the rest angle instead of extending from
+it, and a literal `rotation: 45` in the vars object is neither 45 on screen nor
+defensible against a composed start. If the user meant 45° of *additional* tilt
+(rest −8 → −53), that is one number.
+
+**Paused tween driven by `play()` / `reverse()`, not a `gsap.to` per event.** A
+mouse-out mid-flight then unwinds along the same curve from wherever it is —
+measured: interrupting 150 ms in reads `rotate(-40.98deg) rotateY(10.69deg)` and
+returns to the exact resting matrix. `quickTo` cannot reverse like that, and
+stacked `to`s fight each other. `DUR * 0.7`, `EASE` — both imported from
+`register.ts`, never restated.
+
+**The hover tween is not built, and no listener is bound, until the entrance
+flip's `onComplete`.** Both write `rotation` on the same element, so gating on
+the entrance is what makes hovering mid-flip harmless: there is nothing bound
+yet. The tween is created inside `contextSafe(...)` because anything GSAP makes
+after `useGSAP` has run is outside the context and would never be reverted
+(gsap-react); the `mm.add` handler returns a cleanup that removes both listeners
+and kills the tween.
+
+**Its start vars are the composed resting pose** (`rotation: REST_ROTATION`,
+`rotationY: 0`), never `rotation: 0` — by this point GSAP has folded the
+Tailwind `rotate: -8deg` into `transform`, the trap prompt 20 documented. It
+also carries **`immediateRender: false`**: a paused `fromTo` otherwise writes its
+start values at creation, on top of the entrance tween that has just landed.
+
+**`hasHover: "(hover: hover)"` is a fourth named condition**, alongside
+`reduceMotion` / `fullMotion` / `isTabletUp`. Tailwind v4 wraps its own `hover:`
+rules in that query for free; a JS pointer handler gets no such wrapper, so it is
+authored explicitly and nothing sticks on touch. The reduce branch binds no
+listener and creates no tween, and still touches only `opacity`.
+
+**Overflow was computed, then verified.** For the 2:1 box the rotated bounding
+half-width `(w·cosθ + h·sinθ)/2` is 211.9 at 8° and 212.1 at 45° — flat, because
+the width lost to `cos` is repaid by the height projected through `sin`, and
+`rotationY` foreshortens X further. Half-*height* grows from 126.8 to 212.1, i.e.
+~±85 px into the left column's whitespace; the h2 and the list are in the *other*
+grid column. Measured hovered right edge **215.1 at 800** against the list's
+242.0, and **420.1 at 1280** against 461.3 — clear by 27 and 41 px. Nothing in
+the ancestor chain may become `overflow-hidden`.
+
+#### Measured in the production build
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| resting rect | `0×0` (`display: none`) | **`307×184`** | **`421×252`** |
+| resting inline transform | — | `perspective(800px) rotate(-8deg)` | same |
+| resting matrix | — | `matrix3d(0.990268, -0.139173, …)` | same |
+| hovered | no tween, no listener | `rotate(-45deg) rotateY(12deg)`, `304×304` | `rotate(-45deg) rotateY(12deg)`, `416×416` |
+| after mouse-out | — | back to `rotate(-8deg)`, `307×184` | back to `rotate(-8deg)`, `421×252` |
+| interrupted at 150 ms | — | `rotate(-40.38) rotateY(10.50)` → rest | `rotate(-40.98) rotateY(10.69)` → rest |
+| reduced motion | `opacity 1`, untouched | `opacity 1`, `rotate: -8deg`, hover inert | same |
+
+The resting rects and matrix are prompt 20's numbers **unchanged**, before and
+after a hover. The hovered rect is *narrower* and taller than the resting one,
+as the overflow calculation predicts.
+
+### The hero's split blur-in
+
+**SplitText, on the hero and nowhere else.** Prompt 21, from the user circling
+the whole hero block in `~/Pictures/Screenshots/Screenshot_20260805_213058.png`:
+*"split the text here and give it a nice blurry animation."*
+`app/_components/home/hero-text.tsx` — `"use client"`, component-only, taking
+its children as a prop and taking the hero's existing
+`pt-12 text-center md:pt-16 lg:pt-[76px]` wrapper over via `className`, the same
+two devices `Reveal` uses. **`hero.tsx` stays a server component**, so
+`HeroDashboard` and its `next/image` never reach the client bundle.
+
+**Why the earlier rejection was overridden.** The objection on file was that
+SplitText mutates the DOM after hydration. That is true, and four things answer
+it rather than avoid it — all four load-bearing:
+
+1. It runs **only inside `useGSAP`**, never during render, so React never sees
+   the split nodes. Verified: no hydration warning in the console.
+2. **`autoSplit: true` with the animation created inside — and returned from —
+   `onSplit(self)`**, so SplitText reverts, re-splits and re-syncs on font load
+   and on resize. A tween created *outside* `onSplit` would target orphaned
+   nodes after the first re-split.
+3. **`aria` stays at its default `"auto"`**: SplitText labels the split element
+   and hides the pieces. Verified in the accessibility tree, not just the
+   markup — the `h1` reads
+   `- heading "Sustainability insights, built for business" [level=1]`, and the
+   lede carries its full sentence as `aria-label` with `aria-hidden="true"` on
+   every piece.
+4. `useGSAP`'s context reverts the split on unmount; the leaf still returns
+   `() => mm.revert()` like every other. Do not call `revert()` twice.
+
+**Words for the heading, lines for the lede — a performance choice, not a taste
+one.** An animated `filter: blur()` repaints each target's layer every frame, so
+the count is held in single digits: **5 words and 2 lines** at 1280. A `chars`
+split would put ~90 blurred layers on screen at once and is out of scope; if
+per-character is ever wanted it needs its own measurement. The buttons and the
+dashboard wrapper are **untouched** and stay `data-reveal-item`, so `Reveal`'s
+stagger is two items, not four.
+
+**The two authored `<span className="block">`s stay.** They are the comp's line
+break at all three breakpoints, and `type: "words"` on each span leaves that
+break alone rather than asking SplitText to rediscover it — which matters
+because `autoSplit` re-splits on font load.
+
+**The tween**, one set of vars shared by both splits:
+
+```
+from { opacity: 0, filter: "blur(Npx)", y: 14 }
+  → duration DUR, ease EASE, stagger 0.06, clearProps "filter,display"
+```
+
+- **Blur is 12 px at `lg` and 8 below** (`Math.round(BLUR * 0.66)`, the ratio
+  `Reveal`'s rise already uses). One radius cannot serve both: the h1 is 64–80 px
+  at desktop and 30–36 at mobile, and 12 px reads as a lens on the first and as a
+  smear on the second.
+- **`blur(0px)`, not `none`** — GSAP interpolates a filter numerically only
+  between two `blur()` functions.
+- **Stagger 0.06 rather than the page's 0.08** — more targets, and smaller ones.
+  It is the only new timing number; `DUR` and `EASE` still come from
+  `register.ts` and are never restated.
+- **`clearProps: "filter,display"`, and the `display` half is measured.** A
+  `<div>` inside the authored `<span>` is invalid markup, so the word pieces are
+  `tag: "span"` — which means `display: inline-block` has to be set explicitly or
+  the `y` will not render. An inline-block box rounds each word's advance to a
+  whole pixel, which measured **758 px of desktop heading ink against 756** and
+  put `magick compare -metric AE` at 4007 rather than 0. Clearing `display` with
+  the filter returns the settled heading to the exact pixels it drew before the
+  split. **`clearProps` may still never touch `opacity` or `transform`** — that
+  hands the element back to the CSS start state and it vanishes.
+
+**The hidden start state is `[data-hero-split] { opacity: 0; }`** in the existing
+`(scripting: enabled) and (prefers-reduced-motion: no-preference)` block —
+opacity only, on the *unsplit* element, for the reason `[data-journal-mark]`
+already records. The split nodes do not exist when the stylesheet is parsed, so
+the blur is a tween start value rather than an authored one; `onSplit` lifts the
+outer element to `opacity: 1` and the words carry the animation from there.
+
+**The `Reveal` delay is fitted, not guessed.** With the type off
+`data-reveal-item`, the buttons and dashboard would otherwise race the heading.
+`delay={0.3}` on `<Reveal ... immediate>` holds them behind it; the lede's lines
+carry `delay: 0.18` so they overlap the heading rather than follow it —
+end-to-end sequencing would run the entrance to ~1.4 s. Measured from the first
+frame after load at 1280: heading and lede settle at **756 ms**, buttons at
+**790**, dashboard at **873**. The parent build's same landmark (the dashboard,
+last item in both) is **808 ms**, so the entrance is **+8.0 %**, inside the
+±20 % budget.
+
+#### Impact
+
+`/` is **pixel-identical** in its settled state at 375 / 800 / 1280 (`magick
+compare -metric AE` = **0** at 5 % fuzz against a worktree build of the parent
+commit) and its page heights are unchanged at **6350 / 6006 / 5595**. Every hero
+box — `h1`, both line spans, the lede, the button row — measures identical to two
+decimal places at all three breakpoints.
+
+It is the only route whose prerendered HTML changes, and its only content diffs
+are the three attributes (`data-reveal-item` → `data-hero-split="words"` ×2 and
+`="lines"` ×1) plus the new `HeroText` client reference and the page chunk
+rename. The other 15 pages are byte-identical once the build id and the CSS chunk
+name are normalised, and **every one keeps an identical chunk set** — SplitText
+does not leak, because nothing outside `home/` imports `register.ts`.
+
+Under reduced motion **nothing splits at all** (`childSpans = 0` on all three
+elements), 0 of 28 reveal targets sit below full opacity and every bar reads
+scaleY 1; with JavaScript off the `scripting: enabled` gate never applies and the
+hero is at rest as the server sent it.
+
+**Do not add `text-wrap: balance` anywhere in the hero** — it interferes with
+splitting. **SplitText does not support SVG `<text>`**, so it may never be
+pointed at the journal mark or the footer wordmark.
 
 # Content and asset conventions
 
@@ -1922,6 +2106,21 @@ use `[A-Za-z0-9_-]+`. And `SequenceMatcher` over a 200 KB single-line page runs
 for minutes — scan the common prefix and suffix instead (two `while` loops) and
 print only the middle. For the one page that legitimately differs, re-split on
 `(?<=>)` and run `unified_diff` over the tags, which is fast and readable.
+
+**`page.accessibility.snapshot()` is gone from the cached `playwright-core`.**
+It throws `Cannot read properties of undefined`. Use
+`await page.locator("h1").ariaSnapshot()` instead — it returns the YAML form
+(`- heading "…" [level=1]`), which is what you want for checking that a split or
+otherwise mangled element still reads as one string.
+
+**Splitting text changes its rasterisation, and `magick compare` will catch
+it.** Word pieces need `display: inline-block` for a transform to render, and an
+inline-block box rounds each word's advance to a whole pixel — the desktop hero
+heading measured 2 px of extra ink and 4007 differing pixels against the parent
+build. Set the display for the tween's duration only and list it in
+`clearProps` alongside the filter; the settled render then goes back to 0. Check
+element rects *and* `-metric AE`: rects can be identical to two decimal places
+while the glyphs have moved.
 
 **`playwright-core`'s npx cache hash changes.** Do not copy a path out of an
 older note — resolve it each session with

@@ -95,6 +95,16 @@ body {
   [data-journal-mark] {
     opacity: 0;
   }
+  /* The hero's split type. Opacity only, and on the *unsplit* element — the
+     split nodes do not exist until SplitText runs, and the blur is a tween
+     start value rather than an authored one for the same reason the mark's
+     start transform is not authored here: a CSS filter would be decomposed
+     into the element's own stack and outlive the tween. With JavaScript off,
+     or reduced motion requested, this rule never applies and the hero is at
+     rest as the server sent it. */
+  [data-hero-split] {
+    opacity: 0;
+  }
 }
 
 /* Fluid display type: the 80/56/40px scale is authored at the 1400px frame
