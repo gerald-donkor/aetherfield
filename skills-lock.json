@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "design-handoff": {
+      "source": "anthropics/knowledge-work-plugins",
+      "sourceType": "github",
+      "skillPath": "design/skills/design-handoff/SKILL.md",
+      "computedHash": "3fda0bed51f3aa3ff110cd517388b0b9afa77f6f568700ab9ddbaa5148ae8903"
+    },
     "gsap-core": {
       "source": "greensock/gsap-skills",
       "sourceType": "github",
