@@ -739,6 +739,77 @@ something honest; the closing one ships inert, exactly as the `/careers`
 open-application card's "Apply now" does today. Both want a real application URL
 or `mailto:` once one exists.
 
+### Role 3 — Product Manager (`/job-listing/product-manager`)
+
+**A pure data change, as promised above.** One `JOB_BODIES` key from
+`public/assets/pages/13-job-listing3/screen-sizes/` — same four sections
+(Company description / About the role / Requirements / Company benefits, two
+`body` and two `items`), same closing CTA, `lede` omitted so it falls back to
+`Job.body`. **No component, utility or asset touched.** Company description and
+Company benefits are byte-identical to the Data Scientist entry because the comp
+repeats them verbatim; keep the two in step. Adding the key is what puts
+`product-manager` in `WRITTEN_JOB_SLUGS`, which turns the `/careers` card's
+action into a `ButtonLink` and adds the slug to `generateStaticParams`.
+
+**`/job-listing/ux-designer` is now the one slug still 404ing**, until
+`12-job-listing2` is built.
+
+Prerendered HTML is **byte-identical** for `/`, `/journal`, all six articles,
+`/design-system`, `/about` and `/job-listing/data-scientist` — verified by
+building the working tree twice, once with `jobs.ts` reverted and once with the
+new key, and normalising the CSS chunk name and the build id. That isolates
+*this* change; it holds nothing else in the tree fixed. `/careers`' only diff is
+the Product Manager card's `<button>` becoming an
+`<a href="/job-listing/product-manager">` with the same class string.
+
+#### Measured against the comps
+
+**These numbers were taken against a working tree that already carried the
+bottom-anchored `Seal` refactor** (the `relative` wrapper around the whole prose
+block in `job/sections.tsx`), not against `dd13557`'s top-anchored seal. Every
+seal figure below therefore describes the bottom-anchored behaviour.
+
+| | 1280 | 800 | 375 |
+| --- | --- | --- | --- |
+| card | `820×1842+230+204` → `820×1685+230+204` | `720×1902+40+204` → `720×1800+40+204` | `335×2428+20+166` → `335×2826+20+166` |
+| seal | `281×143+840+1591` → `274×144+842+1431` | `221×112+572+1664` → `216×113+575+1557` | not drawn |
+| top Apply | `100×38+910+244` → `96×38+914+244` | `100×38+620+244` → `96×38+624+244` | `100×38+44+402` → `96×38+44+438` |
+| closing Apply | `122×46+579+1960` → `+1803` | `122×46+339+2020` → `+1918` | `121×46+127+2516` → `122×46+127+2922` |
+| footer top | 2166 → 2009 | 2226 → 2124 | 2714 → 3112 |
+
+Card x, y and width are **exact at all three**, and the card→footer gap is 120px
+in both the comp and the render at all three — the measured constant `/careers`
+and job listing 1 already record. Both Apply buttons' x is exact at every size
+(96 against 100 wide is the mono cut, already on file).
+
+Deviations, all inherited or comp-side:
+
+- **The desktop card runs −157 and the tablet −102, and it is comp-side air, not
+  a layout drift.** Comp 13 draws **214px** between the last benefits bullet and
+  the closing rule where the layout gives the `Rule`'s own 48 — and comp 11
+  measures 46 at exactly the same place (last bullet ink ends 1564, rule ≈1610).
+  So comp 13 alone carries ~166px more air there. **The seal anchoring is not
+  the cause and was not changed**: it holds seal-bottom → closing-rule at 69px
+  against comp 13's 74, the same invariant fitted on comps 11 and 12. What
+  differs is that comp 13's designer drew the seal *below* the benefits list
+  (1591–1733, clear of the last bullet at 1588) where comp 11 overlaps it. Same
+  call as article 6's −216. Record, don't chase.
+- **The desktop lede wraps to two lines where the comp takes three**, at the same
+  740px measure — the shipped Newsreader cut, the mirror of the wide-Archivo
+  note. Job listing 1 records this on tablet; this role's lede is longer, so it
+  reaches desktop.
+- **Two Requirements bullets wrap where the comp wraps one** ("Familiarity with
+  sustainability…" takes a second line), +28. Same font-cut cause.
+- **Mobile runs +398** on the fixed 20px `--text-p1` / `--text-p2` floor, which
+  also puts the mobile top Apply 36px low (`+438` against `+402`) — one extra
+  lede line above it.
+- **The CTA heading breaks one word later**, "…build the future / of climate
+  intelligence?" against the comp's "…build the / future of climate
+  intelligence?" — the identical drift already recorded for job listing 1.
+
+Everything else on desktop is line-for-line: identical headings, identical body
+line counts and wraps through both prose sections, identical bullet order.
+
 ## About page (`/about`)
 
 `app/about/page.tsx` with its sections in `app/_components/about/sections.tsx`
