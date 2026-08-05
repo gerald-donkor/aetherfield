@@ -38,16 +38,25 @@ export function Journal() {
                     href={`/article/${a.slug}`}
                     className="group grid gap-4 transition-transform duration-300 ease-in-out hover:translate-x-2.5 motion-reduce:transition-none md:grid-cols-[164px_1fr] md:items-start md:gap-6"
                   >
-                    {/* src is optional on Article for the styleguide's inert
-                        specimens; every real entry carries one. */}
-                    <Image
-                      src={a.src!}
-                      alt=""
-                      width={328}
-                      height={200}
-                      sizes="(max-width: 768px) 100vw, 164px"
-                      className="aspect-[164/100] w-full object-cover"
-                    />
+                    {/* The zoom needs something to clip against, so the image
+                        gets a wrapper of its own. Tailwind v4 emits `scale-110`
+                        as the independent `scale` property — the mechanic
+                        already recorded for `translate-x-2.5` — so the
+                        transition list names `scale`, not `transform`. The
+                        300ms ease-in-out is the curve measured for these rows;
+                        it is reused, not refitted. */}
+                    <span className="block overflow-hidden">
+                      {/* src is optional on Article for the styleguide's inert
+                          specimens; every real entry carries one. */}
+                      <Image
+                        src={a.src!}
+                        alt=""
+                        width={328}
+                        height={200}
+                        sizes="(max-width: 768px) 100vw, 164px"
+                        className="aspect-[164/100] w-full object-cover transition-[scale,filter] duration-300 ease-in-out group-hover:scale-110 group-hover:grayscale motion-reduce:transition-none"
+                      />
+                    </span>
                     <div>
                       {/* The reference draws no underline — the title just
                           fades. 0.7 is the footer's existing idiom and sits

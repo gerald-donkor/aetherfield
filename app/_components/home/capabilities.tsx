@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { Reveal } from "../motion/reveal";
 import { Button } from "../primitives";
+import { CapabilityVisual } from "./capability-visual";
 import { Container } from "./container";
 
 export const CAPABILITIES = [
@@ -22,8 +23,11 @@ export function Capabilities() {
         </h2>
 
         <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:gap-14">
-          {/* Image with the floating metric card */}
-          <div className="relative aspect-[692/566] w-full" data-reveal-item>
+          {/* Image with the floating metric card. The box, the card and their
+              four animations live in a client leaf; the `<Image>` is passed in
+              as children so this file stays a server component and `next/image`
+              never reaches the client bundle. */}
+          <CapabilityVisual>
             <Image
               src="/assets/images/Image-3.png"
               alt="Sheer fabric lifting against an open sky"
@@ -31,35 +35,7 @@ export function Capabilities() {
               sizes="(max-width: 1024px) 100vw, 620px"
               className="object-cover"
             />
-            <div className="@container absolute inset-x-[8%] top-1/2 -translate-y-1/2 lg:inset-x-[16%]">
-              <div className="bg-white p-[4.5cqw] text-[2.6cqw]">
-                <div className="flex items-start justify-between">
-                  <span className="font-mono text-[1em]">
-                    Energy consumption
-                  </span>
-                  <svg
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinecap="round"
-                    className="size-[2.4em]"
-                    aria-hidden
-                  >
-                    <path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" />
-                  </svg>
-                </div>
-                <div className="mt-[3em] flex items-baseline justify-between">
-                  <p className="font-sans text-[2.6em] leading-none font-bold">
-                    583.7
-                    <span className="ml-[0.3em] text-[0.42em]">MWh</span>
-                  </p>
-                  <span className="font-mono text-[1em] text-accent">
-                    ↓12.4%
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          </CapabilityVisual>
 
           {/* Numbered sequence */}
           <div className="flex flex-col">

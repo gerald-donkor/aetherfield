@@ -1865,6 +1865,161 @@ hero is at rest as the server sent it.
 splitting. **SplitText does not support SVG `<text>`**, so it may never be
 pointed at the journal mark or the footer wordmark.
 
+### The Capabilities section — four behaviours, and a vocabulary override
+
+Prompt 22, from six user screenshots (`~/Pictures/Screenshots/Screenshot_20260805_2136{47}`,
+`_2144{31,711}`, `_2150{46}`, `_2200{55}`, `_2203{29}.png`), each circling one
+element. Four land in this section's photograph and metric card; two are the
+journal row thumbnails, below.
+
+**This section is a deliberate exception to everything "Homepage motion" records
+about the vocabulary**, at the user's explicit request — the same kind of
+override as the seal's offsets and the 20 % speed-up. It adds:
+
+- **the site's only scrubbed ScrollTrigger** (the cloth), against "nothing is
+  scrubbed… no parallax";
+- **two `repeat: -1` loops** (the counter, the asterisk), against "once, on
+  enter";
+- **the site's second and third JS-driven hovers**.
+
+Do not "fix" any of these back to the shared vocabulary. Nothing else on the
+page became scroll-linked, and there is still no pinning and no `ScrollSmoother`.
+
+**`home/capability-visual.tsx` is the section's only client module**, and the
+`<Image>` **arrives as `children`** so `capabilities.tsx` stays a server
+component and `next/image` never reaches the client bundle — the device `Reveal`
+and `HeroText` already use. Keep it **component-only**: a constant or type
+exported from here and imported elsewhere drags GSAP into that page's bundle,
+the rule that forced `PRINCIPLES` out into `principles-data.tsx`. One `useGSAP`,
+one `gsap.matchMedia()` with the named `reduceMotion` / `fullMotion` / `hasHover`
+trio, `mm.add(…, root)`, `mm.revert()` as cleanup, `DUR` / `EASE` from
+`register.ts`.
+
+**The drift is on an inner wrapper, never on the `data-reveal-item` box.**
+`Reveal`'s stagger tween writes `y` on that box and the two would fight. The
+outer box keeps `data-reveal-item`, so the section's stagger is still **7 items**
+(h2, image box, 4 `li`, button), and it gains `overflow-hidden` to clip the
+drift — safe here, since the recorded "nothing in this chain may become
+`overflow-hidden`" warnings are about the `Seal`'s and the journal mark's
+ancestors, both in other sections.
+
+**The cloth's overscan is computed, not eyeballed.** `yPercent -5 → 5` scrubbed
+(`scrub: 0.6`, `start: "top bottom"`, `end: "bottom top"`) against a constant
+`scale: 1.16`, which puts 8 % of the box beyond each edge against 5 % of travel.
+**1.12 also covers it on paper** (6 % against 5 %) but leaves only ~2.7px of
+margin at 375, inside sub-pixel rounding. Verified at the trigger's start, middle
+and end: no edge enters the frame at any of the three.
+
+**The card leans; it does not flip.** `rotationY: 0 → 20` with
+`transformPerspective: 900`. "Flip horizontally to the right" is read as the
+right edge receding — a **positive** `rotationY`. A full 180° was rejected
+because **no comp draws a back face**, and a 360° turn leaves the numbers
+edge-on and unreadable mid-spin. `transformPerspective` is required, not
+decorative, for the reason `journal-mark.tsx` records. Paused `fromTo` driven by
+`play()` / `reverse()`, built inside `contextSafe`, so a mouse-out mid-flight
+unwinds along the same curve. Measured: rest `matrix3d(1,0,0,0,…)`, hovered
+`matrix3d(0.939693, 0, -0.34202, …)` — `cos 20°` exactly — and an exact return
+to rest.
+
+**The asterisk turns once per 9 s**, `ease: "none"`, `repeat: -1`,
+`transformOrigin: "50% 50%"`. GSAP resolves an SVG element's transform origin
+itself; do not hand-author a `transform-box`. Measured at 40°/s, i.e. 9 s/turn.
+
+**The reading and its delta come off one proxy, and that is the point.** The
+delta is derived from the tween — `(current − prev) / prev × 100` — so the arrow
+*is* the direction the value is travelling and cannot disagree with it. The tween
+is monotonic within a step, so the sign is constant and the arrow never flickers.
+
+```
+READINGS = [583.7, 611.2, 548.9, 604.5, 666.3, 583.7]
+```
+
+**The sequence starts and ends on 583.7**, so `repeat: -1` is seamless and the
+loop rests on the value the comps draw. **666.3 is load-bearing**: the final step
+`666.3 → 583.7` is −12.39 %, which reproduces the comp's `↓12.4%` exactly. All
+six are three digits plus one decimal, so the advance width never changes step.
+`0.7` s per sweep on **`power2.inOut` — deliberately not `EASE`**, which never
+accelerates and so cannot read as a speedometer — then a `1.2` s hold.
+
+**The colour ramp has no design-system token, on purpose.** `#2683EB` is exactly
+`--color-accent` (the `Seal`'s precedent for an inline hex with that note); the
+red end is **`#D7263D`**, blue at or below zero and fully red at **+12 %**. It
+exists for this one element and a token would invite it being reused as a
+semantic colour it has never been fitted for.
+
+Two mechanics that are easy to miss:
+
+- **`tabular-nums` on both readouts.** Without it the value shifts horizontally
+  as its digits change. The `MWh` span is a **sibling** of the number, so the
+  tween writes the number's own node — hence the extra `<span>` around `583.7`.
+- **`↑` renders in the shipped mono cut**, checked at 1280 at 500 % against `↓`:
+  same weight, same stroke, a real matching glyph pair, not a fallback. That was
+  worth checking — `AGENTS.md` records the nav `→` shipping from an arbitrary
+  fallback because Archivo lacks it. If either arrow ever loses its glyph, both
+  become a drawn SVG.
+
+**Both loops start paused** and are played/paused by one
+`ScrollTrigger.create({ start: "top bottom", end: "bottom top", onToggle })`.
+That gate is the whole reason a continuous loop is affordable here. Verified: at
+scroll 0 the value is still `583.7` after 1.5 s and the asterisk's transform is
+`none` at all three breakpoints.
+
+**Reduced motion gets nothing at all** — no tween, no timeline, no listener, no
+ScrollTrigger; the branch returns immediately. Nothing needs restoring because
+nothing was ever hidden: every element here is visible and correct at rest, so
+`globals.css` needed no new start-state rule. Verified under `reduce` **and**
+with JavaScript off: `583.7`, `↓12.4%`, **no inline `color` written at all**,
+and `transform: none` on the asterisk, the cloth and the thumbnails.
+
+### The journal rows' thumbnails
+
+**CSS, not GSAP** — `journal.tsx` stays a server component. The image gains a
+`<span className="block overflow-hidden">` wrapper to clip against, and
+`transition-[scale,filter] duration-300 ease-in-out group-hover:scale-110
+group-hover:grayscale motion-reduce:transition-none`.
+
+- **`duration-300 ease-in-out` is reused, not refitted.** It is the curve already
+  measured off the reference recording for these rows' slide and title fade.
+- **The transition list names `scale`, not `transform`.** Tailwind v4 emits
+  `scale-110` as the independent `scale` property — checked in the built
+  stylesheet, `.group-hover\:scale-110{…scale:var(--tw-scale-x) var(--tw-scale-y)}`
+  — the same mechanic already recorded for `translate-x-2.5`. A
+  `transition-[transform]` would silently not animate it.
+- `grayscale` compiles to the `filter` property, and Chrome interpolates from an
+  absent `filter` to `grayscale(100%)` as identity → 100 %.
+- v4 already wraps `group-hover:` in `@media (hover:hover)`, so nothing sticks on
+  touch and no guard is authored.
+
+Measured at 375 / 800 / 1280: rest `scale: none, filter: none` → hover
+`scale: 1.1, filter: grayscale(1)` → back to `none` on leave, with no layout
+shift (see the AE below).
+
+**`cards.tsx` / `ArticleCardStacked` was deliberately left alone**, the same call
+already recorded for the row hover: it carries this thumbnail on `/journal`, the
+article recent-articles band and `/design-system`, all fitted against their own
+comps, and no reference covers them.
+
+#### Impact
+
+`/` page heights are **unchanged at 6350 / 6006 / 5595** and the capabilities
+image box is geometrically identical to the parent build (`335×274+20+903` /
+`760×622+20+1125` / `588×481+24+1346`).
+
+**`magick compare -metric AE` at 5 % fuzz is `0` outside that box at all three
+breakpoints.** It is *not* 0 inside it, and that is correct rather than a
+regression: the parent build's cloth is static, this one's sits wherever the
+scrub puts it (1.0–1.3 % of the box's pixels). **Report this scoped, never as a
+bare page AE** — a whole-page number here reads as 1208 / 4876 / 3066 and means
+nothing.
+
+`/` is the only route whose prerendered HTML changes; its content diffs are the
+`overflow-hidden` + drift wrapper, the `<span>` around `583.7`, `tabular-nums` on
+both readouts, and the three journal image wrappers with their class strings.
+The other **15 pages are byte-identical** once the build id and the CSS chunk
+name are normalised, and **every page keeps an identical chunk set** — `/` still
+has 10 and the rest 9, so `CapabilityVisual` bundled into the existing page chunk
+and no GSAP leaked.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -2125,6 +2280,35 @@ while the glyphs have moved.
 **`playwright-core`'s npx cache hash changes.** Do not copy a path out of an
 older note — resolve it each session with
 `ls -d /home/gdk26/.npm/_npx/*/node_modules/playwright-core`.
+
+**There are two "Energy consumption" cards on `/`, and a `.first()` probe hits
+the wrong one.** The hero dashboard carries one and the Capabilities section
+carries the other, with the *same* markup — `svg[viewBox="0 0 24 24"]` matches
+six elements on the page and `span:text("Energy consumption") ~ svg` matches two.
+A probe of the capabilities card that silently read the hero's reported the
+asterisk at `transform: none` and the counter frozen, i.e. a working animation
+looking broken. Anchor on the section instead:
+
+```js
+const sec = [...document.querySelectorAll('section')]
+  .find(s => s.textContent.includes('Everything you need'));
+```
+
+**A page-wide `magick compare` is the wrong instrument once anything is
+scroll-linked.** A scrubbed element sits wherever the screenshot's scroll put it,
+so the whole-page `AE` is never 0 again and tells you nothing. Mask the animated
+box in *both* renders and compare the remainder, then score the box on its own:
+
+```
+magick new.png -fill black -draw "rectangle X1,Y1 X2,Y2" m-new.png   # same for base
+magick compare -metric AE -fuzz 5% m-new.png m-base.png null:        # must be 0
+magick compare -metric AE -fuzz 5% \( new.png -crop WxH+X+Y +repage \) \
+                                   \( base.png -crop WxH+X+Y +repage \) null:
+```
+
+Report the two numbers separately. Screenshot the *settled* state by stepping the
+scroll down the whole page (400px at a time) to fire every reveal, then returning
+to 0 and waiting, before the `fullPage` shot.
 
 **GSAP consumes an element's independent `rotate` / `translate` / `scale`.**
 `_parseTransform` folds them into one `transform` and sets all three to `none`
