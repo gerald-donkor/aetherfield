@@ -142,7 +142,10 @@ export function Capabilities() {
 /*  Principles — cream fabric section                                           */
 /* -------------------------------------------------------------------------- */
 
-const PRINCIPLES = [
+/* Exported: /about's "Our values" cards are these three items verbatim — same
+   titles, same bodies, same icons. Only the surrounding heading, section
+   background and card fill differ, so the data is shared rather than retyped. */
+export const PRINCIPLES = [
   {
     title: "Clarity drives action",
     body: "We believe better decisions start with better data—measured, visible, and trusted.",

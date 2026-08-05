@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
-/* Product and About stay on "#" until those pages exist — linking them at 404s
-   is worse than linking them nowhere. */
+/* Product stays on "#" until that page exists — linking it at a 404 is worse
+   than linking it nowhere. */
 const NAV_ITEMS = [
   { label: "Product", href: "#" },
   { label: "Journal", href: "/journal" },
-  { label: "About", href: "#" },
+  { label: "About", href: "/about" },
   { label: "Careers", href: "/careers" },
 ] as const;
 
@@ -119,12 +119,21 @@ export function SiteNav() {
 export function CtaBand({
   headline,
   action = "Request a demo",
+  tone = "surface",
 }: {
   headline: string;
   action?: string;
+  /* /about runs the band straight on the page background: the block above it is
+     already a surface panel, and two surfaces touching read as one. Defaults to
+     "surface" so every settled caller is untouched. */
+  tone?: "surface" | "white";
 }) {
   return (
-    <section className="flex flex-col items-center justify-center bg-surface px-6 py-[110px] text-center">
+    <section
+      className={`flex flex-col items-center justify-center px-6 py-[110px] text-center ${
+        tone === "white" ? "bg-white" : "bg-surface"
+      }`}
+    >
       <h2 className="display-fluid-h4 max-w-[980px] font-sans font-bold text-balance">
         {headline}
       </h2>
