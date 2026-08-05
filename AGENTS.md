@@ -670,14 +670,14 @@ components touched.
 
 - **`Seal` in `primitives.tsx`** — the company mark, one scaling SVG on
   `viewBox="0 0 283 144"`, nothing sized per breakpoint (the `JournalStamp`
-  discipline). Three ellipses share `cx 141`, `cy 72`, `ry 71.25` — so all three
-  are tangent at the same top and bottom vertices — with `rx` 137 / 95.75 /
-  58.75, `stroke-width 1.5` in `#2683EB`, which is exactly `--color-accent`, no
-  new token. The ® centres on x 134, under the wordmark rather than under the
-  ellipses, and is **drawn** (a ring plus a serif R) because Newsreader's ®
-  glyph is not fittable at this size. **The /about founder's-story mark is the
-  same seal rotated -6.6°, fitted against its own comp; that one stays local to
-  that page.**
+  discipline). Three ellipses share `cx 141.5`, `cy 72` and one `ry` — so all
+  three are tangent at the same top and bottom vertices — at `stroke-width 1.5`
+  in `#2683EB`, which is exactly `--color-accent`, no new token. The ® is
+  **drawn** (a ring plus a serif R) because Newsreader's ® glyph is not fittable
+  at this size. **The whole mark is rotated +7°** — see "The seal's tilt" below,
+  which supersedes the original upright numbers. **The /about founder's-story
+  mark is a different drawing at a different angle and stays local to that
+  page.**
 - **`ButtonLink` moved from a bare `<a>` to `next/link`** so in-app destinations
   get client-side navigation. `BUTTON_BASE` is shared with `Button`, so the
   rendered class attribute is byte-identical either way.
@@ -728,10 +728,10 @@ Deviations, all inherited:
 - **Both Apply buttons measure 96 wide against the comp's 100**, the mono cut.
   The right edge is exact at 800 and 1280 and the left edge is exact at 375, so
   the button is pinned on the side the comp pins it.
-- **The seal's ink is 276 wide against the comp's 283**; its height (144) and
-  position are exact. The 7px follows from the ellipse `rx` the prompt fitted
-  off the measured mid-height crossings; the bbox wants ~140.75. Within
-  measurement noise either way.
+- ~~**The seal's ink is 276 wide against the comp's 283.**~~ **Fixed** — see
+  "Fix — the seal's tilt" below. The 7px was the missing rotation, not
+  measurement noise; the seal now measures `283×144` against the comp's
+  `283×143`.
 
 **Flag:** **no comp gives either Apply button a destination.** The top one ships
 as a `ButtonLink` to `#apply` (the CTA block carries `id="apply"`) so it does
@@ -871,8 +871,8 @@ Deviations, all already on file:
   other two listings.
 - **Both Apply buttons measure 96 wide against the comp's 100** — the mono cut.
   x is exact at every size.
-- **The seal's ink is 276 wide against the comp's 282**, height and x exact —
-  the ~7px already recorded for job listing 1.
+- ~~**The seal's ink is 276 wide against the comp's 282**, height and x exact.~~
+  **Fixed** — the missing rotation; see "Fix — the seal's tilt" below.
 - **The tablet footer measures 479 tall against the comp's 510**, which is why
   the page runs −21 there while every row above the footer runs +10. Pre-
   existing and shared with every page.
@@ -886,6 +886,87 @@ is **identical** across this change apart from the CSS chunk name and the build
 id — verified against a worktree build of the parent commit. `/careers`' only
 diff is the UX Designer card's `<button>` becoming an
 `<a href="/job-listing/ux-designer">` with the same class string.
+
+### Fix — the seal's tilt (`Seal` in `primitives.tsx`)
+
+**The mark shipped upright; all three comps draw it rotated.** It is now one
+`<g transform="rotate(7 141.5 72)">` around a symmetric drawing, the discipline
+`AetherfieldSeal` on /about already follows. Nothing else on the page moved —
+the seal is absolutely positioned, so no layout row shifted.
+
+**How the first cut missed it.** The original fit measured the three ellipses'
+**mid-height chord** (absolute x 842/883/920 and 1039/1076/1117, symmetric about
+979.5) and read those half-chords as `rx`. **A mid-height chord cannot reveal a
+tilt**: an ellipse is centrally symmetric, so the chord at `y = cy` is centred on
+`cy` for *any* rotation. It only pins `a` once θ is known. The two "asymmetries"
+the fit then baked into the type — `data` set 31px below `tech`, the ® set 7px
+left of the wordmark's axis — were the rotation showing up in the one place the
+chord measurement could not explain it.
+
+**The measurement that does reveal it: the outer ellipse's extreme-x points.**
+Isolate the mark (`-fuzz 28%` around `#2683EB`, threshold, negate) and take the
+min/max-x columns' vertical midpoints. On all three desktop comps the ink bbox
+is `283×143` with the left tip at `y 87.5` and the right at `y 113` — **25.5px
+of drop across the mark**, i.e. right-hand side low, a *positive* (clockwise) SVG
+rotation. Tablet measures `222×113` with a 20.5px drop, the same slope at
+0.7845×. Comps 11, 12 and 13 are byte-identical here.
+
+**Solving for the geometry.** For semi-axes `a`, `b` rotated θ, the ink half-box
+is `√(a²cos²θ + b²sin²θ)` × `√(a²sin²θ + b²cos²θ)`, and the extreme-x point sits
+at `t` where `tan t = −(b/a)tanθ`. Those three equations in `a`, `b`, θ solve
+cleanly — but they are **sensitive**: ±1px on the measured tip drop moves θ by
+±0.5° (12.0 → 6.43°, 12.75 → 6.81°, 13.5 → 7.20°). Two independent type
+constraints break the tie: un-rotating the fitted type so `tech` and `data` land
+on one line gives **7.25°**, and so `earth` and the ® land on one vertical axis
+gives **7.13°**. The mark therefore ships at **7°**, with `a` and `b` solved
+exactly there.
+
+Shipped numbers, all on `cx 141.5`, `cy 72`, `ry 69.13`:
+
+| | outer | middle | inner |
+| --- | --- | --- | --- |
+| comp extreme-x (local) | 29 | 72.5 | 109.5 |
+| `rx` | 141.55 | 97.11 | 59.60 |
+| predicted mid-height chord | 138.5 | 96.4 | 59.7 |
+| measured mid-height chord | 137.5 | 96.5 | 59.5 |
+
+The last two rows are the check, not the fit: the chord the first cut measured
+falls out of the rotated solution to within a pixel, so both readings of the comp
+are satisfied at once.
+
+**The type is symmetric in the unrotated frame**, which is the tell that the comp
+is one rigid rotation rather than a hand-tilted ellipse set. Un-rotating the
+previously fitted anchors by −7° about `(141.5, 72)` puts `earth` at x 140.87,
+the ® at 140.64, `Aether` at 141.64 and `field` at 141.83 — one axis, ~141.5 —
+and `tech`/`data` at y 76.94 / 78.04, one line. It also independently confirms
+the wordmark: the comp sets `field`'s ink centre **3px left of `Aether`'s**
+(168.5 against 171.5), and 26px of line pitch × sin 7° = 3.17. The first cut had
+both at the same x, so `field` was ~3.5px right of the comp. Shipped anchors:
+`tech (18.8, 77.5)`, `data (264.2, 77.5)`, `earth (141.5, 21.7)`,
+`Aether (141.5, 64.9)`, `field (141.5, 91.1)`, ® ring `(141.5, 126.5)`.
+
+**The tablet width is now `222px`, not `223px`.** The upright mark drew 276 ink
+in a 283 box, so the tablet width was padded to make the ink land near the comp's
+221. The rotated mark's ink fills its box exactly, so the width *is* the ink
+width, and the comp measures `222×113`. `lg:w-[283px]` is unchanged.
+
+#### Measured against the comps
+
+| | desktop comp → render | tablet comp → render |
+| --- | --- | --- |
+| seal box | `283×143+839+1399` → `283×144+838+1404` | `222×112+572+1524` → `222×113+572+1509` |
+| tip drop | 25.5 → **25.5** | 20.5 → **21.0** |
+
+**Size is exact at both breakpoints and tablet x is exact** (desktop x is 1px,
+inside the `Container` gutter already on file). The previously recorded −7px on
+the seal's width is gone — it was the missing rotation, not measurement noise, so
+strike that line from job listing 1's deviation list. A channel overlay of render
+against comp at `300x160+830` traces both marks within 1–2px everywhere, with the
+® landing exactly. Vertical placement is unchanged from the bottom-anchored fit
+(`+1404` against `+1399`); that was not touched.
+
+Only `/job-listing/[slug]` renders `Seal`, so `/`, `/journal`, `/about`,
+`/careers`, `/design-system` and the articles are untouched by this change.
 
 ## About page (`/about`)
 
@@ -1227,6 +1308,30 @@ two crops so the text is legible in one pass.
 **A new article that reuses `/article/[slug]` is a data change**: one
 `ARTICLE_BODIES` key plus one generated hero. Reach for new components only when
 the comp shows an element the route does not already render.
+
+**Measuring an ellipse from a comp: use the extreme-x columns, never the
+mid-height chord.** The chord at `y = cy` is centred for *any* rotation, so it
+can never reveal a tilt — it reads a rotated ellipse as an upright one with a
+smaller `rx`, which is exactly how the job-listing `Seal` shipped upright. Take
+the ink bbox and the vertical midpoints of the min-x and max-x columns instead;
+a drop between the two tips *is* the tilt. One command:
+
+```
+magick <img> -crop WxH+X+Y +repage -alpha off \
+  -fuzz 28% -fill white +opaque '#2683EB' -fill black -opaque '#2683EB' \
+  -colorspace Gray -threshold 50% -negate txt:- \
+  | awk -F'[,:( ]+' 'NR>1 && $3>200 {print $1, $2}' \
+  | awk '{if(NR==1||$1<a)a=$1; if($1>b)b=$1
+          if(!($1 in m)||$2<m[$1])m[$1]=$2; if(!($1 in M)||$2>M[$1])M[$1]=$2}
+         END{printf "w %d  Ltip %.1f  Rtip %.1f  drop %.1f\n", b-a+1,
+             (m[a]+M[a])/2, (m[b]+M[b])/2, (m[b]+M[b])/2-(m[a]+M[a])/2}'
+```
+
+Then solve `hw = √(a²cos²θ + b²sin²θ)`, `hh = √(a²sin²θ + b²cos²θ)` and the tip
+offset for `a`, `b`, θ. **θ is sensitive** — ±1px of drop is ±0.5° — so confirm
+it against type landmarks (labels that should sit on one line, or on one axis)
+before shipping a number. **A `-fx` mask over a whole page screenshot picks up
+the sky and the accent links**; always crop to the mark first.
 
 **Fitting a heading's top padding needs an ink-row profile, not a box list.**
 Connected components gives card boxes but not a cap top. Count ink pixels per

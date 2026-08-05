@@ -24,16 +24,35 @@ export function Wordmark({ className = "" }: { className?: string }) {
  * on /journal: nothing inside it is sized per breakpoint, so the desktop and
  * tablet comps agree without a second set of numbers.
  *
- * Fitted against `11-job-listing1/screen-sizes/Desktop.png`, where the mark's
- * bbox is `283×144+839+1399` (isolated with `-fx "(b-r)>0.15?1:0"`). In local
- * coordinates the three ellipses share `cx 141`, `cy 72` and `ry 71.25` — their
- * mid-height crossings sit at absolute x 842/883/920 and 1039/1076/1117, all
- * about the same centre 979.75 — giving `rx` 137 / 95.75 / 58.75. The ® centres
- * on x 134, under the wordmark rather than under the ellipses, and is drawn
- * rather than set as a glyph: Newsreader's ® is not fittable at this size.
+ * **The mark is drawn symmetric and rotated +7°** — clockwise, right-hand side
+ * low. Everything inside the `<g>` shares one axis (`x 141.5`) and one centre
+ * (`141.5, 72`); the tilt is the single `rotate(7 141.5 72)` on the group, the
+ * same discipline `AetherfieldSeal` on /about follows (that mark is a different
+ * drawing at a different angle and stays local to that page).
  *
- * The /about founder's-story mark is the same seal drawn rotated -6.6°, fitted
- * against its own comp; that one stays local to that page.
+ * Fitted against `11-job-listing1/screen-sizes/Desktop.png`, where the mark's
+ * bbox is `283×144+839+1399`; comps 12 and 13 measure identically, as does the
+ * tablet artboard at `222×113` (= 0.7845×, which is why the tablet width is
+ * authored as `222px`).
+ *
+ * The rotation is what the ink bbox and the tips demand: the outer ellipse's
+ * extreme-x points sit 25.5px apart vertically (left `y 87.5`, right `y 113`)
+ * inside a 283×143 ink box. Solving `hw = √(a²cos²θ + b²sin²θ)`,
+ * `hh = √(a²sin²θ + b²cos²θ)` and the tip offset gives `θ ≈ 6.8°`; the type
+ * landmarks give 7.1–7.25° (tech/data level, earth/® on one axis), so the mark
+ * ships at **7°** with `a`/`b` solved exactly there: `ry 69.13`, `rx` 141.55 /
+ * 97.11 / 59.60 from each ellipse's own extreme-x (x 29 / 72.5 / 109.5 local).
+ *
+ * **A mid-height chord is not `rx` once the ellipse is tilted**, which is how
+ * the first cut of this mark came out upright: the chord at `y = cy` is centre-
+ * symmetric for *any* rotation, so measuring it can never reveal the tilt. It
+ * only pins `a` once θ is known — and it does check out here (predicted 138.5 /
+ * 96.4 / 59.7 against the measured 137.5 / 96.5 / 59.5).
+ *
+ * Two "asymmetries" the first cut baked into the type are also just the
+ * rotation, and are gone: `data` sitting 31px below `tech`, and the ® sitting
+ * 7px left of the wordmark's axis. Un-rotated, all four land on one axis and
+ * tech/data on one line.
  */
 export function Seal({ className = "" }: { className?: string }) {
   const serif = { fontFamily: "var(--font-serif)" } as const;
@@ -47,60 +66,68 @@ export function Seal({ className = "" }: { className?: string }) {
       role="img"
       aria-label="Aetherfield — tech, earth, data"
     >
-      <g stroke="currentColor" strokeWidth="1.5">
-        <ellipse cx="141" cy="72" rx="137" ry="71.25" />
-        <ellipse cx="141" cy="72" rx="95.75" ry="71.25" />
-        <ellipse cx="141" cy="72" rx="58.75" ry="71.25" />
-      </g>
-      <g fill="currentColor">
-        <text x="19.5" y="62" textAnchor="middle" fontSize="15" style={serif}>
-          tech
-        </text>
-        <text x="147" y="22" textAnchor="middle" fontSize="15" style={serif}>
-          earth
-        </text>
-        <text x="263" y="93" textAnchor="middle" fontSize="15" style={serif}>
-          data
-        </text>
+      <g transform="rotate(7 141.5 72)">
+        <g stroke="currentColor" strokeWidth="1.5">
+          <ellipse cx="141.5" cy="72" rx="141.55" ry="69.13" />
+          <ellipse cx="141.5" cy="72" rx="97.11" ry="69.13" />
+          <ellipse cx="141.5" cy="72" rx="59.6" ry="69.13" />
+        </g>
+        <g fill="currentColor">
+          <text x="18.8" y="77.5" textAnchor="middle" fontSize="15" style={serif}>
+            tech
+          </text>
+          <text x="141.5" y="21.7" textAnchor="middle" fontSize="15" style={serif}>
+            earth
+          </text>
+          <text
+            x="264.2"
+            y="77.5"
+            textAnchor="middle"
+            fontSize="15"
+            style={serif}
+          >
+            data
+          </text>
+          <text
+            x="141.5"
+            y="64.9"
+            textAnchor="middle"
+            fontSize="26"
+            fontWeight="700"
+            style={sans}
+          >
+            Aether
+          </text>
+          <text
+            x="141.5"
+            y="91.1"
+            textAnchor="middle"
+            fontSize="26"
+            fontWeight="700"
+            style={sans}
+          >
+            field
+          </text>
+        </g>
+        {/* Drawn ®: a ring plus a serif R, so its size and baseline are fittable. */}
+        <circle
+          cx="141.5"
+          cy="126.5"
+          r="7.6"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
         <text
-          x="143"
-          y="65"
+          x="141.5"
+          y="131"
           textAnchor="middle"
-          fontSize="26"
-          fontWeight="700"
-          style={sans}
+          fontSize="11"
+          fill="currentColor"
+          style={serif}
         >
-          Aether
-        </text>
-        <text
-          x="143"
-          y="91"
-          textAnchor="middle"
-          fontSize="26"
-          fontWeight="700"
-          style={sans}
-        >
-          field
+          R
         </text>
       </g>
-      {/* Drawn ®: a ring plus a serif R, so its size and baseline are fittable. */}
-      <circle
-        cx="134"
-        cy="126"
-        r="7.6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <text
-        x="134"
-        y="130.5"
-        textAnchor="middle"
-        fontSize="11"
-        fill="currentColor"
-        style={serif}
-      >
-        R
-      </text>
     </svg>
   );
 }
@@ -192,12 +219,34 @@ export function LinkButton({
       {...props}
     >
       {children}
-      <span
+      {/* Drawn, not the Unicode glyph: Archivo has no "→", so a text arrow is
+          served by whatever fallback the browser picks and its shape differs
+          machine to machine (the reference screenshot's 12x9 chevron renders as
+          a 15x6 flat dart in headless Chromium). Same rule as the Seal's ® and
+          the job-listing bullets.
+
+          The viewBox is the ink box, so the *stroke's* outer edges — not the
+          paths — fill 0..12 x 0..9. Shaft centre y 5, not 4.5: the stroke then
+          spans 4..6 and lands on two whole device pixels, where 4.5 spreads it
+          over three at 50 % and the shaft renders 3px thick. The chevron is
+          symmetric about 4.5 with its vertex at x 10.6, whose 45deg miter tip
+          reaches x 12.01 — that, not the shaft, is what makes the ink 12 wide.
+          The arms overrun the top and bottom edges and are clipped by the
+          viewport, which squares off their butt caps the way the reference
+          draws them. Measured off the screenshot's ink map. */}
+      <svg
         aria-hidden
+        viewBox="0 0 12 9"
+        width="12"
+        height="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
         className="ml-1.5 inline-block transition-transform duration-200 group-hover:translate-x-1.5"
       >
-        →
-      </span>
+        <path d="M0 5h10.6" />
+        <path d="M6.3 0.2 10.6 4.5 6.3 8.8" />
+      </svg>
     </a>
   );
 }
