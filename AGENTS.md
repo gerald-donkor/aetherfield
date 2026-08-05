@@ -98,6 +98,67 @@ The mobile panel now overlays content instead of pushing it, so it is opaque
 `bg-white` and scrolls at `max-h-[calc(100dvh-60px)]`. Items, separators and
 CTA are unchanged.
 
+### The "Get started" arrow is drawn, not a glyph
+
+`LinkButton` in `primitives.tsx` used to render `→` as text. **Archivo has no
+`→`**, so the shape came from whatever fallback the browser picked and differed
+machine to machine: the same markup at the same 1262-wide viewport gives a
+**12×9** chevron in the reference screenshot and a **15×6** flat dart in
+headless Chromium. It is now an inline SVG, the rule this project already
+follows wherever a glyph is not fittable (the `Seal`'s ®, the job-listing
+bullets, the dashed card frame).
+
+The target ink map, off `Screenshot_20260805_105535.png` at threshold 60 %
+(`#` = ink, rows and columns local to the arrow's own 12×9 ink box):
+
+```
+0 .....###....
+1 ......###...
+2 .......###..
+3 ........###.
+4 ############
+5 ###########.
+6 .......###..
+7 ......###...
+8 .....###....
+```
+
+**Three numbers are load-bearing, and none of them is the path.** The viewBox is
+the *ink* box, so it is the 2px stroke's outer edges that must fill 0…12 × 0…9:
+
+- **The shaft is centred on y 5, not on the box's 4.5.** At 4.5 the stroke spans
+  3.5…5.5, lands 50 % on three device pixel rows, and renders **3px thick** —
+  measured, not predicted. At 5 it spans 4…6 and gives the two rows the
+  reference draws. The chevron stays symmetric about 4.5, so shaft and vertex
+  sit half a pixel apart; the reference's own map has exactly that offset (arms
+  symmetric about row 10, shaft on rows 10–11).
+- **The 12th column comes from the miter, not the shaft.** The vertex is at
+  x 10.6 and the 90° miter tip runs to x 12.01. A shaft drawn to x 12 instead
+  would blunt the tip, which the map shows as a single column.
+- **The arms overrun the box and are clipped by the viewport.** Their butt caps
+  are perpendicular to a 45° line, so an endpoint inside the box leaves a
+  diagonal corner and the top row renders 1px wide instead of 3. Ending them at
+  y 0.2 / 8.8 lets the SVG clip square, as the reference draws it. Everything
+  past ±0.707 of the edge is clipped anyway, so the exact overrun does not
+  matter — 0.4 and 0.2 measure identically.
+
+Measured on the production render at 1262, `/about`: **12 × 9 with a 2px shaft**,
+and every row matches the map above except the two extreme corners, which come
+out 2px wide against the reference's 3 — one pixel of antialiasing on a
+reference that is itself a rasterised font glyph. Vertically the arrow's ink
+centres 1px below the nav text's cap mid, against the reference's 0.5px; the
+ink box aligns without a `-mt` nudge, so none is authored. The `ml-1.5` gap and
+the `group-hover:translate-x-1.5` slide are unchanged — hover measures 6.00px.
+
+`/`, `/journal`, `/careers`, `/about` and `/design-system` are **byte-identical
+prerendered HTML apart from the arrow element itself** (verified against a build
+of the same tree with the `<span>` restored, normalising the CSS chunk names and
+the build id). `/design-system` carries two, the navbar's and the sample's.
+
+**Still outstanding:** `app/_components/about/sections.tsx:56` ("Adjust your
+targets →") sets the same bare glyph and carries the same fallback risk. It is
+not the navbar, so it was left alone.
+
 ## Journal index (`/journal`)
 
 `app/journal/page.tsx` with its sections in `app/_components/journal/sections.tsx`.
