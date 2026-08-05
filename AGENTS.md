@@ -751,8 +751,8 @@ repeats them verbatim; keep the two in step. Adding the key is what puts
 `product-manager` in `WRITTEN_JOB_SLUGS`, which turns the `/careers` card's
 action into a `ButtonLink` and adds the slug to `generateStaticParams`.
 
-**`/job-listing/ux-designer` is now the one slug still 404ing**, until
-`12-job-listing2` is built.
+**`/job-listing/ux-designer` was the one slug still 404ing** at the time this
+was written; it is built below.
 
 Prerendered HTML is **byte-identical** for `/`, `/journal`, all six articles,
 `/design-system`, `/about` and `/job-listing/data-scientist` — verified by
@@ -809,6 +809,83 @@ Deviations, all inherited or comp-side:
 
 Everything else on desktop is line-for-line: identical headings, identical body
 line counts and wraps through both prose sections, identical bullet order.
+
+### Role 2 — UX Designer (`/job-listing/ux-designer`)
+
+One `JOB_BODIES` key from `public/assets/pages/12-job-listing2/screen-sizes/`
+plus **one shared-component fix** — the seal's anchoring. With it, all three real
+roles have prose, so no `/careers` role card links at a 404; the
+open-application card has no listing page by design and keeps its inert action.
+
+The comp is the same page at the same geometry: card `820×1522+230+204`, rules
+at y **459** and **1487**, footer top **1846** — the same 120px card→footer gap.
+`lede` is omitted so it falls back to `Job.body`. Company description is verbatim
+identical to the Data Scientist entry and is **transcribed again rather than
+shared**: `JOB_BODIES` is per-slug copy, and a shared constant would invite
+editing one role's boilerplate and silently moving the other's.
+
+**"Company benefits" is a paragraph here, not a list** — the only shape
+difference across the three listings, and the whole reason for the fix below.
+
+**The `Seal` is bottom-anchored to the prose block, not top-anchored to the last
+list.** It used to render *inside* the `items` branch of the last section, so on
+this comp — whose last section has `body` — it would not have rendered at all.
+It now sits once, outside the `sections.map`, in a single `relative` wrapper
+around the whole prose block, at `bottom-[55px] … lg:bottom-[24px]`.
+
+**Bottom-anchoring is measured, not chosen.** Seal bottom minus closing rule is
+**−73px on all three desktop comps** (11: 1542/1615, 12: 1414/1487, 13:
+1734/1807) even though the prose above it differs in length and in shape. Top-
+anchoring cannot fit that: held at the old `top-[36px]` against comp 12's last
+*list* it lands ~180px high. `left-[76.8%]`, the widths, `pointer-events-none`,
+`hidden sm:block` and the spill past the card's right edge are unchanged — the
+seal is still drawn outside the card, so nothing in that chain may become
+`overflow-hidden`.
+
+The move is worth ~4px on the settled Data Scientist page and improves it:
+desktop `+841+1403` → `+841+1404` against the comp's `+840+1399`, tablet
+`+574+1505` → `+575+1509` against `+572+1524`.
+
+#### Measured against the comps
+
+| | 1280 | 800 | 375 |
+| --- | --- | --- | --- |
+| card | `820×1522+230+204` → `820×1533+230+204` | `720×1666+40+204` → `720×1677+40+204` | `335×2113+20+166` → `335×2618+20+166` |
+| seal | `282×143+840+1271` → `276×144+841+1280` | `221×112+572+1428` → `217×113+575+1437` | not drawn |
+| top Apply | `100×38+910+244` → `96×38+914+244` | `100×38+620+244` → `96×38+624+244` | `100×38+44+402` → `96×38+44+438` |
+| closing Apply | `122×46+579+1640` → `+1651` | `122×46+339+1784` → `+1794` | `121×46+127+2201` → `122×46+127+2714` |
+| footer top | 1846 → **1857** | 1990 → **2000** | 2399 → 2904 |
+| page height | 2434 → 2456 | 2500 → 2479 | 2781 → 3255 |
+
+Card x, y and width are **exact at all three**, and the card→footer gap holds at
+120px in comp and render at every size.
+
+Deviations, all already on file:
+
+- **Desktop and tablet run +11**, one line's worth, and it lands on every row
+  below it — card bottom, closing Apply, footer. The mono/serif cuts, not a
+  spacing error.
+- **Mobile runs +505** on the fixed 20px `--text-p1` / `--text-p2` floor, which
+  also puts the mobile top Apply 36px low (`+438` against `+402`) from one extra
+  lede line above it. Same call as `/journal`, articles 1–6, `/careers` and the
+  other two listings.
+- **Both Apply buttons measure 96 wide against the comp's 100** — the mono cut.
+  x is exact at every size.
+- **The seal's ink is 276 wide against the comp's 282**, height and x exact —
+  the ~7px already recorded for job listing 1.
+- **The tablet footer measures 479 tall against the comp's 510**, which is why
+  the page runs −21 there while every row above the footer runs +10. Pre-
+  existing and shared with every page.
+
+**Flag, unchanged:** no comp gives either Apply button a destination, so this
+role inherits the same `#apply` top link and inert closing button. Both still
+want a real application URL or `mailto:`.
+
+Prerendered HTML for `/`, `/journal`, `/design-system`, `/about` and the articles
+is **identical** across this change apart from the CSS chunk name and the build
+id — verified against a worktree build of the parent commit. `/careers`' only
+diff is the UX Designer card's `<button>` becoming an
+`<a href="/job-listing/ux-designer">` with the same class string.
 
 ## About page (`/about`)
 

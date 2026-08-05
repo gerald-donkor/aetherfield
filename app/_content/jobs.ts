@@ -149,11 +149,46 @@ export const JOB_BODIES: Record<string, JobBody> = {
     ],
     cta: "Ready to help build the future of climate intelligence?",
   },
+  // Transcribed from `public/assets/pages/12-job-listing2/screen-sizes/Desktop.png`.
+  // "Company description" is verbatim identical to the Data Scientist entry and
+  // is transcribed again rather than shared: JOB_BODIES is per-slug copy, and a
+  // shared constant would invite editing one role's boilerplate and silently
+  // moving the other's. "Company benefits" is a paragraph here, not a list —
+  // the only shape difference between the two listings.
+  "ux-designer": {
+    sections: [
+      {
+        heading: "Company description",
+        body: "At Aetherfield, we build software that empowers companies to lead with climate accountability. Our platform helps sustainability and operations teams make sense of complex environmental data—transforming emissions, waste, and energy metrics into measurable, meaningful action. We're a mission-driven team of technologists, designers, and scientists working to accelerate the shift toward a low-carbon future.",
+      },
+      {
+        heading: "About the role",
+        body: "As a UX Designer at Aetherfield, you'll help turn raw climate data into clear, confident decision-making tools. You'll design end-to-end experiences that make complex systems feel approachable—shaping everything from data visualization to system flows to interaction patterns. Your work will help enterprise users feel informed, empowered, and aligned in their climate action.",
+      },
+      {
+        heading: "Requirements",
+        items: [
+          "3+ years of experience designing for web-based products or platforms",
+          "Portfolio that demonstrates systems thinking, design craft, and user empathy",
+          "Experience designing data-dense interfaces or enterprise tools",
+          "Strong skills in Figma (or equivalent), plus familiarity with accessible design practices",
+          "Ability to partner closely with product, data, and engineering teams",
+          "Curiosity about climate systems and care for usability in high-stakes workflows",
+        ],
+      },
+      {
+        heading: "Company benefits",
+        body: "This is a contract position and does not include employee benefits. However, you'll work closely with our core team, have flexible hours, and contribute meaningfully to high-impact climate work alongside mission-driven collaborators.",
+      },
+    ],
+    cta: "Ready to help build the future of climate intelligence?",
+  },
 };
 
-/** Only slugs with prose are routed; UX Designer 404s by design until
-    `12-job-listing2` is built. Same rule `WRITTEN_SLUGS` applies to the
-    journal. */
+/** All three real roles now have prose, so none of the `/careers` role cards
+    links at a 404. The open-application card has no listing page by design and
+    keeps its inert action. Derived from `JOB_BODIES` so the two cannot drift —
+    the same rule `WRITTEN_SLUGS` applies to the journal. */
 export const WRITTEN_JOB_SLUGS = Object.keys(JOB_BODIES);
 
 export function getJob(slug: string) {

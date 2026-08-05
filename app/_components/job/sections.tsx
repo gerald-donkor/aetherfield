@@ -110,31 +110,33 @@ export function JobListing({ job, body }: { job: Job; body: JobBody }) {
 
       <Rule />
 
-      {body.sections.map((section, i) => (
-        <section key={section.heading} className={i > 0 ? "mt-[52px]" : "mt-12"}>
-          <h2 className="font-sans text-p1 font-bold">{section.heading}</h2>
-          {section.body ? (
-            <p className="mt-7 font-serif text-p2 leading-[28px]">
-              {section.body}
-            </p>
-          ) : null}
-          {section.items ? (
-            /* The seal hangs off the last section, overflowing the card's right
-               edge onto the sky — 1121 against a card right of 1050 at 1280.
-               That is the design, so nothing above this may be clipped. */
-            <div className="relative">
-              <Bullets items={section.items} />
-              {i === body.sections.length - 1 ? (
-                /* The comp puts the seal's top 31 (tablet) / 34 (desktop)
-                   below item 1's *cap top*; these are 5 more, because the
-                   offset is against the list's border box and the cap sits
-                   5px down inside a 28px line box. */
-                <Seal className="pointer-events-none absolute top-[36px] left-[76.8%] hidden w-[223px] sm:block lg:top-[39px] lg:w-[283px]" />
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-      ))}
+      {/* The seal hangs off the end of the prose, overflowing the card's right
+          edge onto the sky — 1121 against a card right of 1050 at 1280. That is
+          the design, so nothing above this may be clipped. */}
+      <div className="relative">
+        {body.sections.map((section, i) => (
+          <section
+            key={section.heading}
+            className={i > 0 ? "mt-[52px]" : "mt-12"}
+          >
+            <h2 className="font-sans text-p1 font-bold">{section.heading}</h2>
+            {section.body ? (
+              <p className="mt-7 font-serif text-p2 leading-[28px]">
+                {section.body}
+              </p>
+            ) : null}
+            {section.items ? <Bullets items={section.items} /> : null}
+          </section>
+        ))}
+        {/* Bottom-anchored, and measured: the seal follows the end of the prose,
+            not any one section's shape. Comp 11's last section is a list and
+            comp 12's is a paragraph, yet both put the seal's bottom 74
+            (desktop) / 107 (tablet) above the closing rule — i.e. ~24 / ~55
+            above the prose block's bottom edge once the Rule's own mt-12 is
+            taken off. Top-anchoring cannot fit both: held against comp 12's
+            last list it lands 180px high. */}
+        <Seal className="pointer-events-none absolute bottom-[55px] left-[76.8%] hidden w-[223px] sm:block lg:bottom-[24px] lg:w-[283px]" />
+      </div>
 
       <Rule />
 
