@@ -219,34 +219,12 @@ export function LinkButton({
       {...props}
     >
       {children}
-      {/* Drawn, not the Unicode glyph: Archivo has no "→", so a text arrow is
-          served by whatever fallback the browser picks and its shape differs
-          machine to machine (the reference screenshot's 12x9 chevron renders as
-          a 15x6 flat dart in headless Chromium). Same rule as the Seal's ® and
-          the job-listing bullets.
-
-          The viewBox is the ink box, so the *stroke's* outer edges — not the
-          paths — fill 0..12 x 0..9. Shaft centre y 5, not 4.5: the stroke then
-          spans 4..6 and lands on two whole device pixels, where 4.5 spreads it
-          over three at 50 % and the shaft renders 3px thick. The chevron is
-          symmetric about 4.5 with its vertex at x 10.6, whose 45deg miter tip
-          reaches x 12.01 — that, not the shaft, is what makes the ink 12 wide.
-          The arms overrun the top and bottom edges and are clipped by the
-          viewport, which squares off their butt caps the way the reference
-          draws them. Measured off the screenshot's ink map. */}
-      <svg
+      <span
         aria-hidden
-        viewBox="0 0 12 9"
-        width="12"
-        height="9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
         className="ml-1.5 inline-block transition-transform duration-200 group-hover:translate-x-1.5"
       >
-        <path d="M0 5h10.6" />
-        <path d="M6.3 0.2 10.6 4.5 6.3 8.8" />
-      </svg>
+        →
+      </span>
     </a>
   );
 }
