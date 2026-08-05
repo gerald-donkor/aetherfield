@@ -4,6 +4,7 @@ import type { Article } from "../_content/articles";
 import {
   ArrowUpRight,
   Button,
+  ButtonLink,
   IconCircle,
   Meta,
   Placeholder,
@@ -140,6 +141,7 @@ export function JobCard({
   location,
   body,
   action = "View role",
+  href,
   open = false,
 }: {
   role: string;
@@ -147,6 +149,9 @@ export function JobCard({
   location: string;
   body: string;
   action?: string;
+  /** Destination for the action. Without one it stays the inert button the
+      styleguide and the open-application card render. */
+  href?: string;
   /** Dashed outline over the page instead of a white fill — the open
       application card at the foot of `/careers`. */
   open?: boolean;
@@ -187,9 +192,15 @@ export function JobCard({
           <p className="mt-5 max-w-[640px] font-serif text-p2">{body}</p>
         </div>
         {/* Desktop: pinned top-right. Mobile: falls to the bottom-left. */}
-        <Button size="compact" className="mt-6 shrink-0 sm:mt-0">
-          {action}
-        </Button>
+        {href ? (
+          <ButtonLink size="compact" href={href} className="mt-6 shrink-0 sm:mt-0">
+            {action}
+          </ButtonLink>
+        ) : (
+          <Button size="compact" className="mt-6 shrink-0 sm:mt-0">
+            {action}
+          </Button>
+        )}
       </div>
     </article>
   );

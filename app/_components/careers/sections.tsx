@@ -1,5 +1,5 @@
 import { JobCard } from "../cards";
-import { JOBS } from "../../_content/jobs";
+import { JOBS, WRITTEN_JOB_SLUGS } from "../../_content/jobs";
 
 /* -------------------------------------------------------------------------- */
 /*  Masthead — two centred lines, serif over sans                               */
@@ -42,6 +42,14 @@ export function JobList() {
             location={job.location}
             body={job.body}
             action={job.action}
+            /* Only roles whose listing is written get a link — the other two
+               comps are not built yet, and a link to a notFound() is worse than
+               an inert button. The same rule /journal uses for its cards. */
+            href={
+              WRITTEN_JOB_SLUGS.includes(job.slug)
+                ? `/job-listing/${job.slug}`
+                : undefined
+            }
             open={job.open}
           />
         </li>

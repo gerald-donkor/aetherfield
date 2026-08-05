@@ -597,6 +597,148 @@ file plus one comp artefact:
 mistake. The comp is the source of truth, so it ships; drop the line if the
 designer confirms.
 
+## Job listing page (`/job-listing/[slug]`)
+
+`app/job-listing/[slug]/page.tsx` with its sections in
+`app/_components/job/sections.tsx` and its prose in `app/_content/jobs.ts`.
+Comps: `public/assets/pages/11-job-listing1/screen-sizes/` (Data Scientist);
+`12-job-listing2` and `13-job-listing3` are the other two roles. Reuses
+`SiteNav`, `Container` and `SiteFooter`; **there is no `CtaBand`** — the closing
+call to action lives *inside* the white card, and the card runs into the footer
+exactly as `/careers` does. Layout only: no generated imagery, no `magick`. The
+only picture on the page is the seal, and it is drawn as SVG.
+
+**The whole page is one white card on the `hero-sky` shell `/careers` already
+uses** — `hero-sky -mt-[60px] pt-[60px] pb-[120px]` on `main` as a *sibling* of
+the header, for the reason recorded there (a wrapper round `SiteNav` unpins the
+sticky bar). The 120px foot is the same measured constant: the card→footer gap
+is 121px at 375, 800 *and* 1280.
+
+**The card is 335 / 720 / 820 wide, and tablet gutters are 40, not 20.** So the
+cap is authored at `md` as well as `lg` (`md:max-w-[720px] lg:max-w-[820px]`)
+rather than letting `Container` decide; mobile is the standard 335 + 20 and
+desktop centres 820 in the 1232 content box, landing on the comp's x 230.
+Padding is `p-6 sm:p-10` — 24 at 375, 40 at 800 and 1280, the same split
+`JobCard` measures. **The card must not be `overflow-hidden`**: the seal
+deliberately spills past its right edge onto the sky.
+
+**The top Apply button is absolutely positioned, not a flex row.** The comp runs
+the lede the full 740px content width *underneath* the button, not beside it;
+putting the two in one `sm:flex … justify-between` row shortens the measure to
+~600 and costs the lede a whole line — 24px that then propagates through the
+entire card, and moves the seal with it. So the button is
+`sm:absolute sm:top-10 sm:right-10` on a `relative` card, and drops back into
+flow (`mt-6`, left-aligned on the content edge) at 375, which is what the mobile
+comp draws.
+
+**Derived spacing, one set of numbers at all three sizes**: 48px above and below
+each rule, 52px between sections, 28px from a heading to its first line, 8px
+between list items (the comp's 36px item pitch minus the 28px line). Everything
+inside the card follows from these four — nothing else is fitted.
+
+**`@utility display-job-h2`** in `app/globals.css`, for the role title and the
+closing CTA heading: cap heights measure 17 / 22 / 28, i.e. exactly
+`display-fluid-h4`'s 24 / 30 / 40, but the leading is 24 / 32 / 39 against that
+utility's 1.1 (26.4 / 33 / 43.7). A separate utility rather than
+`display-fluid-h4` + `leading-*`, for the reason `display-careers-title`
+already records.
+
+**The meta line is serif, not the mono `Meta` component** the `/careers` cards
+use — verified on a 300 % crop of `Desktop.png -crop 400x80+265+240`. Set inline
+as `font-serif text-p2 text-muted` with the system middot.
+
+**The bullets are drawn.** Measured at 1280 the marker is a 4×4 dot 13px in from
+the content edge with the text at 31px, 12px below the line box top; `list-disc`
+cannot be pinned to that. So a `<span>` dot inside a real `ul`/`li`.
+
+### Data shape
+
+`Job` gains `slug` (the AGENTS.md slug rule: `"Data Scientist"` →
+`"data-scientist"`). Prose is a separate `JOB_BODIES` map, keyed by slug, for the
+reason `ARTICLE_BODIES` exists — `/careers` renders cards, not prose, and should
+not ship copy it never draws. `WRITTEN_JOB_SLUGS` feeds `generateStaticParams`;
+everything else `notFound()`s, so **`/job-listing/ux-designer` and
+`/job-listing/product-manager` 404 by design** until comps 12 and 13 are built.
+
+`JobBody.lede` is **optional and falls back to `Job.body`** — the comp's
+standfirst is the card body verbatim, so the two cannot drift.
+
+**Adding roles 2 and 3 is a pure data change**: one `JOB_BODIES` key each, no
+components touched.
+
+### Shared-component changes
+
+- **`Seal` in `primitives.tsx`** — the company mark, one scaling SVG on
+  `viewBox="0 0 283 144"`, nothing sized per breakpoint (the `JournalStamp`
+  discipline). Three ellipses share `cx 141`, `cy 72`, `ry 71.25` — so all three
+  are tangent at the same top and bottom vertices — with `rx` 137 / 95.75 /
+  58.75, `stroke-width 1.5` in `#2683EB`, which is exactly `--color-accent`, no
+  new token. The ® centres on x 134, under the wordmark rather than under the
+  ellipses, and is **drawn** (a ring plus a serif R) because Newsreader's ®
+  glyph is not fittable at this size. **The /about founder's-story mark is the
+  same seal rotated -6.6°, fitted against its own comp; that one stays local to
+  that page.**
+- **`ButtonLink` moved from a bare `<a>` to `next/link`** so in-app destinations
+  get client-side navigation. `BUTTON_BASE` is shared with `Button`, so the
+  rendered class attribute is byte-identical either way.
+- **`JobCard` gains optional `href`.** With one the action renders as
+  `ButtonLink`; without one it stays the inert `Button` it is today. `JobList`
+  passes an href **only for slugs in `WRITTEN_JOB_SLUGS`** — a link to a
+  `notFound()` is worse than an inert button, the same rule `/journal` uses.
+  Nothing else on `/careers` moves.
+
+`/`, `/journal`, `/article/[slug]` and `/design-system` are **byte-identical**
+prerendered HTML across this change (verified by diffing a build of `HEAD` in a
+worktree against the working tree, normalising chunk hashes). `/careers`'
+only diff is the Data Scientist card's `<button>` becoming an `<a>` with the
+same class string.
+
+### Measured against the comps
+
+| | 1280 | 800 | 375 |
+| --- | --- | --- | --- |
+| card | `820×1650+230+204` → `+1657` | `720×1762+40+204` → `+1748` | `335×2228+20+166` → `335×2746` |
+| seal | `283×144+839+1399` → `276×144+841+1403` | `223×113+571+1524` → `218×113+574+1505` | not drawn |
+| top Apply | `100×38+910+244` → `96×38+914+244` | — | `100×38+44+402` → `96×38+44+414` |
+| closing Apply | `122×46+579+1768` → `+1775` | — | — |
+| footer top | 1974 → **1981** | 2086 → **2072** | 2514 → 3032 |
+
+Card x, y and width are **exact at all three**. The desktop interior is exact
+too: every ink row — title, meta, both lede lines, the rule, all four headings,
+all eleven body lines, all thirteen bullet lines, both CTA lines and the button
+— lands within **7px**, most within 4, with identical line counts and identical
+wraps.
+
+Deviations, all inherited:
+
+- **Mobile runs +518.** The comp sets the mobile lede at pitch 22 and the body
+  at 25 (~17px type); `--text-p1` / `--text-p2` are a fixed 20px and every
+  settled page ships that way. Same call as `/journal`, articles 1–6 and
+  `/careers`.
+- **Tablet runs −14**, because the shipped Newsreader wraps the lede to two
+  lines where the comp takes three at the same 640px measure. The mirror image
+  of the wide-Archivo note, on the serif.
+- **The CTA heading breaks one word later** — "…build the future / of climate
+  intelligence?" against the comp's "…build the / future of climate
+  intelligence?". Both are two balanced centred lines; forcing the comp's break
+  needs a max-width inside a 2px window, so it is recorded, not chased.
+- **"Back to Careers" measures 165 wide against the comp's 142 / 142 / 131** —
+  the 20px `--text-p2` floor again. Its ink sits 2px high at all three sizes;
+  the card top below it is exact, so the padding is left alone.
+- **Both Apply buttons measure 96 wide against the comp's 100**, the mono cut.
+  The right edge is exact at 800 and 1280 and the left edge is exact at 375, so
+  the button is pinned on the side the comp pins it.
+- **The seal's ink is 276 wide against the comp's 283**; its height (144) and
+  position are exact. The 7px follows from the ellipse `rx` the prompt fitted
+  off the measured mid-height crossings; the bbox wants ~140.75. Within
+  measurement noise either way.
+
+**Flag:** **no comp gives either Apply button a destination.** The top one ships
+as a `ButtonLink` to `#apply` (the CTA block carries `id="apply"`) so it does
+something honest; the closing one ships inert, exactly as the `/careers`
+open-application card's "Apply now" does today. Both want a real application URL
+or `mailto:` once one exists.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is

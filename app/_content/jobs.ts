@@ -6,6 +6,8 @@
  * Straight apostrophes, per the convention the six articles already ship.
  */
 export type Job = {
+  /** Route key for `/job-listing/[slug]` — the role, slugified. */
+  slug: string;
   role: string;
   type: string;
   location: string;
@@ -18,6 +20,7 @@ export type Job = {
 
 export const JOBS: Job[] = [
   {
+    slug: "ux-designer",
     role: "UX Designer",
     type: "Contract",
     location: "San Francisco, CA",
@@ -25,6 +28,7 @@ export const JOBS: Job[] = [
     action: "View role",
   },
   {
+    slug: "data-scientist",
     role: "Data Scientist",
     type: "Full-time",
     location: "Denver, CO",
@@ -32,6 +36,7 @@ export const JOBS: Job[] = [
     action: "View role",
   },
   {
+    slug: "product-manager",
     role: "Product Manager",
     type: "Part-time",
     location: "Seattle, WA",
@@ -40,6 +45,7 @@ export const JOBS: Job[] = [
     action: "View role",
   },
   {
+    slug: "open-application",
     role: "Open application",
     // Shipped as drawn: the comp gives the open-application card a real role's
     // meta line. It reads like placeholder left in by mistake, but the comp is
@@ -51,3 +57,67 @@ export const JOBS: Job[] = [
     open: true,
   },
 ];
+
+/**
+ * Prose behind `/job-listing/[slug]`, kept out of `JOBS` for the reason
+ * `ARTICLE_BODIES` exists: `/careers` renders cards, not prose, and should not
+ * ship copy it never draws.
+ *
+ * Transcribed from `public/assets/pages/11-job-listing1/screen-sizes/Desktop.png`
+ * at 190 %. Straight apostrophes, per the convention the six articles ship.
+ */
+export type JobBody = {
+  /** Standfirst above the rule. The comp repeats the card body verbatim, so it
+      defaults to `Job.body` rather than being retyped — the two cannot drift. */
+  lede?: string;
+  sections: { heading: string; body?: string; items?: string[] }[];
+  /** Closing call to action, inside the card above the second Apply button. */
+  cta: string;
+};
+
+export const JOB_BODIES: Record<string, JobBody> = {
+  "data-scientist": {
+    sections: [
+      {
+        heading: "Company description",
+        body: "At Aetherfield, we build software that empowers companies to lead with climate accountability. Our platform helps sustainability and operations teams make sense of complex environmental data—transforming emissions, waste, and energy metrics into measurable, meaningful action. We're a mission-driven team of technologists, designers, and scientists working to accelerate the shift toward a low-carbon future.",
+      },
+      {
+        heading: "About the role",
+        body: "As a Data Scientist at Aetherfield, you'll help shape the analytical engine behind our platform. You'll collaborate with product and engineering teams to design models that interpret environmental impact, forecast future trends, and uncover actionable insights for our customers. Your work will directly influence how companies plan, report, and act on their sustainability strategies.",
+      },
+      {
+        heading: "Requirements",
+        items: [
+          "3+ years of experience in data science or applied analytics (Python, SQL, etc.)",
+          "Experience working with climate, sustainability, or supply chain datasets is a plus",
+          "Strong foundation in statistics and data modeling",
+          "Ability to communicate complex insights clearly to both technical and non-technical teams",
+          "Curiosity, clarity, and care in how you approach messy data",
+          "Passion for solving real-world problems with purpose and precision",
+        ],
+      },
+      {
+        heading: "Company benefits",
+        items: [
+          "Competitive salary and equity options",
+          "Flexible, hybrid work environment",
+          "Generous PTO and paid volunteer days",
+          "Annual sustainability stipend",
+          "Team offsites and climate-focused retreats",
+          "A mission-first culture that values clarity, impact, and integrity",
+        ],
+      },
+    ],
+    cta: "Ready to help build the future of climate intelligence?",
+  },
+};
+
+/** Only slugs with prose are routed; the other two roles 404 by design until
+    `12-job-listing2` and `13-job-listing3` are built. Same rule
+    `WRITTEN_SLUGS` applies to the journal. */
+export const WRITTEN_JOB_SLUGS = Object.keys(JOB_BODIES);
+
+export function getJob(slug: string) {
+  return JOBS.find((job) => job.slug === slug);
+}

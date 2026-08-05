@@ -118,6 +118,27 @@ body {
   }
 }
 
+/* Job listing headings — the role title at the head of the card and the closing
+   call to action. Cap heights measure 17 / 22 / 28 across the three comps, i.e.
+   exactly display-fluid-h4's 24 / 30 / 40; only the leading differs, measured
+   24 / 32 / 39 against that utility's 1.1 (26.4 / 33 / 43.7). A separate
+   utility rather than display-fluid-h4 plus a leading-* override, for the
+   reason display-careers-title already records: two same-weight utility classes
+   on one element leave the winner to source order. */
+@utility display-job-h2 {
+  font-size: 24px;
+  line-height: 24px;
+  letter-spacing: -0.01em;
+  @media (width >= 768px) {
+    font-size: 30px;
+    line-height: 32px;
+  }
+  @media (width >= 1024px) {
+    font-size: clamp(30px, 3.1vw, 40px);
+    line-height: 39px;
+  }
+}
+
 /* "Recent articles" band heading. A second utility rather than an extension of
    display-article-title: the two step differently (32 / 50 / 60 against
    36 / 64 / 80), so folding them together would need a modifier per breakpoint
