@@ -6,6 +6,14 @@ import { DUR, EASE, gsap, useGSAP } from "../motion/register";
 /** The `md:-rotate-[8deg]` class, restated for the tween's terminus. */
 const REST_ROTATION = -8;
 
+/* Hover: the enter pose, revisited. "45 degrees above" is read the way prompt
+   20 read "45 degrees" — as an *on-screen* angle — so hovering tilts the mark
+   back out to the −45° it entered from, lifting its right-hand tip above the
+   resting line, with a reduced slice of the same rotationY so it leans rather
+   than replays the flip. See AGENTS.md for the two rejected readings. */
+const HOVER_ROTATION = -45;
+const HOVER_ROTATION_Y = 12;
+
 /**
  * The Journal mark: a flattened diamond with the masthead set inside it.
  *
@@ -35,7 +43,7 @@ export function JournalMark() {
   const root = useRef<HTMLDivElement>(null);
 
   useGSAP(
-    () => {
+    (_context, contextSafe) => {
       const mm = gsap.matchMedia();
 
       mm.add(
@@ -48,11 +56,16 @@ export function JournalMark() {
           // The mark is `display: none` below `md`, so this is a tablet-and-up
           // effect and nothing should be tweened at 375.
           isTabletUp: "(min-width: 768px)",
+          // Nothing may stick on a touch device. Tailwind v4 wraps its own
+          // `hover:` rules in this query for free; a JS pointer handler gets no
+          // such wrapper, so the query is authored here explicitly.
+          hasHover: "(hover: hover)",
         },
         (context) => {
-          const { reduceMotion, isTabletUp } = context.conditions as {
+          const { reduceMotion, isTabletUp, hasHover } = context.conditions as {
             reduceMotion: boolean;
             isTabletUp: boolean;
+            hasHover: boolean;
           };
 
           // The hidden start state lives in globals.css so the prerendered page
@@ -70,6 +83,47 @@ export function JournalMark() {
           // −45° and unwinds in one continuous direction onto its resting −8°.
           // See AGENTS.md for the two readings rejected. DUR * 1.5 because the
           // flip travels much further than a 36px rise and reads rushed at DUR.
+          const el = root.current as HTMLDivElement;
+
+          // The hover tween writes `rotation` on the same element as the enter
+          // flip, so it is not built — and no listener is bound — until the
+          // flip has landed. Hovering mid-flip therefore cannot leave the mark
+          // off its resting angle; there is nothing to hover yet.
+          let hover: gsap.core.Tween | null = null;
+
+          const buildHover = contextSafe?.(() => {
+            // Paused, and driven with play()/reverse() rather than a `gsap.to`
+            // per event: a mouse-out mid-flight then unwinds along the same
+            // curve from wherever it is. `quickTo` cannot reverse like that,
+            // and stacked tweens fight each other.
+            //
+            // The start vars are the *composed* resting pose, never
+            // `rotation: 0` — GSAP has already folded the authored
+            // `rotate: -8deg` into `transform` by this point.
+            hover = gsap.fromTo(
+              el,
+              {
+                rotation: REST_ROTATION,
+                rotationY: 0,
+                transformPerspective: 800,
+              },
+              {
+                rotation: HOVER_ROTATION,
+                rotationY: HOVER_ROTATION_Y,
+                transformPerspective: 800,
+                duration: DUR * 0.7,
+                ease: EASE,
+                paused: true,
+                // Nothing may be written until the pointer arrives; the enter
+                // tween has just set the resting pose.
+                immediateRender: false,
+              },
+            );
+          });
+
+          const onPointerEnter = () => hover?.play();
+          const onPointerLeave = () => hover?.reverse();
+
           gsap.fromTo(
             root.current,
             {
@@ -90,8 +144,20 @@ export function JournalMark() {
                 start: "top 88%",
                 once: true,
               },
+              onComplete: () => {
+                if (!hasHover) return;
+                buildHover?.();
+                el.addEventListener("pointerenter", onPointerEnter);
+                el.addEventListener("pointerleave", onPointerLeave);
+              },
             },
           );
+
+          return () => {
+            el.removeEventListener("pointerenter", onPointerEnter);
+            el.removeEventListener("pointerleave", onPointerLeave);
+            hover?.kill();
+          };
         },
         root,
       );
