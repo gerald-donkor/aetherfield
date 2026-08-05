@@ -159,6 +159,25 @@ the build id). `/design-system` carries two, the navbar's and the sample's.
 targets →") sets the same bare glyph and carries the same fallback risk. It is
 not the navbar, so it was left alone.
 
+### Nav — Product points at the home page
+
+`NAV_ITEMS[0]` shipped as `{ label: "Product", href: "#" }` and was the last nav
+item without a destination. There is no `/product` route and none is planned, so
+it now resolves to `/` — the homepage *is* the product story. One line of data
+in `chrome.tsx`; the desktop nav and the mobile panel both read `NAV_ITEMS`, so
+both follow, and the panel's existing `onClick={() => setOpen(false)}` already
+closes the overlay on navigation.
+
+**The footer nav is deliberately untouched.** `SiteFooter` maps `NAV_ITEMS`'
+*labels* only and hardcodes `href="#"` for every item. Wiring those is a change
+to the settled footer and is a separate decision — do not fold it into a nav
+change.
+
+No layout row moves at any breakpoint: the label's text and type are unchanged,
+so there is nothing to measure against the comps. Every page's prerendered HTML
+gains exactly two diffs (desktop and mobile `<a href="#">` → `<a href="/">`)
+with the same class strings.
+
 ## Journal index (`/journal`)
 
 `app/journal/page.tsx` with its sections in `app/_components/journal/sections.tsx`.
@@ -624,7 +643,9 @@ clips the outer half, leaving exactly 1px, with no fractional `x="0.5"` /
 ink at y 1036, runs 26–32 then 42–48.
 
 `SiteNav`'s `Careers` item moved from `"#"` to `"/careers"`; Product and About
-are still the only unbuilt destinations. Nothing else in `chrome.tsx` changed.
+were still the only unbuilt destinations at the time (both are wired now — see
+"Nav — Product points at the home page" below). Nothing else in `chrome.tsx`
+changed.
 
 ### Measured against the comps
 
@@ -892,7 +913,9 @@ difference across the three listings, and the whole reason for the fix below.
 list.** It used to render *inside* the `items` branch of the last section, so on
 this comp — whose last section has `body` — it would not have rendered at all.
 It now sits once, outside the `sections.map`, in a single `relative` wrapper
-around the whole prose block, at `bottom-[55px] … lg:bottom-[24px]`.
+around the whole prose block. (The offsets recorded here — `bottom-[55px] …
+lg:bottom-[24px]` — were later moved by the user's reference; see "Fix — the
+seal's offsets" below. The *anchoring* is unchanged.)
 
 **Bottom-anchoring is measured, not chosen.** Seal bottom minus closing rule is
 **−73px on all three desktop comps** (11: 1542/1615, 12: 1414/1487, 13:
@@ -1029,6 +1052,65 @@ against comp at `300x160+830` traces both marks within 1–2px everywhere, with 
 Only `/job-listing/[slug]` renders `Seal`, so `/`, `/journal`, `/about`,
 `/careers`, `/design-system` and the articles are untouched by this change.
 
+### Fix — the seal's offsets (`bottom-[73px] left-[75.95%] lg:bottom-[42px]`)
+
+**This one is fitted on a user-supplied reference, not on the comps, and it
+overrides the −73px invariant recorded above.** Reference:
+`~/Pictures/Screenshots/Screenshot_20260805_113838.png`, a 1263×575 window of
+the Product Manager listing. Only the offsets moved — the bottom-anchoring, the
+widths, `pointer-events-none`, `hidden sm:block` and the spill past the card's
+right edge are all unchanged.
+
+**The reference is not a comp export, and identifying that is the whole
+measurement.** It renders at viewport 1263 (card `820+221`, which is
+`24 + (1215−820)/2` — the render's own geometry, not the comps' `+230` at 1280),
+so it is unscaled and directly comparable to a 1263-wide screenshot of ours. But
+its benefits list runs at a **28px item pitch** where ours runs 36, and its
+closing CTA breaks as `…build the / future of climate intelligence?` — both the
+comps' ~17px body, not the shipped 20px `--text-p2`. So it is a faithful
+implementation of the design, and its prose block is **44px shorter** than ours
+for identical copy. **That difference is not fixable here** and is the same
+`--text-p2` floor already recorded for every page since the article; do not try
+to close it by moving the seal.
+
+**What is fixable is the seal's two offsets**, and both are measured against the
+card and the closing rule, which are scale-free landmarks:
+
+| | reference | before | after |
+| --- | --- | --- | --- |
+| seal left − card left | 602 | 608 | **602** |
+| seal bottom → closing rule | 91 | 73 | **91** |
+
+`left-[76.8%]` → `left-[75.95%]`: the offsets resolve against the prose wrapper,
+which is the card minus its `p-10`, i.e. 740 wide at `lg`, so 602 from the card
+edge is `(602 − 40)/740 = 75.95 %`. `lg:bottom-[24px]` → `lg:bottom-[42px]` is
+the same +18 as the gap.
+
+**Tablet moves by the same +18 (`bottom-[55px]` → `bottom-[73px]`), and that is
+an inference, not a measurement** — the reference is desktop-only. +18 rather
+than 18×0.7845 because the prose leading that sets the vertical rhythm is the
+same at both breakpoints; only the mark scales. Revisit if a tablet reference
+turns up.
+
+#### Measured after the change
+
+All three listings, production build:
+
+| | 1280 | 800 |
+| --- | --- | --- |
+| seal left − card left | **602** (x 832, card 230) | **526** (x 566, card 40) |
+| seal bottom → closing rule | **91** | **122** |
+
+Identical on Data Scientist, UX Designer and Product Manager — the anchoring
+still holds one invariant across three differently shaped prose blocks, which is
+the property the original fit was chosen for. Against the reference at 1263, the
+seal lands at `+824+247` where the reference has `+823+247` (cards at 222 and
+221), and the closing rule at 481 against 479 — i.e. **both offsets exact.**
+
+For the record, the comps' own numbers are 609 / 73 (desktop) and 532 / ~107
+(tablet); the shipped values now sit 7 left and 18 high of those. That is a
+deliberate override on the user's reference.
+
 ## About page (`/about`)
 
 `app/about/page.tsx` with its sections in `app/_components/about/sections.tsx`
@@ -1084,7 +1166,8 @@ card is on an element that only inherits `1cqw`, so `em` there is `cqw`.
 - **`primitives.tsx` gains `ButtonLink`** — the `Button` look on a link, for
   "Meet the team" → `#team`. The shared classes moved into a `BUTTON_BASE`
   constant and the bullet into a `Bullet()` so the two elements cannot drift.
-- `NAV_ITEMS`: About → `/about`. Only Product still sits on `"#"`.
+- `NAV_ITEMS`: About → `/about`. Product was the last item still on `"#"`; it
+  now points at `/` (see "Nav — Product points at the home page").
 
 **`AetherfieldSeal` is local to this page and is *not* `primitives.Seal`.** The
 job-listing seal has all three ellipses tangent at one top and one bottom vertex

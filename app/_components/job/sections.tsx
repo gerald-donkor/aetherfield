@@ -135,7 +135,7 @@ export function JobListing({ job, body }: { job: Job; body: JobBody }) {
             above the prose block's bottom edge once the Rule's own mt-12 is
             taken off. Top-anchoring cannot fit both: held against comp 12's
             last list it lands 180px high. */}
-        <Seal className="pointer-events-none absolute bottom-[55px] left-[76.8%] hidden w-[222px] sm:block lg:bottom-[24px] lg:w-[283px]" />
+        <Seal className="pointer-events-none absolute bottom-[73px] left-[75.95%] hidden w-[222px] sm:block lg:bottom-[42px] lg:w-[283px]" />
       </div>
 
       <Rule />

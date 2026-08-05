@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
-/* Product stays on "#" until that page exists — linking it at a 404 is worse
-   than linking it nowhere. */
+/* There is no /product route, so Product resolves to the home page — the
+   product story is what the homepage tells. */
 const NAV_ITEMS = [
-  { label: "Product", href: "#" },
+  { label: "Product", href: "/" },
   { label: "Journal", href: "/journal" },
   { label: "About", href: "/about" },
   { label: "Careers", href: "/careers" },
