@@ -1903,12 +1903,57 @@ drift — safe here, since the recorded "nothing in this chain may become
 `overflow-hidden`" warnings are about the `Seal`'s and the journal mark's
 ancestors, both in other sections.
 
-**The cloth's overscan is computed, not eyeballed.** `yPercent -5 → 5` scrubbed
-(`scrub: 0.6`, `start: "top bottom"`, `end: "bottom top"`) against a constant
-`scale: 1.16`, which puts 8 % of the box beyond each edge against 5 % of travel.
-**1.12 also covers it on paper** (6 % against 5 %) but leaves only ~2.7px of
-margin at 375, inside sub-pixel rounding. Verified at the trigger's start, middle
-and end: no edge enters the frame at any of the three.
+**The cloth falls on two nested wrappers, and the scrub alone was not enough.**
+The first cut shipped only the scrubbed parallax, and the user rejected it: a
+scrub moves only while the reader is *actively scrolling*, so a reader who has
+stopped to look at the card sees a still photograph. The falling has to be
+autonomous. So the outer wrapper takes the scroll parallax (`yPercent -4 → 4`,
+`scrub: 0.6`, `start: "top bottom"`, `end: "bottom top"`) and an inner one
+carries a continuous drift. **Two wrappers, not one** — sharing an element would
+make the two tweens fight over its transform.
+
+The fall is three yoyoing tweens on **deliberately coprime-ish periods — 7 / 11
+/ 13 s** (`yPercent 2`, `xPercent 1.5`, `rotation 1`, all `sine.inOut`). Their
+compound period is minutes long, so the cloth never visibly repeats and never
+lines up into an obvious bounce; that is what makes a looping drift read as
+organic rather than mechanical. `sine` because a falling cloth decelerates into
+each turn. The timeline is `seek(3.5)` at build so the cloth is already mid-sway
+the first time the section scrolls in, and it joins the same on-screen gate as
+the counter and the spin.
+
+**The overscan is asymmetric CSS insets — `-inset-x-[4%] -inset-y-[11%]` — and
+that is a resolution decision, not a styling one.** It shipped first as a
+uniform `gsap.set(scale: 1.16)`, and the user reported the photograph looking
+blurry. A uniform scale makes the image paint 16 % wider than its box, and
+`Image-3.png` is only **768×768**: at 800 that pushed the required source width
+to 884 and visibly softened it. The motion is mostly vertical, and a square
+source cropped into this 692:566 box already has vertical pixels to spare — so
+**vertical overscan is free and horizontal overscan is not**. 11 % down each side
+covers 4 % of parallax + 2 % of fall + ~1 % of rotation sweep; 4 % across covers
+the 1.5 % x-sway plus its share of the rotation. Rendered width drops from 1.16×
+the box to **1.08×**, which is what puts desktop back inside the 750w candidate.
+Verified at the scrub's start, middle and end: no edge enters the frame.
+
+**`sizes` must advertise the *rendered* width, not the box.** This is the trap
+that made the image soft in the first place. The wrapper overscans, so the image
+paints larger than its container, and `sizes="…, 620px"` had the browser pick
+the **640w** candidate for a 637px render — right at the edge, and at 1.16× it
+was a genuine upscale. It now reads `(max-width: 1024px) 116vw, 720px`. Measured
+after the fix: **1280@1x renders 637 CSS and is served 750px — sharp**; 375
+renders 363 and is served 750 — sharp.
+
+**The 768×768 source is a hard ceiling, and two cases still sit under it**: 800
+upscales ×1.07 and a 2× display ×1.66. Neither is fixable from here — the box at
+800 is 760 CSS wide against a 768px source, so *any* overscan upscales, and that
+was true before this work too. Replace the photograph if a larger one turns up;
+do not chase it with `sizes`.
+
+**`quality={90}` needs `images.qualities` in `next.config.ts`.** Next 16 defaults
+that allowlist to `[75]` and **silently coerces** any other value to the nearest
+allowed entry — the prop appeared in the source and the built srcSet still read
+`q=75`, with no warning anywhere. The config now allows `[75, 90]`. 90 is used by
+this one image, because the sky is a wide smooth gradient and that is exactly
+what a low WebP quality smears; `q=90` appears on `/` and on no other page.
 
 **The card leans; it does not flip.** `rotationY: 0 → 20` with
 `transformPerspective: 900`. "Flip horizontally to the right" is read as the
@@ -2293,6 +2338,24 @@ looking broken. Anchor on the section instead:
 const sec = [...document.querySelectorAll('section')]
   .find(s => s.textContent.includes('Everything you need'));
 ```
+
+**`img.naturalWidth` is density-corrected and is NOT the delivered pixel
+count.** When an image is chosen out of a `srcset` with `w` descriptors, Chrome
+gives the resource an intrinsic density of `candidate_w / sizes_w` and
+`naturalWidth` returns `real_pixels / density`. So a 768px file selected from a
+`w=1920` candidate at `sizes=720px` reports **288**, and a *larger* request
+appears to deliver a *smaller* image. A sharpness check built on it is garbage.
+Read `currentSrc` for the candidate and confirm the real bytes against the
+optimizer directly:
+
+```
+curl -s -H 'Accept: image/avif,image/webp,image/*' \
+  "http://localhost:3001/_next/image?url=%2Fassets%2Fimages%2FX.png&w=1920&q=90" -o o.bin
+magick identify -format '%wx%h %m %B bytes' o.bin
+```
+
+The optimizer caps output at the source's own width, so `delivered =
+min(requested_w, source_w)`; compare that against `rendered_css_width × DPR`.
 
 **A page-wide `magick compare` is the wrong instrument once anything is
 scroll-linked.** A scrubbed element sits wherever the screenshot's scroll put it,

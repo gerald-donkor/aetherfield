@@ -57,6 +57,7 @@ const LEAN = 20;
 export function CapabilityVisual({ children }: { children: React.ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
   const drift = useRef<HTMLDivElement>(null);
+  const float = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const star = useRef<SVGSVGElement>(null);
   const value = useRef<HTMLSpanElement>(null);
@@ -91,20 +92,26 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
           // restoring because nothing was ever hidden.
           if (reduceMotion) return;
 
-          /* 1 — the cloth. The only scrubbed animation on the site. It sits on
-             an inner wrapper, never on the `data-reveal-item` box: `Reveal`'s
-             stagger tween writes `y` on that box and the two would fight. The
-             constant scale is the overscan that keeps an edge from entering the
-             frame at either extreme of the ±5% travel: 1.16 puts 8% of the box
-             beyond each edge against 5% of travel, so 3% of margin. 1.12 also
-             covers it on paper (6% against 5%) but leaves only ~2.7px at 375,
-             which is inside sub-pixel rounding. */
-          gsap.set(drift.current, { scale: 1.16 });
+          /* 1 — the cloth, on two nested wrappers.
+
+             The scrub alone is not enough: it only moves while the reader is
+             actively scrolling, so a reader who has stopped to look at the card
+             sees a still photograph. The falling has to be autonomous. So the
+             outer wrapper takes the scroll parallax and an inner one carries a
+             continuous drift, and the two compose without fighting over one
+             element's transform.
+
+             Neither may sit on the `data-reveal-item` box: `Reveal`'s stagger
+             tween writes `y` on that box. */
+
+          /* The overscan is authored as *asymmetric insets in CSS*, not as a
+             uniform `scale` here — see the wrapper's class for why. Nothing is
+             scaled, so this tween is the element's only transform. */
           gsap.fromTo(
             drift.current,
-            { yPercent: -5 },
+            { yPercent: -4 },
             {
-              yPercent: 5,
+              yPercent: 4,
               ease: "none",
               scrollTrigger: {
                 trigger: root.current,
@@ -114,6 +121,53 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
               },
             },
           );
+
+          /* The fall itself: three yoyoing tweens on *deliberately coprime-ish
+             periods* (7 / 11 / 13 s). Their compound period is minutes long, so
+             the cloth never visibly repeats and never lines up into an obvious
+             bounce — the trick that makes a looping drift read as organic. Sine
+             easing because a falling cloth decelerates into each turn rather
+             than snapping out of it. `y` leads; `x` and the rotation are the
+             sway around it. Transform-only, so this composites on the GPU and
+             never touches layout. */
+          const fall = gsap
+            .timeline({ paused: true })
+            .to(
+              float.current,
+              {
+                yPercent: 2,
+                duration: 7,
+                ease: "sine.inOut",
+                repeat: -1,
+                yoyo: true,
+              },
+              0,
+            )
+            .to(
+              float.current,
+              {
+                xPercent: 1.5,
+                duration: 11,
+                ease: "sine.inOut",
+                repeat: -1,
+                yoyo: true,
+              },
+              0,
+            )
+            .to(
+              float.current,
+              {
+                rotation: 1,
+                duration: 13,
+                ease: "sine.inOut",
+                repeat: -1,
+                yoyo: true,
+              },
+              0,
+            );
+          // Start mid-sway rather than at a dead stop, so the cloth is already
+          // in motion the first time the section is scrolled into view.
+          fall.seek(3.5);
 
           /* 2 — the card's lean. A paused tween driven by play()/reverse(),
              not a `gsap.to` per event: a mouse-out mid-flight then unwinds
@@ -208,9 +262,11 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
               if (self.isActive) {
                 spin.play();
                 numbers.play();
+                fall.play();
               } else {
                 spin.pause();
                 numbers.pause();
+                fall.pause();
               }
             },
           });
@@ -221,6 +277,7 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
             lean?.kill();
             spin.kill();
             numbers.kill();
+            fall.kill();
             gate.kill();
           };
         },
@@ -241,8 +298,25 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
       className="relative aspect-[692/566] w-full overflow-hidden"
       data-reveal-item
     >
-      <div ref={drift} className="absolute inset-0">
-        {children}
+      {/* Two wrappers, not one: the outer takes the scroll parallax and the
+          overscan, the inner the autonomous fall. Sharing one element would
+          make the two tweens fight over its transform.
+
+          **The overscan is asymmetric insets, not `scale`, and that is a
+          resolution decision.** A uniform `scale: 1.16` makes the photograph
+          paint 16% wider than its box, and `Image-3.png` is only 768x768 — at
+          800 that pushed the required source width to 884 and visibly softened
+          it. The motion is mostly vertical, and a square source cropped into
+          this 692:566 box already has vertical pixels to spare, so the vertical
+          overscan is free while the horizontal one is not. 11% down each side
+          covers 4% of parallax + 2% of fall + ~1% of rotation sweep; 4% across
+          covers the 1.5% x-sway plus its share of the rotation. Rendered width
+          drops from 1.16x the box to 1.08x, which is what puts desktop back
+          inside the 750w candidate. */}
+      <div ref={drift} className="absolute -inset-x-[4%] -inset-y-[11%]">
+        <div ref={float} className="absolute inset-0">
+          {children}
+        </div>
       </div>
       <div className="@container absolute inset-x-[8%] top-1/2 -translate-y-1/2 lg:inset-x-[16%]">
         <div ref={card} className="bg-white p-[4.5cqw] text-[2.6cqw]">

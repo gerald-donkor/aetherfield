@@ -28,11 +28,21 @@ export function Capabilities() {
               as children so this file stays a server component and `next/image`
               never reaches the client bundle. */}
           <CapabilityVisual>
+            {/* `sizes` must advertise the *rendered* width, not the box: the
+                drift wrapper carries a 1.16 overscan, so the image paints 16%
+                larger than its container. At the box's own numbers the browser
+                picks the 640w candidate for a 682px render and the photograph
+                comes out visibly soft. 116vw / 720px lands on 1080w / 750w
+                instead. q90 over the default 75 because the sky is a wide
+                smooth gradient, which is exactly what a low JPEG/WebP quality
+                smears. Image-3.png is 768x768, so a 2x display is upscaled
+                whatever we ask for — that ceiling is the source, not `sizes`. */}
             <Image
               src="/assets/images/Image-3.png"
               alt="Sheer fabric lifting against an open sky"
               fill
-              sizes="(max-width: 1024px) 100vw, 620px"
+              sizes="(max-width: 1024px) 116vw, 720px"
+              quality={90}
               className="object-cover"
             />
           </CapabilityVisual>
