@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { ButtonLink } from "../primitives";
-import { Container, PRINCIPLES } from "../home/sections";
+import { Container } from "../home/container";
+import { PRINCIPLES } from "../home/principles-data";
 
 /* -------------------------------------------------------------------------- */
 /*  Hero — sky band with the floating Forecast card, mission copy beside it     */

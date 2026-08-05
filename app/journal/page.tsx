@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { CtaBand, SiteFooter, SiteNav } from "../_components/chrome";
-import { Container } from "../_components/home/sections";
+import { Container } from "../_components/home/container";
 import { JournalStamp, LatestArticles } from "../_components/journal/sections";
 
 export const metadata: Metadata = {

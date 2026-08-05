@@ -1293,6 +1293,162 @@ three breakpoints (`magick compare -metric AE` = 0 against a worktree build of
 the parent commit) — the `PRINCIPLES` export and the `CtaBand` prop are inert.
 The sticky bar still pins on `/about` past the fold at all three widths.
 
+## Homepage motion (`/` only)
+
+GSAP, on the homepage and nowhere else. Two reference recordings in
+`public/design-ref/animation-ref/`: `landing.webm` (three passes over `/` at
+desktop, tablet and mobile) and `chart.webm` (a generic bar chart). Prompt 17.
+
+**The vocabulary is small and identical at every breakpoint**: fade in and
+rise, per-element stagger in reading order, ~0.6 s each with ~0.1 s between
+siblings, decelerating, **once, on enter**. Nothing scales, blurs or rotates;
+nothing reverses on scroll-up; nothing is scrubbed. **No pinning, no parallax,
+no horizontal scroll, no `ScrollSmoother`** — the recording contains none of
+them and they would fight the sticky navbar. `DUR` and `EASE` live in
+`motion/register.ts` so the chart and the page reveals cannot drift apart.
+
+### The component split
+
+`home/sections.tsx` was 444 lines holding six sections, `Container`,
+`PRINCIPLES` and a private `JournalMark`. It is now one file per section —
+`container` / `hero` / `dashboard` / `emissions-chart` / `capabilities` /
+`principles` / `principles-data` / `case-study` / `journal` / `testimonial` —
+with `sections.tsx` left behind as a **barrel**, which is what `app/page.tsx`
+imports.
+
+**Nothing outside `home/` may import the barrel, and that is a bundle rule, not
+a style one.** The barrel reaches every section, the sections reach the
+client-side `Reveal`, and Next's client-reference graph follows: with the five
+unrelated pages still importing `Container` through `home/sections`, **every
+route's prerendered HTML gained the homepage's 118 KB GSAP `<script>`** —
+measured on `/careers`, `/about`, `/journal`, all six articles and all three job
+listings. So `/journal`, `/careers`, `/job-listing/[slug]`, `article/sections`
+and `about/sections` import `home/container` directly, and `/about` imports
+`PRINCIPLES` from **`home/principles-data`**, a component-free module that
+`principles.tsx` re-exports.
+
+That last file is the one addition prompt 17 did not anticipate: `PRINCIPLES`
+could not stay in `principles.tsx` once that file imported `Reveal`, or `/about`
+would keep pulling GSAP in for a plain array. Same discipline as `chrome.tsx`
+inlining `CONTAINER` rather than importing it.
+
+With the leaf imports in place, **`/` is the only route whose prerendered HTML
+changes at all** — verified against a build of the parent commit, normalising
+the build id and the CSS chunk name.
+
+### The chart — `from: "edges"`
+
+`HeroDashboard`'s "Carbon emissions trend" block moved into
+`home/emissions-chart.tsx` as the panel's **only** client module; the three stat
+tiles keep their `next/image` and stay server-rendered. `BARS`, `PEAK`,
+`Y_TICKS` and `MONTHS` moved with it and the markup, class strings and
+`em`-on-`1cqw` sizing are unchanged — the panel's proportional scaling is
+load-bearing.
+
+One timeline: gridlines `scaleX 0→1` from `left center` (stagger 0.06,
+top-to-bottom), then the 33 bars `scaleY 0→1` from `bottom center`, then the
+`220` pill fades and rises.
+
+- **`stagger: { amount: 0.9, from: "edges", ease: "power1.inOut" }`.** GSAP's
+  advanced-stagger `from` takes `"start" | "center" | "edges" | "end" |
+  "random" | <index>`; `"edges"` starts at both ends of the target array at once
+  and converges on the middle, which is exactly the user's ask. Do not hand-roll
+  it with an index function. `amount` rather than `each` so the run length is
+  authored once and does not drift with the bar count. **Verified in the render**
+  — 0.56 s in, bars 0–3 and 29–32 read scaleY 0.15/0.13/0.09/0.04, symmetric,
+  everything between still 0.
+- **Never animate `height`.** The bars' heights are inline `em` values driving
+  layout; `scaleY` is a compositor transform and leaves layout alone.
+- **The pill is a sibling of the scaled bar, not a child** — both sit inside the
+  `relative flex-1` wrapper — so scaling the bar cannot distort it. Confirmed in
+  the render; no restructuring was needed.
+- **The trigger is `start: "bottom bottom", once: true`, and it is measured.**
+  At scroll 0 the panel's top/bottom edges sit at 585/687 (375), 651/879 (800)
+  and 743/1031 (1280). The bottom edge is below the fold at each breakpoint's
+  nominal height, so one value gives the user's ask everywhere: nothing fires on
+  load, the bars run as the chart scrolls in. Verified — all 33 bars still read
+  scaleY 0 after 1.2 s at scroll 0.
+
+### `Reveal` — the page reveals
+
+`app/_components/motion/reveal.tsx`:
+
+```tsx
+<Reveal>            {/* animates itself */}
+<Reveal stagger>    {/* animates its [data-reveal-item] descendants, in order */}
+```
+
+Props: `as`, `stagger`, `delay`, `start` (default `"top 88%"`), `y`, `immediate`
+(play on load — the hero, which is above the fold) and `className`.
+
+**`className` and `as` exist so the reveal takes an existing wrapper over rather
+than adding a box.** Every section renders `<Reveal as="section" stagger
+className="…">` in place of its own `<section>`, so **no layout row moves**:
+`/` is pixel-identical to the parent commit in the settled state at 375, 800 and
+1280 (`magick compare` finds no pixel over a 5 % threshold at any of the three;
+page heights 6350 / 6006 / 5595 unchanged).
+
+**Server sections stay server components.** `children` arrive as a prop, so
+`Capabilities`, `Principles`, `CaseStudy`, `Journal` and `Testimonial` keep
+their `next/image` and never join the client bundle. **Do not add `"use client"`
+to a section file.** `CtaBand` is wrapped **at the call site in `app/page.tsx`**
+so the band animates on `/` only — `chrome.tsx` is not edited, and the footer is
+not animated at all.
+
+**The hero's two title lines are two `<span className="block">`s, not a `<br>`,**
+so they are separately targetable. Both are the same Newsreader face, so the
+mixed-font line-box union recorded for the `/careers` masthead does not apply —
+verified: the h1's ink does not move at any of the three breakpoints.
+
+### The flash-of-final-state problem, and why `clearProps` is forbidden
+
+The server sends the sections visible and the browser paints them; `useGSAP`
+runs in a layout effect, which is before *React's* paint but after the *initial
+document* paint on a prerendered page. So the hidden start state is authored in
+`globals.css`, not in JS:
+
+```css
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  [data-reveal], [data-reveal-item], [data-chart-pill] { opacity: 0; }
+  [data-chart-bar] { transform: scaleY(0); transform-origin: bottom center; }
+  [data-chart-grid] { transform: scaleX(0); transform-origin: left center; }
+}
+```
+
+`scripting: enabled` survives Tailwind v4 / Lightning CSS into the built
+stylesheet — checked in `.next/static/chunks/*.css`. With JavaScript off, or
+reduced motion requested, the rules never apply and the page is simply at rest.
+
+**No reveal tween may `clearProps` opacity or transform** — that hands the
+element back to these rules and it vanishes.
+
+### `matchMedia`
+
+`gsap.matchMedia()` carries both the breakpoint and the accessibility split.
+Desktop rises 36 px, below `lg` two thirds of that — the recording's mobile pass
+travels a visibly shorter distance, which is also right for a 375 viewport.
+
+**A `matchMedia` handler only runs while at least one of its conditions
+matches**, so a lone `(prefers-reduced-motion: reduce)` query would never fire
+for anybody else. Both halves are named — `reduceMotion` *and* a complementary
+`fullMotion` / `isDesktop` + `isMobile` pair. The reduce branch sets the final
+state and returns; verified at 1280 that **0 of 29 reveal targets sit below full
+opacity and every bar reads scaleY 1**, under `reduce` and with JavaScript
+disabled alike.
+
+`useGSAP(() => {…}, { scope: ref })` everywhere, with `gsap.registerPlugin`
+called once at module scope in `motion/register.ts` — never in render — and
+`mm.revert()` returned as cleanup. No `markers: true` in committed code.
+ScrollTriggers are created in page order naturally, so no `refreshPriority`.
+
+**`SplitText` was considered and rejected.** It is free as of GSAP 3.13 and
+would be the idiomatic way to stagger the two headings per line, but it mutates
+the DOM after hydration; the two headings that need splitting carry authored
+spans instead.
+
+**`motion@^13` is in `package.json` and is unused by this work.** The homepage
+is GSAP throughout. Do not mix the two libraries on one page.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -1505,6 +1661,86 @@ of the command never runs). Kill by port instead:
 `name() { … }` collides with its aliases (`cc`, and others) — write the helper
 to the scratchpad with `chmod +x` and call it by path.
 
+**Reading a reference recording: sample it, don't scrub it.** Extract frames
+with `ffmpeg` and read them as a contact sheet rather than opening the video:
+
+```
+ffprobe -v error -show_entries stream=width,height,duration -of default=nw=1 ref.webm
+ffmpeg -v error -i ref.webm -vf fps=1 -q:v 2 frames/f%03d.jpg           # whole pass
+ffmpeg -v error -ss 4.2 -to 7.4 -i ref.webm -vf fps=15 -q:v 2 hero/h%03d.jpg  # one beat
+magick montage frames/f0*.jpg -tile 6x -geometry +2+2 -resize 320x sheet.png
+```
+
+1 fps first, to find where each pass and each section starts; then 12–15 fps
+over the two or three seconds that matter. **A 1 fps sample makes clean opacity
+fades look like blur** — do not diagnose an effect off the coarse pass.
+
+**Comparing two builds' prerendered HTML is a script, not an eyeball.** The
+pages are single-line, so `diff` prints the whole file for a one-character
+change. Normalise the build id (`.next/BUILD_ID`) and the CSS chunk name
+(`/_next/static/chunks/*.css` — Next puts CSS under `chunks/`, not `css/`) and
+report differing *regions* with `difflib.SequenceMatcher`. Keep the helper in
+the scratchpad; it is ~20 lines of Python.
+
+**Building the parent commit needs a sibling worktree with hard-linked
+`node_modules`.** Turbopack rejects a symlinked `node_modules` outright
+(`Symlink [project]/node_modules is invalid, it points out of the filesystem
+root`), and a worktree under `/tmp` cannot hard-link to one under `/home`:
+
+```
+git worktree add ../aetherfield-base HEAD
+cp -al node_modules ../aetherfield-base/node_modules
+(cd ../aetherfield-base && npm run build)
+```
+
+Run the two servers side by side (`3001` new, `3002` base) and screenshot both.
+Remove the worktree and `git worktree prune` when done.
+
+**A client component reached from a shared barrel lands in every page's
+`<script>` list.** After adding one, always check the chunk graph, not just the
+markup:
+
+```
+grep -o '/_next/static/chunks/[a-zA-Z0-9_-]*\.js' .next/server/app/<page>.html | sort -u
+```
+
+Diff that list against the parent build's. To identify an unexpected chunk,
+grep it for a distinctive string from the suspect module.
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.
+
+# 4. Prompt files
+
+Every implementation request gets a file in `prompts/`, written before any code
+(section 1, step 5) and re-read verbatim at execution time (step 7).
+
+**Numbering.** `NN-<kebab-case-scope>.md`, where `NN` is the highest existing
+number in `prompts/` plus one. Never renumber, never overwrite, never reuse a
+number — the sequence is the project's build history and a gap or a reused
+number makes "what is already built" unresolvable in a later session.
+
+**A prompt file must state**, in whatever order the work makes natural:
+
+- the scope, and why it is next;
+- the reference material read for it — comps, screenshots, recordings, source
+  files — by path;
+- the measurements the implementation must hit, or the measurement procedure
+  that will produce them, never eyeballed numbers;
+- the expected impact, including which routes' prerendered HTML must stay
+  identical;
+- non-goals — what is deliberately out of scope, and why;
+- the checks to run (section 2), and what to record in `AGENTS.md` afterwards.
+
+**`## SKILLS USED`** — required, in every prompt file. List every skill the
+implementation should invoke, by its exact name from the skill listing, with one
+line each saying what it is for. Include skills already loaded while writing the
+prompt as well as ones only the implementation will need. Write `None` if the
+work genuinely needs no skill, rather than omitting the section.
+
+**Why it is required.** The prompt file is the whole brief on execution — after
+a `/clear`, an approving `y` is answered by re-reading the file and nothing
+else. A skill that was loaded while writing the prompt is not loaded when the
+prompt runs, so an unlisted skill is a skill the implementation will silently
+work without. Naming them in the file is what makes the run reproducible.

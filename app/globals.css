@@ -59,6 +59,34 @@ body {
   font-family: var(--font-sans);
 }
 
+/* ---- Homepage motion: the hidden start state ----------------------------
+   The server sends every section fully visible and the browser paints it, then
+   the client sets opacity 0 and animates — a real flash, because useGSAP runs
+   after the *document's* first paint on a prerendered page. So the start state
+   is authored here, in the server-rendered stylesheet, instead of in JS.
+
+   Gated on `scripting: enabled` and `no-preference`: with JavaScript off, or
+   with reduced motion requested, the rules never apply and the page is simply
+   at rest and fully visible with no dependency on GSAP ever running.
+
+   The reveal tweens animate these back and must NOT `clearProps` them — that
+   would hand the element back to these rules and it would vanish. */
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  [data-reveal],
+  [data-reveal-item],
+  [data-chart-pill] {
+    opacity: 0;
+  }
+  [data-chart-bar] {
+    transform: scaleY(0);
+    transform-origin: bottom center;
+  }
+  [data-chart-grid] {
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+}
+
 /* Fluid display type: the 80/56/40px scale is authored at the 1400px frame
    and steps down on narrow viewports without changing the ratios. */
 @utility display-fluid-h1 {

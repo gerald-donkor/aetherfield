@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SiteFooter, SiteNav } from "../_components/chrome";
 import { CareersMasthead, JobList } from "../_components/careers/sections";
-import { Container } from "../_components/home/sections";
+import { Container } from "../_components/home/container";
 
 export const metadata: Metadata = {
   title: "Careers — Aetherfield",

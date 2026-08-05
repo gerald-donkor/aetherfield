@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
-import { Container } from "../../_components/home/sections";
+import { Container } from "../../_components/home/container";
 import { BackToCareers, JobListing } from "../../_components/job/sections";
 import { getJob, JOB_BODIES, WRITTEN_JOB_SLUGS } from "../../_content/jobs";
 

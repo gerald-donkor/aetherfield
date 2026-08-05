@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Article, ArticleBody } from "../../_content/articles";
 import { ArticleCardStacked } from "../cards";
-import { Container } from "../home/sections";
+import { Container } from "../home/container";
 import { MetaPair } from "../primitives";
 
 /* The reading column runs on a 28px line pitch at every breakpoint, measured

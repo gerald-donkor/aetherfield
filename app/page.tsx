@@ -1,4 +1,5 @@
 import { CtaBand, SiteFooter, SiteNav } from "./_components/chrome";
+import { Reveal } from "./_components/motion/reveal";
 import {
   Capabilities,
   CaseStudy,
@@ -33,7 +34,11 @@ export default function Page() {
         <CaseStudy />
         <Journal />
         <Testimonial />
-        <CtaBand headline="Ready to operationalize your sustainability goals?" />
+        {/* Wrapped here rather than inside chrome.tsx: CtaBand is shared with
+            /journal and /about, and this prompt is the homepage only. */}
+        <Reveal>
+          <CtaBand headline="Ready to operationalize your sustainability goals?" />
+        </Reveal>
       </main>
 
       <SiteFooter />
