@@ -111,11 +111,49 @@ export const JOB_BODIES: Record<string, JobBody> = {
     ],
     cta: "Ready to help build the future of climate intelligence?",
   },
+  // Transcribed from `public/assets/pages/13-job-listing3/screen-sizes/Desktop.png`.
+  // Company description and Company benefits are byte-identical to the Data
+  // Scientist entry — the comp repeats them, so keep the two in step.
+  "product-manager": {
+    sections: [
+      {
+        heading: "Company description",
+        body: "At Aetherfield, we build software that empowers companies to lead with climate accountability. Our platform helps sustainability and operations teams make sense of complex environmental data—transforming emissions, waste, and energy metrics into measurable, meaningful action. We're a mission-driven team of technologists, designers, and scientists working to accelerate the shift toward a low-carbon future.",
+      },
+      {
+        heading: "About the role",
+        body: "As a Product Manager at Aetherfield, you'll define and drive the roadmap for climate intelligence tools used by leading sustainability teams. You'll work closely with engineering, design, and customers to turn complex workflows into intuitive, impactful solutions. From shaping product strategy to refining launch details, your work will guide how enterprises operationalize their climate goals.",
+      },
+      {
+        heading: "Requirements",
+        items: [
+          "5+ years of experience in product management for SaaS or data platforms",
+          "Strong customer instincts with a track record of shipping thoughtful, user-centered products",
+          "Ability to translate complex problems into clear product requirements",
+          "Familiarity with sustainability, climate tech, or enterprise reporting systems is a plus",
+          "Excellent collaboration and communication skills",
+          "Drive to work on mission-aligned technology that moves the needle",
+        ],
+      },
+      {
+        heading: "Company benefits",
+        items: [
+          "Competitive salary and equity options",
+          "Flexible, hybrid work environment",
+          "Generous PTO and paid volunteer days",
+          "Annual sustainability stipend",
+          "Team offsites and climate-focused retreats",
+          "A mission-first culture that values clarity, impact, and integrity",
+        ],
+      },
+    ],
+    cta: "Ready to help build the future of climate intelligence?",
+  },
 };
 
-/** Only slugs with prose are routed; the other two roles 404 by design until
-    `12-job-listing2` and `13-job-listing3` are built. Same rule
-    `WRITTEN_SLUGS` applies to the journal. */
+/** Only slugs with prose are routed; UX Designer 404s by design until
+    `12-job-listing2` is built. Same rule `WRITTEN_SLUGS` applies to the
+    journal. */
 export const WRITTEN_JOB_SLUGS = Object.keys(JOB_BODIES);
 
 export function getJob(slug: string) {
