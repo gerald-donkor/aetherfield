@@ -85,6 +85,16 @@ body {
     transform: scaleX(0);
     transform-origin: left center;
   }
+  /* Opacity only, deliberately — no start transform. The mark is invisible
+     here, so a start transform would never be seen, but it *would* be parsed:
+     GSAP folds an element's independent `rotate` into `transform` and clears
+     the property (CSSPlugin `_parseTransform`), and decomposing that composite
+     against a perspective start state yields a spurious rotationX the tween
+     never animates away. Starting from `transform: none` + the authored
+     `rotate: -8deg` decomposes cleanly. See AGENTS.md. */
+  [data-journal-mark] {
+    opacity: 0;
+  }
 }
 
 /* Fluid display type: the 80/56/40px scale is authored at the 1400px frame

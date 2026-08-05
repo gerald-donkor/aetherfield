@@ -1551,6 +1551,136 @@ states, an intermediate value mid-transition, and a full reverse on mouse-out.
 `/` is the only route whose prerendered HTML changes and its only diffs are the
 two class attributes — the other 15 pages are byte-identical.
 
+### The journal mark's flip
+
+**The one element on the homepage with a treatment of its own.** Prompt 20. The
+user circled the mark in `~/Pictures/Screenshots/Screenshot_20260805_192944.png`
+and asked for it to "flip and tilt from 45 degrees point to the current
+position". It used to be one `data-reveal-item` among six in the "From the
+journal" section; it now has its own client leaf and its own hook, and the
+section's stagger is five items, not six.
+
+`app/_components/home/journal-mark.tsx` — `"use client"`, the SVG moved
+verbatim out of `journal.tsx`, which **stays a server component**. Same shape as
+`emissions-chart.tsx`: `gsap.matchMedia()`, `mm.add(..., root)`, `return () =>
+mm.revert()`, `useGSAP(fn, { scope: root })`, no `clearProps`, no
+`will-change`. Keep the file **component-only** — a constant or type exported
+from here and imported elsewhere drags GSAP into that page's bundle, the rule
+that forced `PRINCIPLES` out into `principles-data.tsx`.
+
+**`home-journals.webm` was read and rejected as a source for this.** Across all
+749 real frames (`-fps_mode passthrough`) the mark's blue-ink bbox is
+bit-identical at `x 34–444, y 56–179` with a constant ink count of 5540 — it
+never moves in that file. It constrains the row hover and nothing else. Do not
+try to fit the flip to it.
+
+**The tween:**
+
+```
+{ opacity: 0, rotationY: 45, rotation: -45, transformPerspective: 800 }
+  → { opacity: 1, rotationY: 0, rotation: -8, transformPerspective: 800 }
+```
+
+`DUR * 1.5` = **0.75s** (the flip travels much further than a 36px rise and
+reads rushed at `DUR`), `EASE` unchanged, `start: "top 88%", once: true` —
+`Reveal`'s own default, so the mark starts with its section rather than on a
+second threshold. `DUR` and `EASE` are imported from `register.ts`, never
+restated.
+
+**−45 → −8 is a judgement, and the two alternatives are recorded.** "45 degrees"
+is a number read off the screen, so it is an *on-screen* start angle, and the
+mark rests at −8° on screen. Sweeping from −45 up to −8 never reverses direction
+and makes the resting angle the terminus of the gesture. The opposite-sign
+reading (start at +45) sweeps across vertical and flies *past* the rest angle; a
+literal `rotation: 45` on top of the CSS tilt is neither 45 on screen nor
+defensible. At `t=0` "net −45" is strictly a sum only once the flip closes: with
+`rotationY` also applied the composite is not a pure Z rotation, so the
+perceived tilt starts slightly under 45° and converges.
+
+**The resting −8° is authored twice — in the class and in the tween — and the
+prompt's reasoning for keeping it out of JS was wrong.** Tailwind v4 does emit
+`-rotate-[8deg]` as the independent `rotate` property (`.md\:-rotate-\[8deg\]{
+rotate:-8deg}` in the built stylesheet), and css-transforms-2 does compose
+`translate × rotate × scale × transform`. But **GSAP does not leave the property
+alone**: `_parseTransform` folds `translate` / `rotate` / `scale` into a single
+`transform` string and then sets all three to `none`
+(`node_modules/gsap/CSSPlugin.js:859-866`) — unconditionally, on every parse.
+The `_removeIndependentTransforms` guard at `:123` (`if (style.translate)`) is a
+*different*, later code path and does not protect this. So the −8 is consumed at
+tween creation and a tween ending at `rotation: 0` lands the mark **upright**.
+Measured before the fix: resting rect `425×171` at 1280 against the settled
+`421×252`, with `rotate` computing to `none`. The class stays because it is the
+resting state with JavaScript off and under reduced motion; `REST_ROTATION = -8`
+in the module is the same number for the tween's terminus. Keep the two in step.
+
+**`rotate` in a GSAP vars object is an alias for `rotation`**
+(`CSSPlugin.js:1592`, `"8:rotate"`) — it writes `transform`, never the CSS
+property. Do not reach for it expecting the latter.
+
+**The CSS start state is `opacity: 0` and nothing else** — deliberately *not* a
+mirror of the tween's `from`. The mark is invisible there, so a start transform
+could never be seen, but it would still be *parsed*: decomposing
+`rotate(-8deg)` folded against `perspective(800px) rotateY(45deg) rotateZ(-37deg)`
+yields a spurious `rotationX(-31.04deg)` that the tween never animates away, and
+it survives into the resting state. Starting from `transform: none` plus the
+authored `rotate` decomposes cleanly. The rule joins the existing
+`(scripting: enabled) and (prefers-reduced-motion: no-preference)` block in
+`globals.css`, verified present in the built chunk.
+
+**`transformPerspective: 800` is required, not decorative.** Without a
+perspective, `rotateY(45deg)` is an orthographic projection — a flat horizontal
+squash with no foreshortening — and does not read as a flip. GSAP writes it as
+`perspective()` at the head of the element's own transform string
+(`CSSPlugin.js:1078-1079`), so it is element-local and needs no `perspective` on
+the parent. 800 is ~2× the `lg` element width. `transformOrigin` stays at the
+default `50% 50%`: the diamond path spans `6…394` of the 400-wide viewBox, so
+its visual centre is the box centre. The leftover inline `perspective(800px)
+rotate(-8deg)` after the tween is cosmetic — it is visually identical to the
+class, since a perspective row is inert for a flat element at z 0 — and is left
+alone.
+
+**`isTabletUp: "(min-width: 768px)"` is a third named condition**, alongside the
+`reduceMotion` / `fullMotion` pair. The mark is `display: none` below `md`, so
+no tween is created at 375 at all. The reduce branch sets **only the opacity** —
+touching a transform property there would parse the transform and strip the
+authored `rotate`, exactly as above.
+
+**Overflow was computed, not eyeballed.** For a 2:1 box the rotated bounding
+half-width `(w·cosθ + h·sinθ)/2` is flat between 8° and 45°: at `md` the right
+edge is 202.7 at rest against 202.8 at the start (the list begins at 222), at
+`lg` 409.2 against 409.4 (list at 437.3). Under a tenth of a pixel — the width
+lost to `cos` is repaid by the height projected through `sin` — and `rotationY`
+foreshortens X further, so the mid-flip box is *narrower* than at rest. Measured
+mid-flight at 768 the box peaks at `315×251`, still clear of the list. The
+vertical bbox does grow ~±35px into the whitespace above and the empty tail of
+the left grid column; the h2 and the list are in the *other* column. Nothing in
+the chain may become `overflow-hidden`.
+
+#### Measured in the production build
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| `display` | `none` | `block` | `block` |
+| resting rect | `0×0` | **`307×184`** | **`421×252`** |
+| resting matrix | — | `matrix3d(0.990268, -0.139173, …)` | same |
+| pre-trigger | `opacity 0`, no tween | `opacity 0`, `rotate(-45deg) rotateY(45deg)` | `opacity 0` |
+| mid-flight | — | `opacity 0.77`, `rotate(-16.7) rotateY(10.6)` | `opacity 0.79`, `rotate(-15.7) rotateY(9.3)` |
+| reduced motion | `opacity 1`, untouched | `opacity 1`, `rotate: -8deg`, `307×184` | `opacity 1`, `rotate: -8deg`, `421×252` |
+
+The resting matrix's 2D block is exactly `cos/sin 8°`; the only extra term is the
+perspective row (`-1/800`), inert at z 0. The resting rects are the settled
+numbers unchanged. Under reduced motion the inline style is never written at
+all, and with JavaScript off the `scripting: enabled` gate never applies.
+
+`/` is **pixel-identical** in its settled state at 375 / 800 / 1280 (`magick
+compare -metric AE` = 0 at 5 % fuzz against a worktree build of the parent
+commit) and its page heights are unchanged at **6350 / 6006 / 5595**. It is the
+only route whose prerendered HTML changes: the wrapper's `data-reveal-item`
+becomes `data-journal-mark`, the SVG becomes a client reference, and the page
+chunk is renamed. The other 15 pages are byte-identical once the build id and
+the CSS chunk name are normalised, and **every one of them keeps the identical
+chunk set** — no GSAP leak.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -1783,6 +1913,28 @@ change. Normalise the build id (`.next/BUILD_ID`) and the CSS chunk name
 (`/_next/static/chunks/*.css` — Next puts CSS under `chunks/`, not `css/`) and
 report differing *regions* with `difflib.SequenceMatcher`. Keep the helper in
 the scratchpad; it is ~20 lines of Python.
+
+**The CSS chunk name is not hex, and `difflib.SequenceMatcher` on these files
+times out.** Two traps in the build-diff helper, both hit again in prompt 20:
+the chunk is `/_next/static/chunks/0fxyh0j19zdp7.css`, so a `[a-f0-9]+`
+normalisation silently matches nothing and reports all 16 pages as differing;
+use `[A-Za-z0-9_-]+`. And `SequenceMatcher` over a 200 KB single-line page runs
+for minutes — scan the common prefix and suffix instead (two `while` loops) and
+print only the middle. For the one page that legitimately differs, re-split on
+`(?<=>)` and run `unified_diff` over the tags, which is fast and readable.
+
+**`playwright-core`'s npx cache hash changes.** Do not copy a path out of an
+older note — resolve it each session with
+`ls -d /home/gdk26/.npm/_npx/*/node_modules/playwright-core`.
+
+**GSAP consumes an element's independent `rotate` / `translate` / `scale`.**
+`_parseTransform` folds them into one `transform` and sets all three to `none`
+(`node_modules/gsap/CSSPlugin.js:859-866`), unconditionally. So a Tailwind v4
+`-rotate-[8deg]` class is **not** safe from a tween that writes `transform`: any
+tween on that element must land on the authored angle explicitly. Probe
+`getComputedStyle(el).rotate` before and after the tween to see it happen.
+Corollary: a CSS start state that combines a perspective with an authored
+`rotate` decomposes into a spurious `rotationX` the tween never clears.
 
 **Building the parent commit needs a sibling worktree with hard-linked
 `node_modules`.** Turbopack rejects a symlinked `node_modules` outright
