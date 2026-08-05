@@ -1300,12 +1300,26 @@ GSAP, on the homepage and nowhere else. Two reference recordings in
 desktop, tablet and mobile) and `chart.webm` (a generic bar chart). Prompt 17.
 
 **The vocabulary is small and identical at every breakpoint**: fade in and
-rise, per-element stagger in reading order, ~0.6 s each with ~0.1 s between
+rise, per-element stagger in reading order, ~0.5 s each with ~0.08 s between
 siblings, decelerating, **once, on enter**. Nothing scales, blurs or rotates;
 nothing reverses on scroll-up; nothing is scrubbed. **No pinning, no parallax,
 no horizontal scroll, no `ScrollSmoother`** — the recording contains none of
 them and they would fight the sticky navbar. `DUR` and `EASE` live in
 `motion/register.ts` so the chart and the page reveals cannot drift apart.
+
+**The shipped timings are one step faster than the recording, on purpose**
+(prompt 18). `DUR 0.5`, sibling stagger `0.08`, the chart's gridlines and bars
+`0.4` with stagger `0.05` and a **0.7 s** bar run — a deliberate ~20 % cut on
+the recording's own pace at the user's request, in the same spirit as the seal's
+offsets being overridden by a user reference. Nothing else moved: `EASE`
+(`power3.out`), `from: "edges"`, the `power1.inOut` stagger ease, the rise
+distances (36 / 24), `start: "top 88%"`, the chart's `start: "bottom bottom",
+once: true` and the `immediate` hero are all unchanged, and `DUR` / `EASE`
+remain the single source of truth in `register.ts`. These are tween vars, not
+markup — **all 16 prerendered pages, `/` included, are byte-identical** across
+the change once the build id and the CSS chunk name are normalised. Verified in
+the render at 1280: bars sit at scaleY 0 until the chart scrolls in, then run
+edges-first with the centre still at 0.58 when the ends have landed.
 
 ### The component split
 
@@ -1349,14 +1363,17 @@ One timeline: gridlines `scaleX 0→1` from `left center` (stagger 0.06,
 top-to-bottom), then the 33 bars `scaleY 0→1` from `bottom center`, then the
 `220` pill fades and rises.
 
-- **`stagger: { amount: 0.9, from: "edges", ease: "power1.inOut" }`.** GSAP's
+- **`stagger: { amount: 0.7, from: "edges", ease: "power1.inOut" }`** (0.9 as
+  originally fitted; see the speed-up note above)**.** GSAP's
   advanced-stagger `from` takes `"start" | "center" | "edges" | "end" |
   "random" | <index>`; `"edges"` starts at both ends of the target array at once
   and converges on the middle, which is exactly the user's ask. Do not hand-roll
   it with an index function. `amount` rather than `each` so the run length is
   authored once and does not drift with the bar count. **Verified in the render**
-  — 0.56 s in, bars 0–3 and 29–32 read scaleY 0.15/0.13/0.09/0.04, symmetric,
-  everything between still 0.
+  — at 0.9 the original fit read, 0.56 s in, bars 0–3 and 29–32 at scaleY
+  0.15/0.13/0.09/0.04, symmetric, everything between still 0; at 0.7 the same
+  shape holds, with the two ends landed and the middle bar still at 0.58 1.2 s
+  in.
 - **Never animate `height`.** The bars' heights are inline `em` values driving
   layout; `scaleY` is a compositor transform and leaves layout alone.
 - **The pill is a sibling of the scaled bar, not a child** — both sit inside the

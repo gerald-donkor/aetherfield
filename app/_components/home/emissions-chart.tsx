@@ -75,9 +75,9 @@ export function EmissionsChart() {
             {
               scaleX: 1,
               transformOrigin: "left center",
-              duration: 0.5,
+              duration: 0.4,
               ease: "power2.out",
-              stagger: 0.06,
+              stagger: 0.05,
             },
           )
             .fromTo(
@@ -86,12 +86,12 @@ export function EmissionsChart() {
               {
                 scaleY: 1,
                 transformOrigin: "bottom center",
-                duration: 0.5,
+                duration: 0.4,
                 ease: "power2.out",
                 // `amount` rather than `each`: the run length is authored once
                 // and does not drift with the bar count. `from: "edges"` starts
                 // at both ends of the array and converges on the middle.
-                stagger: { amount: 0.9, from: "edges", ease: "power1.inOut" },
+                stagger: { amount: 0.7, from: "edges", ease: "power1.inOut" },
               },
               "-=0.25",
             )

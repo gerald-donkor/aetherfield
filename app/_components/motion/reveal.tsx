@@ -91,7 +91,7 @@ export function Reveal({
               duration: DUR,
               ease: EASE,
               delay,
-              stagger: 0.1,
+              stagger: 0.08,
               scrollTrigger: immediate
                 ? undefined
                 : { trigger: root.current, start, once: true },
