@@ -114,9 +114,13 @@ export function Journal() {
                   className="border-b border-border py-5"
                   data-reveal-item
                 >
+                  {/* The slide sits on the Link, not the li: the li carries the
+                      row's rule (which the reference holds still) and GSAP's
+                      inline reveal transform. Measured off the reference —
+                      10px, ~300ms, ease-in-out. See AGENTS.md. */}
                   <Link
                     href={`/article/${a.slug}`}
-                    className="group grid gap-4 md:grid-cols-[164px_1fr] md:items-start md:gap-6"
+                    className="group grid gap-4 transition-transform duration-300 ease-in-out hover:translate-x-2.5 motion-reduce:transition-none md:grid-cols-[164px_1fr] md:items-start md:gap-6"
                   >
                     {/* src is optional on Article for the styleguide's inert
                         specimens; every real entry carries one. */}
@@ -129,7 +133,10 @@ export function Journal() {
                       className="aspect-[164/100] w-full object-cover"
                     />
                     <div>
-                      <h3 className="font-sans text-p1 font-bold group-hover:underline">
+                      {/* The reference draws no underline — the title just
+                          fades. 0.7 is the footer's existing idiom and sits
+                          inside the measurement; text-muted is ruled out. */}
+                      <h3 className="font-sans text-p1 font-bold transition-opacity duration-300 ease-in-out group-hover:opacity-70 motion-reduce:transition-none">
                         {a.title}
                       </h3>
                       <Meta className="mt-2" items={[a.category, a.readTime]} />

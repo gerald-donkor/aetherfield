@@ -1466,6 +1466,91 @@ spans instead.
 **`motion@^13` is in `package.json` and is unused by this work.** The homepage
 is GSAP throughout. Do not mix the two libraries on one page.
 
+### The journal rows' hover
+
+**The one hover animation on the site, and it is CSS, not GSAP.** Prompt 19.
+Reference: `public/design-ref/animation-ref/home-journals.webm` (34 s of the
+"From the journal" rows being hovered), plus the user's
+`~/Videos/Screencasts/Screencast_20260805_193354.webm`. The recording that
+prompted it — `Screencast_20260805_193215.webm` — shows the old behaviour: an
+underline that snapped on in a single frame with no transition anywhere near it.
+
+Two class strings in `home/journal.tsx`. **The slide is on the `<Link>`, not on
+the `<li>`** — the `li` carries the row's `border-b` (which the reference holds
+still) *and* GSAP's inline reveal transform, so putting it there would move the
+rule and fight the tween. Verified in the render: the `li`'s rect does not move
+and its transform stays `matrix(1, 0, 0, 1, 0, 0)`.
+
+| | at rest | on hover | how it was measured |
+| --- | --- | --- | --- |
+| the row (image + title + meta) | — | **+10 px in x** | title ink box left edge 6 → 16, **width constant at 365** — a translation, not a scale |
+| title | `#000` | **≈ 84/255 ink ≈ 0.67 opacity** | aligned crop mean 198.87 → 217.27, ink fraction 0.220 |
+| meta | — | **unchanged** | aligned crop mean 240.81 → 240.73 |
+| thumbnail | — | **unchanged** — no zoom, no fade | aligned crop mean 186.65 → 186.66 |
+| the row's rule | — | **does not move** | static pixels |
+| underline | none | **none** | title ink box height constant at 19 px |
+
+**The recordings are 1:1 with CSS pixels** — the thumbnail measures 165 and 166
+px against the authored `md:grid-cols-[164px_1fr]` — so distances read off them
+are CSS pixels directly. Establish that before trusting any number here.
+
+**Both recordings were measured independently and agree.** On the 34 s file the
+cursor sits inside the title crop during the hover, so the ink box's *left* edge
+is the cursor's; read the **right** edge instead (379 → 389, +10) and crop the
+tone probe to start past the cursor (191.57 → 212.73, which solves to the same
+85/255).
+
+**The easing is authored because the default is measurably wrong.** Title left
+edge per frame at 30 fps: `6,6,6,7,7,9,10,12,13,15,16,16,16,16`; mouse-out
+mirrors it. Fitting named curves to that trace:
+
+| curve | best duration | SSE |
+| --- | --- | --- |
+| linear | 230 ms | 0.0153 |
+| **`ease-in-out`** | **300 ms** | **0.0157** |
+| `ease-out` (CSS) | 270 ms | 0.0211 |
+| `ease` | 360 ms | 0.0334 |
+| `ease-out` (Tailwind's `cubic-bezier(0,0,.2,1)`) | 330 ms | 0.0518 |
+
+Linear and `ease-in-out` are tied at the top and Tailwind's default is the
+**worst** fit, so it ships `duration-300 ease-in-out`. ±1 px on a 10 px travel
+is ±10 % of progress — claim no more precision than that.
+
+**`opacity-70`, not `opacity-65` and definitely not `text-muted`.** Predicted
+crop means are 215.7 / 218.5 / 222.6 against the measured 217.3: the first two
+straddle it and cannot be told apart, so 70 wins on idiom — `SiteFooter` already
+ships `hover:opacity-70`. `text-muted` (`#6c6c6c`) is out by 5 grey levels.
+
+Four Tailwind v4 mechanics, all checked against the **built** stylesheet rather
+than assumed — re-check them on any Tailwind upgrade:
+
+- `translate-x-2.5` is `2.5 × --spacing`, and `--spacing` is not overridden in
+  `@theme`, so it is exactly **10 px**.
+- **v4 emits translate utilities as the `translate` property, not `transform`.**
+  `.transition-transform` expands to
+  `transition-property: transform, translate, scale, rotate` and does cover it —
+  but a narrower `transition-[transform]` would silently not animate.
+- v4 already wraps every `hover:` / `group-hover:` rule in
+  `@media (hover:hover)`, so nothing sticks on touch and no guard is needed.
+- `motion-reduce:transition-none` compiles to
+  `@media (prefers-reduced-motion:reduce){transition-property:none}` — the hover
+  state still applies, just instantly, which is how the GSAP reduce branch
+  already behaves.
+
+**`cards.tsx` was deliberately left alone.** `ArticleCardStacked` carries the
+same `group-hover:underline` idiom and feeds `/journal`, the `/article`
+recent-articles band and `/design-system`, but those were fitted against their
+own comps and no recording covers them. Extending this treatment to them is a
+separate decision — as is the rest of the site's hover states, which remain
+three unrelated idioms (`hover:text-muted`, `hover:opacity-70`,
+`hover:underline` / `hover:no-underline`).
+
+Measured in the production render at 1280: link x **+10.00**, image **+10.00**,
+`li` **+0.00**, `h3` opacity `1 → 0.7`, `text-decoration-line` `none` in both
+states, an intermediate value mid-transition, and a full reverse on mouse-out.
+`/` is the only route whose prerendered HTML changes and its only diffs are the
+two class attributes — the other 15 pages are byte-identical.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
