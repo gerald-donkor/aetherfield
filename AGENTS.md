@@ -2489,6 +2489,10 @@ keeping: **nothing outside `home/` may import `home/sections.tsx` or any
 `home/` client module.** The leaf-import discipline stays; `motion/` is the
 shared surface and the footer is the one module that reaches everywhere.
 
+`/about` took `Reveal` the same way in prompt 30 — see "`/about`'s reveals"
+below. With GSAP already in the shared chunk, its cost is +998 raw / +643
+gzipped, which is why the chunk *count* moving 9 → 10 overstates it.
+
 The measured cost, against a build of `729bfcc` in a sibling worktree:
 
 | | chunk count | raw JS | gzipped JS |
@@ -2769,6 +2773,208 @@ sample has no `group` link, so it is visually unchanged.
 - `ArticleCardHorizontal`, `ArticleCardCompact`, `Meta` and the job listing's
   prose `hover:underline` are untouched.
 
+## `/about`'s reveals
+
+Prompt 30 (the file is `prompts/30-about-page-motion.md`; it was drafted as 29
+and renumbered on execution — 29 was already taken by the perforation speed
+change). `/about` was the last content route with no motion of its own, and it
+now carries the site's existing `Reveal` and nothing else: **no new motion
+component, no new timing constant, no `globals.css` rule, no geometry change,
+no asset.** `about/sections.tsx` **stays a server component** — `children`
+arrive as a prop, so its `next/image` never reaches the client bundle.
+
+### `about.webm` *does* contain motion — and it is not our build
+
+`public/design-ref/animation-ref/about.webm` (1264×573, 20.517 s, one
+continuous scroll pass, recorded on localhost). **Unlike `journal.webm`, which
+constrains nothing, this one carries authored motion and it was measured.**
+
+**But it is a different implementation of the same comps.** Connected
+components on the settled values row (t = 8.667) gives the three cards as
+`398x247+19+133`, `397x246+433+134`, `398x246+846+134`; ours render **276
+tall** — the 48px icon-box deviation already recorded above under "About page".
+So the recording matches the comp's card height where ours deliberately does
+not. **Read it for motion only.** Every geometry, type and wrap difference
+against it is out of scope and must not be "fixed". No later session should
+re-derive this.
+
+### What was measured, and how
+
+**The rise is measured with an ink-weighted centroid, which is
+opacity-invariant** — opacity scales every weight uniformly, so the centroid
+does not move as an element fades — and therefore separates a rise from the
+page's own scrolling. The reference landmark is a neighbouring element that has
+already settled.
+
+| block | channel | rise | window |
+| --- | --- | --- | --- |
+| values card 1 | icon centroid − "Our values" centroid | 152.1 → 117.9 = **34.2 px** | t 7.90 → ~8.45 |
+| team table | first-row centroid − "Meet the team" centroid | 192.9 → 160.5 = **32.4 px** | t 12.00 → 12.40 |
+
+32–34 px against `Reveal`'s authored **36 px** desktop rise. Opacity runs 0→1
+over the same window (values-card icon ink mass 5 222 → 94 000; founder title
+ink mass 210 011 → 974 400).
+
+**There is no sibling stagger, and that *is* a departure from `/`.** The three
+values cards' rise is identical **to within 0.7 px at every frame**:
+
+```
+h014  c1 144.3  c2 144.2  c3 144.6
+h019  c1 131.3  c2 131.2  c3 130.5
+h024  c1 121.9  c2 121.7  c3 121.1
+h030  c1 117.9  c2 117.7  c3 117.1
+```
+
+At the measured ~72 px/s mid-tween, 0.7 px is **under 10 ms**, where `Reveal`'s
+`stagger` prop puts **0.08 s** between siblings. So the values grid is **one
+plain `<Reveal>`, never `<Reveal stagger>`.** Do not "improve" it with a
+stagger.
+
+**Blocks trigger separately, rather than one section trigger with a stagger.**
+"Our values" fades in at t ≈ 6.95–7.15; its cards do not start until t ≈ 7.90 —
+a ~0.75 s gap on a continuous scroll. Same shape on the team block: "Meet the
+team" is settled by t = 11.3 while the table starts at t ≈ 12.0.
+
+**The founder text is one group, not three staggered lines.** Eyebrow, title and
+prose share the same α at every frame (0.247/0.244, 0.455/0.431, 0.627/0.606,
+0.710/0.688, 0.773/0.769 title/eyebrow) and their mutual gaps are constant
+throughout (eyebrow→title 36–37 px, title→prose 107 px). One target, one tween.
+
+**Duration could not be resolved better than 0.5–0.7 s.** Fitting `power3.out`
+frame by frame and solving for `D`:
+
+| channel | fitted `D` |
+| --- | --- |
+| values-card rise (centroid, opacity-invariant) | 0.60 – 0.75 s |
+| founder title opacity (ink mass) | 0.40 – 0.74 s, drifting |
+| team-table rise | ~0.45 s |
+
+**The fit drifts in every ease tried** (`power2/3/4.out`, `expo.out`). The
+site's existing `DUR = 0.5` / `EASE = "power3.out"` / `y = 36` sits inside that
+band on all three channels, so they were **reused, not refitted**. If this is
+ever revisited: say "measurement could not separate 0.5 from 0.7", not "0.5 was
+measured".
+
+**What the recording could NOT resolve**, and so is not claimed:
+
+- **The hero on load.** The load beat (t = 3.2–5.2 at 20 fps) is progressive SSR
+  paint plus a font swap, with no readable fade. `AboutHero`'s `immediate` is
+  therefore a **judgement** — the call `/`'s hero and `/journal`'s stamp both
+  make for an above-the-fold block — not a measurement.
+- **The portrait and the seal.** Both enter from the foot of the viewport at
+  full opacity within ~2 frames of becoming measurable (blue-band mean stable at
+  241/246/251 from t = 8.80). `AetherfieldSeal` gets no motion of its own; it
+  rides the portrait column's `Reveal`.
+- **The footer.** The reference's wordmark is solid the instant it crosses the
+  fold. **Ours keeps prompt 24's split blur-in**, which reaches every route via
+  `chrome.tsx` and was shipped at the user's explicit request.
+
+### What ships
+
+`Reveal`'s `as` union gained **`"table"`** — one word, inert, the same kind of
+change `"h2"` was for `/journal`. It is what lets the team table animate
+**without a wrapper box**, which a `<div>` around a `<table>` would not manage
+cleanly.
+
+Eight targets, all at `Reveal`'s default `start: "top 88%"`:
+
+| element | shape |
+| --- | --- |
+| `AboutHero`'s `<section>` | `<Reveal as="section" immediate>` |
+| "Our values" `<h2>` | `<Reveal as="h2">` |
+| the values `<ul>` | `<Reveal as="ul">` — **no `stagger`** |
+| the portrait column | `<Reveal className="relative">` |
+| the founder prose column | `<Reveal>` — one target for eyebrow + title + prose |
+| "Meet the team" `<h2>` | `<Reveal as="h2">` |
+| the team `<table>` | `<Reveal as="table">` |
+| `CtaBand` | wrapped **at the call site in `app/about/page.tsx`** |
+
+`chrome.tsx` is **not** edited — the same call `app/page.tsx` and
+`app/journal/page.tsx` make. The sky band in `page.tsx` is deliberately **not**
+wrapped: it is a document-level absolute sibling and paints immediately, as the
+recording shows.
+
+**Known deviation, recorded not chased:** the reference's elements begin fading
+at roughly **95–97 %** of viewport height (its "Our values" is already grey at
+the viewport foot), i.e. its trigger sits ~50 px lower at that 573 px viewport.
+Matching it would fork the site's one trigger constant for a single page.
+
+`globals.css` needed no change — `[data-reveal] { opacity: 0 }` inside the
+existing `(scripting: enabled) and (prefers-reduced-motion: no-preference)`
+block already covers every target. **Confirmed in the built chunk**, not
+assumed: `[data-reveal],[data-reveal-item],[data-chart-pill]{opacity:0}`.
+
+### Measured in the production build
+
+Against a worktree build of `39b788c`.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| page height | **5242** | **4129** | **4279** |
+| `AE` @ 5 % fuzz, settled | **0** | **0** | **0** |
+| reveal targets below opacity 1 after a full pass | 0 of 8 | 0 of 8 | 0 of 8 |
+
+Page heights are the recorded numbers **unchanged**, and `/about` has no
+scrubbed element, so a bare page-wide `AE` is the right instrument here —
+unlike `/` and `/journal`.
+
+**The lockstep property, which is what distinguishes this page from
+`<Reveal stagger>`**, probed at 1280 through the values tween:
+
+```
+ul opacity 0      card tops 687.66 687.66 687.66   spread 0.00px
+ul opacity 0.438  card tops 671.90 671.90 671.90   spread 0.00px
+ul opacity 0.652  card tops 664.18 664.18 664.18   spread 0.00px
+ul opacity 0.838  card tops 657.47 657.47 657.47   spread 0.00px
+ul opacity 1      card tops 651.66 651.66 651.66   spread 0.00px
+```
+
+**Separate triggers confirmed**: scrolled so the heading is past `top 88%` but
+its content is not, `h2` reads `1` while the `ul` reads `0`; the same on the
+team block (`h2` `1`, `table` `0`). At scroll 0 the hero reads `1` (it is
+`immediate`) and the other seven all read `0`.
+
+**Reduced motion**: all eight at `opacity: 1` and `transform: translate(0px,
+0px)`, i.e. at rest. **Note the prompt expected "no inline transform written"
+and that is wrong about `Reveal`** — its reduce branch is `gsap.set(targets, {
+opacity: 1, y: 0 })`, which writes the inline transform. Verified identical on
+the **base** build's `/journal`, so it is pre-existing shared behaviour, not
+something this change introduced; fixing it would move `/` and `/journal`.
+
+**JavaScript off**: all eight at `opacity: 1` at their normal boxes
+(`1280x800`, `1232x44`, `1232x276`, `612x700`, `400x338`, `1232x66`,
+`1232x711`, `1280x348`) — the `scripting: enabled` gate never applies.
+
+**Four `/about` ⇄ `/` and `/about` ⇄ `/journal` round trips, each with a full
+scroll pass: zero page errors and zero console errors.** `Reveal` contains no
+`contextSafe` and none was added.
+
+### Impact
+
+**`/about` is the only route whose prerendered HTML changes**, and its only
+diffs are the seven `data-reveal` attributes, the `CtaBand` wrapper `<div
+data-reveal>`, the `Reveal` client-reference `<script>` and chunk/build-id
+renames. **The other 15 pages are byte-identical** once the build id and the CSS
+and JS chunk names are normalised — no flight-payload segmentation to see
+through, because no class string changed.
+
+Chunk sets: `/about` goes **9 → 10**, the same way `/journal` did in prompt 24;
+every other route keeps its exact set (`/` and `/journal` 10, the rest 9). GSAP
+is already in the shared chunk site-wide, so **diff the chunk bytes, not the
+list length** — `/about` is **775 793 → 776 791 raw (+998)** and **242 879 →
+243 522 gzipped (+643)**. Every other route's totals are byte-identical.
+
+### Non-goals held
+
+- **No geometry, type, spacing or asset change.** The card height, the
+  `display-band-h2` sizing, the `CtaBand` padding and the mobile length are all
+  already-recorded deviations and were not chased.
+- **The footer keeps its split blur-in**, and `chrome.tsx` was not edited.
+- **No stagger, no scrub, no pin, no parallax, no loop, no hover.** The
+  capabilities cloth is still the site's only scroll-linked element.
+- **No new timing constant** — `DUR` and `EASE` come from `register.ts`.
+- **`primitives.tsx`, `cards.tsx` and `home/` are untouched.**
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -2994,6 +3200,43 @@ magick montage frames/f0*.jpg -tile 6x -geometry +2+2 -resize 320x sheet.png
 1 fps first, to find where each pass and each section starts; then 12–15 fps
 over the two or three seconds that matter. **A 1 fps sample makes clean opacity
 fades look like blur** — do not diagnose an effect off the coarse pass.
+
+**Measuring a rise off a scroll-pass recording: use an ink-weighted centroid,
+relative to a settled neighbour.** A recording of a continuous scroll moves
+*everything*, so an element's absolute y tells you nothing about its tween. Two
+properties make the centroid the right channel:
+
+- **It is opacity-invariant.** Opacity scales every pixel's weight uniformly, so
+  the centroid does not move as an element fades — it isolates the rise from the
+  fade, which a bbox-top or a first-ink-row reading cannot.
+- **Differencing it against a neighbour that has already settled removes the
+  page scroll**, which is common to both.
+
+Take the centroid over a crop containing one element, per frame, and report
+`element_centroid − landmark_centroid`. On `about.webm` this gave 34.2 px and
+32.4 px on two independent blocks against an authored 36 — see "`/about`'s
+reveals". The same trace also tests for a **sibling stagger**: sample all
+siblings per frame and look at the spread. Under 1 px at a ~70 px/s rise is
+under 10 ms, i.e. no stagger; `Reveal`'s own stagger is 0.08 s and is
+unmistakable.
+
+**Ink *mass* over the same crop is the opacity channel** — sum the ink weights
+rather than their centroid. Two elements sharing one tween show the same α at
+every frame *and* constant mutual gaps; three separate tweens do not.
+
+**Fitting a duration to such a trace usually fails, and saying so is the
+result.** Solve for `D` frame by frame under a candidate ease; if the fitted `D`
+*drifts* across the window under `power2/3/4.out` and `expo.out` alike, the
+recording does not resolve it. Report the band and reuse the site's existing
+`DUR`/`EASE` rather than inventing a number — and record "measurement could not
+separate 0.5 from 0.7", never "0.5 was measured".
+
+**Check whether a reference recording is even your build before fitting motion
+to it.** Run connected components on a settled frame and compare the box list to
+your render. `about.webm`'s values cards are 246 tall against ours at 276, so it
+is a *different implementation* of the same comps — usable for motion, useless
+for geometry. Establish this first; it is what stops a later session "fixing"
+a deliberate deviation to a recording.
 
 **Comparing two builds' prerendered HTML is a script, not an eyeball.** The
 pages are single-line, so `diff` prints the whole file for a one-character

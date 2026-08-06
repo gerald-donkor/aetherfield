@@ -5,7 +5,15 @@ import { DUR, EASE, gsap, useGSAP } from "./register";
 
 type RevealProps = {
   /** Element to render. Defaults to a plain `div`. */
-  as?: "div" | "section" | "ul" | "li" | "header" | "figure" | "h2";
+  as?:
+    | "div"
+    | "section"
+    | "ul"
+    | "li"
+    | "header"
+    | "figure"
+    | "h2"
+    | "table";
   /** Animate `[data-reveal-item]` descendants in document order, not the box. */
   stagger?: boolean;
   /** Seconds before the sequence starts. */

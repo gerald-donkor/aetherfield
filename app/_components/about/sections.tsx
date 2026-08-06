@@ -2,6 +2,7 @@ import Image from "next/image";
 import { ButtonLink } from "../primitives";
 import { Container } from "../home/container";
 import { PRINCIPLES } from "../home/principles-data";
+import { Reveal } from "../motion/reveal";
 
 /* -------------------------------------------------------------------------- */
 /*  Hero — sky band with the floating Forecast card, mission copy beside it     */
@@ -68,7 +69,17 @@ export function AboutHero() {
     // top of the artboard and centre the card in it, but SiteNav is sticky and
     // so takes 60px of flow; without this the card and the mission column both
     // sit 60px low. The bar is transparent glass over the band, as on the comp.
-    <section className="-mt-[60px] lg:flex lg:items-center">
+    // `immediate` because the block is above the fold at every breakpoint — the
+    // call `/`'s hero and `/journal`'s stamp both make. A judgement, not a
+    // measurement: about.webm's load beat is progressive SSR paint plus a font
+    // swap, and cannot resolve whether the hero animates. The sky band is a
+    // document-level sibling in page.tsx and is deliberately *not* wrapped, so
+    // it paints immediately, as the recording shows.
+    <Reveal
+      as="section"
+      immediate
+      className="-mt-[60px] lg:flex lg:items-center"
+    >
       {/* Matches the sky band exactly — 375×320 / 800×480 / 632×800, the last
           being 49.375 % of the 1280 artboard. The band itself is painted by a
           document-level absolute sibling in page.tsx; this box only holds the
@@ -97,7 +108,7 @@ export function AboutHero() {
           </div>
         </div>
       </div>
-    </section>
+    </Reveal>
   );
 }
 
@@ -109,10 +120,22 @@ export function Values() {
   return (
     <section className="pt-10 pb-10 md:pt-20 md:pb-[118px] lg:pt-[118px] lg:pb-40">
       <Container>
-        <h2 className="display-fluid-h4 text-center font-sans font-bold">
+        {/* Two independent triggers, not one section tween with a stagger.
+            about.webm puts ~0.75 s between the heading settling and the cards
+            starting on a continuous scroll, and the three cards' rise is
+            identical to within 0.7 px at every frame — under 10 ms at the
+            measured ~72 px/s, where `stagger` would put 0.08 s between them.
+            So: no `stagger` prop on either. */}
+        <Reveal
+          as="h2"
+          className="display-fluid-h4 text-center font-sans font-bold"
+        >
           Our values
-        </h2>
-        <ul className="mt-8 grid gap-4 md:mt-10 lg:grid-cols-3">
+        </Reveal>
+        <Reveal
+          as="ul"
+          className="mt-8 grid gap-4 md:mt-10 lg:grid-cols-3"
+        >
           {PRINCIPLES.map((p) => (
             <li
               key={p.title}
@@ -134,7 +157,7 @@ export function Values() {
               <p className="mt-2 font-serif text-p2">{p.body}</p>
             </li>
           ))}
-        </ul>
+        </Reveal>
       </Container>
     </section>
   );
@@ -218,7 +241,11 @@ export function FounderStory() {
   return (
     <section className="pb-11 md:pb-20 lg:pb-[120px]">
       <Container className="md:grid md:grid-cols-[372px_1fr] md:items-center md:gap-14 lg:grid-cols-[612px_1fr] lg:gap-[120px]">
-        <div className="relative">
+        {/* The seal rides this column's Reveal rather than getting one of its
+            own: its entrance could not be isolated in about.webm — portrait and
+            seal both enter from the foot of the viewport at full opacity within
+            ~2 frames of becoming measurable. */}
+        <Reveal className="relative">
           {/* Hangs off the left page gutter, as JournalMark does on the
               homepage, and dropped below md for the same reason: Mobile.png
               draws the portrait with no mark over it. The offsets are the
@@ -237,9 +264,12 @@ export function FounderStory() {
             sizes="(max-width: 768px) 100vw, (max-width: 1024px) 372px, 612px"
             className="w-full"
           />
-        </div>
+        </Reveal>
 
-        <div className="mt-6 md:mt-0 lg:max-w-[400px]">
+        {/* One target for eyebrow + title + prose. Measured: the three share the
+            same α at every frame (0.247/0.244 … 0.773/0.769) and their mutual
+            gaps are constant throughout, so it is one tween, not three. */}
+        <Reveal className="mt-6 md:mt-0 lg:max-w-[400px]">
           <p className="font-serif text-p2 text-muted">Founder&apos;s story</p>
           <h2 className="display-band-h2 mt-2 font-sans font-bold">
             Eunji Park
@@ -251,7 +281,7 @@ export function FounderStory() {
             past decade building tools that turn impact goals into real-world
             outcomes. She still insists on biking to every investor meeting.
           </p>
-        </div>
+        </Reveal>
       </Container>
     </section>
   );
@@ -285,12 +315,18 @@ export function TeamTable() {
       className="bg-surface py-10 md:py-20 lg:pt-[120px] lg:pb-[126px]"
     >
       <Container>
-        <h2 className="display-band-h2 font-sans font-bold">Meet the team</h2>
+        {/* Separate triggers again — "Meet the team" is fully settled by
+            t = 11.3 in about.webm while the table only starts at t ≈ 12.0. */}
+        <Reveal as="h2" className="display-band-h2 font-sans font-bold">
+          Meet the team
+        </Reveal>
 
         {/* One table at every width. Below md the header row and the cell
             layout are dropped with CSS — each row becomes a stacked block —
-            rather than shipping the roster twice. */}
-        <table className="mt-7 w-full text-left md:mt-[52px]">
+            rather than shipping the roster twice. `Reveal as="table"` so the
+            reveal takes this element over rather than adding a wrapper box,
+            which would break the table's own box model. */}
+        <Reveal as="table" className="mt-7 w-full text-left md:mt-[52px]">
           <thead className="hidden md:table-header-group">
             <tr className="border-b border-border">
               <th
@@ -333,7 +369,7 @@ export function TeamTable() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Reveal>
       </Container>
     </section>
   );

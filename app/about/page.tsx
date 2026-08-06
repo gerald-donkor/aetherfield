@@ -6,6 +6,7 @@ import {
   TeamTable,
   Values,
 } from "../_components/about/sections";
+import { Reveal } from "../_components/motion/reveal";
 
 export const metadata: Metadata = {
   title: "About — Aetherfield",
@@ -37,12 +38,17 @@ export default function Page() {
         <FounderStory />
         <TeamTable />
         {/* On white, not surface: the team panel above it is already a surface
-            block and the comp keeps the two reading as separate blocks. */}
-        <CtaBand
-          tone="white"
-          headline="We're hiring! Want to join the team?"
-          action="View open roles"
-        />
+            block and the comp keeps the two reading as separate blocks.
+            Wrapped here rather than in `chrome.tsx`, exactly as `app/page.tsx`
+            and `app/journal/page.tsx` do it, so the band animates on the pages
+            that opted into motion and nowhere else. */}
+        <Reveal>
+          <CtaBand
+            tone="white"
+            headline="We're hiring! Want to join the team?"
+            action="View open roles"
+          />
+        </Reveal>
       </main>
 
       <SiteFooter />
