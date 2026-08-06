@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { ARTICLES } from "../../_content/articles";
 import { ArticleCardStacked } from "../cards";
+import { Reveal } from "../motion/reveal";
 
 /* -------------------------------------------------------------------------- */
 /*  Masthead stamp                                                              */
@@ -58,7 +59,10 @@ const SERIF = { fontFamily: "var(--font-serif)" };
 
 export function JournalStamp() {
   return (
-    <div className="relative aspect-[1240/480] w-full">
+    // The stamp is above the fold at scroll 0 at every breakpoint, so it plays
+    // on load — the same call the homepage hero makes. `Reveal` takes the
+    // existing wrapper over via `className`, so no box is added.
+    <Reveal immediate className="relative aspect-[1240/480] w-full">
       <Image
         src="/assets/generated/texture-journal.png"
         alt=""
@@ -117,7 +121,7 @@ export function JournalStamp() {
           </text>
         </g>
       </svg>
-    </div>
+    </Reveal>
   );
 }
 
@@ -128,19 +132,29 @@ export function JournalStamp() {
 export function LatestArticles() {
   return (
     <section className="mb-14 md:mb-24 lg:mb-40">
-      <h2 className="display-fluid-h4 mt-6 text-center font-sans font-bold md:mt-9 lg:mt-[76px]">
+      <Reveal
+        as="h2"
+        className="display-fluid-h4 mt-6 text-center font-sans font-bold md:mt-9 lg:mt-[76px]"
+      >
         Latest articles
-      </h2>
+      </Reveal>
 
       {/* Two columns from lg, with the comp's 16px column gutter. */}
       <div className="mt-10 grid grid-cols-1 gap-y-20 lg:grid-cols-2 lg:gap-x-4">
+        {/* One `Reveal` per card rather than a single `stagger` over the
+            section: the grid is ~3000px tall at 1280, so a section trigger at
+            `top 88%` would run all six cards while four are still far below the
+            fold. The delay reproduces the sibling stagger *within a row* while
+            each row still waits for its own trigger. The `Reveal` div becomes
+            the grid item and the `<article>` sits inside it as a plain block. */}
         {ARTICLES.map((article, i) => (
-          <ArticleCardStacked
-            key={article.title}
-            article={article}
-            href={`/article/${article.slug}`}
-            priority={i < 2}
-          />
+          <Reveal key={article.title} delay={i % 2 === 1 ? 0.08 : 0}>
+            <ArticleCardStacked
+              article={article}
+              href={`/article/${article.slug}`}
+              priority={i < 2}
+            />
+          </Reveal>
         ))}
       </div>
     </section>

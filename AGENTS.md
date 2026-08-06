@@ -1293,7 +1293,13 @@ three breakpoints (`magick compare -metric AE` = 0 against a worktree build of
 the parent commit) — the `PRINCIPLES` export and the `CtaBand` prop are inert.
 The sticky bar still pins on `/about` past the fold at all three widths.
 
-## Homepage motion (`/` only)
+## Homepage motion (`/` only, until prompt 24)
+
+**Superseded in part.** Everything in this section still describes `/`
+accurately, but "GSAP, on the homepage and nowhere else" and the "no GSAP leak"
+invariant are no longer true of the site: prompt 24 put motion on `/journal`
+and in the footer, and the footer reaches every route. See **"Site motion"**
+below for what replaced them.
 
 GSAP, on the homepage and nowhere else. Two reference recordings in
 `public/design-ref/animation-ref/`: `landing.webm` (three passes over `/` at
@@ -2241,6 +2247,195 @@ with no unattributed hit anywhere.
 **Aside, harmless:** the built stylesheet also contains a `.cursor-pointer`
 utility. Nothing in `app/` uses it — v4's automatic content detection picked the
 class name out of the prose in `prompts/25-*.md`.
+
+# Site motion — `/journal`, the article cards, and the footer
+
+Prompt 24. Three pieces from one request, and the first work that puts motion
+**outside `/`**. Everything in "Homepage motion" above still describes the
+homepage correctly; what changes here is the scope, and one invariant.
+
+## `journal.webm` contains no animation — it constrains nothing
+
+`public/design-ref/animation-ref/journal.webm` (1263×571, ~50 s) is a scroll
+pass down `/journal`. **It is a walkthrough of the current, unanimated page
+recorded on `localhost:3000`** — the "Spectacle is Recording" badge is in frames
+1–4 — not a designer's prototype. Sampled at 1 fps across the whole pass and at
+12 fps across the two entry beats (t≈10–14 s, the article grid; t≈26.5–31 s, the
+CTA band and footer), every element is fully opaque and at its final position
+the instant it crosses the fold.
+
+**So no number below is fitted to it, and no later session should re-do that
+sampling.** The `/journal` reveals are the site's existing `DUR` / `EASE` /
+stagger, unchanged.
+
+## `/journal`'s reveals
+
+The existing `Reveal` (`motion/reveal.tsx`), used as-is; no new motion component,
+and `DUR` / `EASE` are not restated. `journal/sections.tsx` **stays a server
+component** — `children` arrive as a prop, so its `next/image` never reaches the
+client bundle. `Reveal`'s `as` union gained `"h2"`, which is inert.
+
+- `JournalStamp`'s wrapper is `<Reveal immediate …>` — it is above the fold at
+  scroll 0 at every breakpoint, the same call the hero makes.
+- `LatestArticles`' `<h2>` is `<Reveal as="h2">` rather than a wrapping `div`,
+  so no box is added and its `mt-6` margin cannot collapse differently.
+- **Each card gets its own `Reveal`, not one `stagger` over the section, and
+  that is measured rather than stylistic.** The grid is ~3000 px tall at 1280,
+  so a single section trigger at `top 88%` would run all six cards while four
+  are still far below the fold. `delay={i % 2 === 1 ? 0.08 : 0}` reproduces the
+  sibling stagger *within a row* while each row still waits for its own trigger.
+  Verified in the render at 1280: scrolled to 700, the h2 and the first four
+  cards read `opacity: 1` while the cards at viewport-top 1200 and 1876 are
+  still at **`opacity: 0`**; all nine targets settle at 1.
+- `CtaBand` is wrapped **at the call site in `app/journal/page.tsx`**, exactly as
+  `app/page.tsx` does it. `chrome.tsx`'s `CtaBand` is not edited.
+
+## The article cards' hover zoom
+
+One change in `ArticleCardStacked` (`cards.tsx`), which feeds `/journal`, the
+`/article/[slug]` recent-articles band and `/design-system`. **This closes the
+"cards.tsx was deliberately left alone" exception** recorded twice above — the
+user took that decision explicitly ("Zoom in all the article images on hover in
+a beautifully animated way").
+
+The `<Image>` gains a `<span className="block overflow-hidden">` clip box — the
+device the homepage journal thumbnails already use — and
+`transition-[scale] duration-500 ease-in-out group-hover:scale-105
+motion-reduce:transition-none`.
+
+- **`ease-in-out` is measured; 500 ms and 5 % are judgements.** The curve is the
+  one already fitted off `home-journals.webm` for these rows (linear and
+  `ease-in-out` tied at the top of a five-curve fit; Tailwind's `ease-out` was
+  the worst). The duration is not fitted: the homepage thumbnails run 300 ms
+  across a 164 px box and this box is 612×356 at desktop, where the same 300 ms
+  over ~4× the travel reads snappy rather than "beautifully animated". Say
+  judgement, not measurement, if this is ever revisited.
+- **`scale-105`, not the thumbnails' `scale-110`.** 10 % of a 612 px image is
+  61 px of edge travel against 16 px on the thumbnail; 5 % lands at ~31 px.
+- **`transition-[scale]`, never `transition-[transform]`.** Confirmed in the
+  built stylesheet, not from memory:
+  `.group-hover\:scale-105{…scale:var(--tw-scale-x) var(--tw-scale-y)}` — the
+  independent `scale` property, the mechanic already recorded for
+  `translate-x-2.5` and `scale-110`. v4 also wraps `group-hover:` in
+  `@media (hover:hover)` for free (verified), so no touch guard is authored.
+- **No grayscale.** The homepage rows desaturate because that was measured off a
+  recording; nothing covers these cards and the ask was a zoom.
+- The `group` class only exists on the `<Link>`, so the hrefless
+  `/design-system` sample is unchanged apart from the wrapping `<span>`.
+
+Measured at 375 / 800 / 1280: rest `scale: none` → an intermediate 1.018–1.023
+mid-transition → `1.05` → back to `none`, with **no layout shift** (page heights
+unchanged and `AE` 0 in the settled state).
+
+## The footer's split blur-in — `motion/footer-reveal.tsx`
+
+New client leaf, imported by `chrome.tsx`. It renders the `<footer>` itself and
+takes its class string over via `className`, so the settled footer gains motion
+and **not a single box**. The three markers — `data-footer-split` on each nav
+`<a>` and on the `©` `<p>`, `data-footer-wordmark` on the wordmark `<svg>` — are
+inert attributes; no geometry, class string or element changed. Keep the file
+component-only.
+
+- **`type: "words"`, not `chars`.** 12 blurred layers against ~60; an animated
+  `filter: blur()` repaints every target's layer every frame.
+- **`data-footer-split` is per-link, not on the `<nav>`.** With `aria` at its
+  default `"auto"` SplitText labels the element it splits and hides the pieces,
+  so splitting the `<nav>` would strip every link of its accessible name.
+  Verified with `page.locator("footer nav").ariaSnapshot()`: five links, each
+  with its own name.
+- **`FOOTER_DUR = 1.0` and stagger `0.12`** — roughly double `register.ts`'s
+  `DUR 0.5` / `0.08`, a **deliberate slow departure at the user's request**
+  ("do not make the animation speed for that fast"), in the same spirit as the
+  seal's offsets. `EASE` is still imported, never restated. Blur is 10 px on the
+  split words and 16 on the wordmark.
+- **The wordmark is one element and can never be split**: SplitText does not
+  support SVG `<text>`, and its `textLength="1013"` from `x="-1.6"` is the
+  measured thing that holds the ink flush to both gutters at any viewport. It
+  takes the same blur + fade + rise as a single target, starting at the split
+  run's length less a 0.5 s overlap.
+- `autoSplit: true` with the animation created inside and returned from
+  `onSplit(self)`; `clearProps: "filter,display"` on the words, `"filter"` on
+  the wordmark; **never `opacity` or `transform`**. The start state is
+  `[data-footer-split], [data-footer-wordmark] { opacity: 0 }`, appended to the
+  existing `(scripting: enabled) and (prefers-reduced-motion: no-preference)`
+  block. **No `contextSafe`** — everything is created synchronously inside the
+  `mm.add` handler, and wrapping that is the crash already on file.
+
+### Two traps, both cost a build to find
+
+- **`gsap.from` reads the element's *current* value as the tween's end value.**
+  The wordmark's current opacity is the `0` the CSS start state pins it at, so
+  `gsap.from(wm, { opacity: 0 })` animates **0 → 0** and the wordmark never
+  appears — measured as `opacity: 0` inline and an ink count of literally 0 in
+  the render, on every page. The split words escape it because they are fresh
+  spans at their default opacity 1. **Any tween on an element that
+  `globals.css` hides must be a `fromTo` with the end value authored.** This
+  applies to `[data-reveal]`, `[data-journal-mark]` and `[data-hero-split]` too;
+  those all happen to animate split children or use `fromTo` already.
+- **One ScrollTrigger gating paused tweens, not a `scrollTrigger` per tween.**
+  With `autoSplit` the split tween is destroyed and rebuilt on font load and on
+  resize, and a rebuilt tween carrying its own `once: true` trigger would be
+  waiting on a trigger that has already fired. A flag plus a pending `Set` means
+  a tween created after the footer was entered simply plays at once. Same shape
+  as the capabilities section's on-screen gate.
+
+Measured on `/journal` at 1280: the footer settles **3024 ms** end to end
+(authored 1.82 + 1.2 = 3.02 s), split word counts `1,1,1,1,2,6` = 12.
+
+## The bundle invariant, rewritten
+
+`chrome.tsx` reaches every route, so the footer leaf does too. **"No GSAP leak"
+is no longer the rule** — the user chose site-wide motion explicitly ("Make
+reflect on every page"). The rule that survives is narrower and still worth
+keeping: **nothing outside `home/` may import `home/sections.tsx` or any
+`home/` client module.** The leaf-import discipline stays; `motion/` is the
+shared surface and the footer is the one module that reaches everywhere.
+
+The measured cost, against a build of `729bfcc` in a sibling worktree:
+
+| | chunk count | raw JS | gzipped JS |
+| --- | --- | --- | --- |
+| the 14 non-homepage, non-`/journal` routes | 9 → **9** | 653,000 → 775,793 (**+122,793**) | 195,380 → 242,879 (**+47,499**) |
+| `/journal` | 9 → **10** | +123,791 | +48,142 |
+| `/` | 10 → **10** | +1,370 | +509 |
+
+**The chunk *count* is the wrong instrument here** — GSAP went into an existing
+shared chunk (`047q64__4pyf_.js`, 25.6 KB, became `3k-8_no3bkb0l.js`, 148 KB /
+56.7 KB gz) rather than adding one, so only `/journal`'s extra `Reveal` chunk
+shows up as a count. Diff the chunk *bytes*, not the list length, when checking
+this again.
+
+## Impact
+
+- **Every route's prerendered HTML changes**, and the diffs are exactly:
+  the three footer data attributes, the `FooterMotion` client reference, the
+  `<span>` wrapper plus image class string on every `ArticleCardStacked`, the
+  `data-reveal` attributes on `/journal`, and chunk/build-id renames. Confirmed
+  page by page with the scratchpad build-diff helper — nothing else moved.
+  `_not-found` and `_global-error` are identical.
+- **`AE` at 5 % fuzz is `0`** in the settled state at 375 / 800 / 1280 on
+  `/journal`, `/design-system` and `/article/[slug]`.
+- **`/` is pixel-identical outside the capabilities cloth box** (`AE` 0 at all
+  three); inside it, 41.7 / 14.9 / 0 differing pixels — the scrubbed cloth at a
+  different phase, exactly as the note above predicts. Never report a bare
+  page-wide `AE` for `/`.
+- Page heights unchanged everywhere: `/` 6350 / 6006 / 5595, `/journal`
+  3801 / 5160 / 3486.
+- **Reduced motion**: nothing splits (`childSpans` 0 on all six elements), every
+  footer element at `opacity: 1`, 0 of 9 `/journal` reveal targets below full
+  opacity, and the card hover reaches 1.05 in 30 ms. **JavaScript off**: the
+  wordmark and the stamp render at their normal boxes, page at rest as the
+  server sent it.
+- Four `/` ⇄ `/journal` / `/about` round trips with **zero page or console
+  errors** — the `contextSafe` crash class does not reappear.
+
+## Non-goals held
+
+The footer's geometry, type, colours, texture band and wordmark drawing are
+untouched; its `href="#"` links stay `#`. No scrub, pin or parallax was added —
+the capabilities cloth is still the site's only scroll-linked element. No file
+under `app/_components/home/` was touched. `ArticleCardHorizontal` and
+`ArticleCardCompact` are left alone.
 
 # Content and asset conventions
 

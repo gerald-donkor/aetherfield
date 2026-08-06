@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { FooterMotion } from "./motion/footer-reveal";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
 /* There is no /product route, so Product resolves to the home page — the
@@ -148,21 +149,31 @@ export function CtaBand({
 
 export function SiteFooter() {
   return (
-    <footer className="overflow-hidden bg-brand text-brand-ink">
+    // `FooterMotion` renders the `<footer>` itself and takes its class string
+    // over, so the settled footer gains motion and not a single box. The three
+    // data attributes below are inert markers for it; no geometry, class string
+    // or element here has changed.
+    <FooterMotion className="overflow-hidden bg-brand text-brand-ink">
       <div className="mx-auto flex max-w-page flex-col items-center gap-3 px-5 lg:px-6 py-6 text-center sm:flex-row sm:items-baseline sm:justify-between sm:text-left">
         <nav className="flex flex-wrap justify-center gap-x-7 gap-y-2">
-          {/* Labels only: the footer's link targets are unchanged pending review. */}
+          {/* Labels only: the footer's link targets are unchanged pending review.
+              `data-footer-split` is per-link rather than on the `<nav>`: SplitText
+              labels the element it splits and hides the pieces, so splitting the
+              nav would leave every link without an accessible name. */}
           {[...NAV_ITEMS.map((i) => i.label), "Get started"].map((item) => (
             <a
               key={item}
               href="#"
+              data-footer-split=""
               className="font-sans text-p1 font-bold hover:opacity-70"
             >
               {item}
             </a>
           ))}
         </nav>
-        <p className="font-serif text-p2">© 2025 · All rights reserved</p>
+        <p data-footer-split="" className="font-serif text-p2">
+          © 2025 · All rights reserved
+        </p>
       </div>
 
       {/* Halftone-screened fabric band */}
@@ -191,6 +202,7 @@ export function SiteFooter() {
           viewBox="0 0 1000 165"
           role="img"
           aria-label="Aetherfield"
+          data-footer-wordmark=""
           className="mt-4 block w-full sm:mt-5"
         >
           {/* textLength is the advance width, which includes the A's left and
@@ -212,6 +224,6 @@ export function SiteFooter() {
           </text>
         </svg>
       </div>
-    </footer>
+    </FooterMotion>
   );
 }

@@ -127,6 +127,16 @@ body {
   [data-hero-split] {
     opacity: 0;
   }
+  /* The footer's split type and its wordmark, on every page. Opacity only, and
+     on the *unsplit* elements, for the same two reasons the hero's rule
+     records: the split nodes do not exist when the stylesheet is parsed, and an
+     authored transform or filter would be decomposed into the element's own
+     stack and outlive the tween. The wordmark is SVG `<text>` and is never
+     split — it takes the blur as one element. */
+  [data-footer-split],
+  [data-footer-wordmark] {
+    opacity: 0;
+  }
 }
 
 /* Fluid display type: the 80/56/40px scale is authored at the 1400px frame

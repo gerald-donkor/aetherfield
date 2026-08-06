@@ -37,15 +37,24 @@ export function ArticleCardStacked({
   const body = (
     <>
       {article.src ? (
-        <Image
-          src={article.src}
-          alt={article.alt ?? ""}
-          width={768}
-          height={768}
-          sizes="(max-width: 1024px) 100vw, 612px"
-          priority={priority}
-          className="aspect-[612/356] w-full object-cover"
-        />
+        // The span is the clip box — the same device the homepage journal
+        // thumbnails use. `transition-[scale]`, never `transition-[transform]`:
+        // Tailwind v4 emits `scale-105` as the independent `scale` property, so
+        // a transform-only transition would silently not animate it. v4 already
+        // wraps `group-hover:` in `@media (hover:hover)`, so nothing sticks on
+        // touch and no guard is authored. 500ms and 5% are judgements, not
+        // measurements — see AGENTS.md.
+        <span className="block overflow-hidden">
+          <Image
+            src={article.src}
+            alt={article.alt ?? ""}
+            width={768}
+            height={768}
+            sizes="(max-width: 1024px) 100vw, 612px"
+            priority={priority}
+            className="aspect-[612/356] w-full object-cover transition-[scale] duration-500 ease-in-out group-hover:scale-105 motion-reduce:transition-none"
+          />
+        </span>
       ) : (
         <Placeholder ratio="612 / 356" />
       )}

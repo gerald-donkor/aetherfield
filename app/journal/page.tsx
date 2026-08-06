@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CtaBand, SiteFooter, SiteNav } from "../_components/chrome";
 import { Container } from "../_components/home/container";
 import { JournalStamp, LatestArticles } from "../_components/journal/sections";
+import { Reveal } from "../_components/motion/reveal";
 
 export const metadata: Metadata = {
   title: "Journal — Aetherfield",
@@ -22,10 +23,15 @@ export default function Page() {
           <JournalStamp />
           <LatestArticles />
         </Container>
-        <CtaBand
-          headline="Subscribe to Aetherfield Journal"
-          action="Sign up to newsletter"
-        />
+        {/* Wrapped here rather than inside `chrome.tsx`, exactly as `app/page.tsx`
+            does it — the band animates on the pages that opt in, and the shared
+            component is not edited. */}
+        <Reveal>
+          <CtaBand
+            headline="Subscribe to Aetherfield Journal"
+            action="Sign up to newsletter"
+          />
+        </Reveal>
       </main>
 
       <SiteFooter />
