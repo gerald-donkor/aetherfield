@@ -64,7 +64,7 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
   const delta = useRef<HTMLSpanElement>(null);
 
   useGSAP(
-    (_context, contextSafe) => {
+    () => {
       const mm = gsap.matchMedia();
 
       mm.add(
@@ -184,23 +184,41 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
           const onPointerLeave = () => lean?.reverse();
 
           if (hasHover) {
-            // contextSafe because this is created after useGSAP has run; a
-            // tween built outside the context would never be reverted.
-            const buildLean = contextSafe?.(() => {
-              lean = gsap.fromTo(
-                cardEl,
-                { rotationY: 0, transformPerspective: 900 },
-                {
-                  rotationY: LEAN,
-                  transformPerspective: 900,
-                  transformOrigin: "50% 50%",
-                  duration: DUR * 0.7,
-                  ease: EASE,
-                  paused: true,
-                },
-              );
-            });
-            buildLean?.();
+            /* **Built directly, NOT through `contextSafe`.** This runs
+               synchronously inside the `matchMedia` handler, so a gsap Context
+               is already active and the tween is already registered with it —
+               `mm.revert()` reverts it.
+
+               Routing it through `contextSafe` instead is an actual bug, not a
+               harmless belt-and-braces: `contextSafe` is bound to the *outer*
+               `useGSAP` context, and `Context.add`'s wrapper does
+               `prev && prev !== self && prev.data.push(self)`
+               (`gsap-core.js:3925`). With the matchMedia context live as
+               `prev`, that pushes the outer context into the inner one's
+               `data` — while the inner is already in the outer's, from the
+               same line when `mm.add` first matched. The two contexts then
+               reference each other, and `Context.getTweens` recurses over
+               `data` unconditionally (`:3949`), so the next `revert()` — i.e.
+               the next unmount, which on `/` means any client-side navigation
+               away — throws `RangeError: Maximum call stack size exceeded`.
+
+               `journal-mark.tsx` may keep its `contextSafe` because it calls
+               it from the entrance tween's `onComplete`, on a later tick, with
+               no context active. The rule is: `contextSafe` is for callbacks
+               that fire *after* the hook has returned, never for work done
+               inline. */
+            lean = gsap.fromTo(
+              cardEl,
+              { rotationY: 0, transformPerspective: 900 },
+              {
+                rotationY: LEAN,
+                transformPerspective: 900,
+                transformOrigin: "50% 50%",
+                duration: DUR * 0.7,
+                ease: EASE,
+                paused: true,
+              },
+            );
             cardEl.addEventListener("pointerenter", onPointerEnter);
             cardEl.addEventListener("pointerleave", onPointerLeave);
           }

@@ -2016,6 +2016,53 @@ nothing was ever hidden: every element here is visible and correct at rest, so
 with JavaScript off: `583.7`, `↓12.4%`, **no inline `color` written at all**,
 and `transform: none` on the asterisk, the cloth and the thumbnails.
 
+#### Fix — `contextSafe` inside a `matchMedia` handler makes two contexts
+reference each other
+
+**The lean tween shipped built through `contextSafe` and it crashed the page on
+any client-side navigation away from `/`** —
+`RangeError: Maximum call stack size exceeded` out of `Context.getTweens`,
+reported as a Next.js runtime error pointing at `<CapabilityVisual>` in
+`capabilities.tsx:30`. Reproduced by clicking `/` → `/journal`; the error fires
+on **unmount**, so the homepage itself looked fine and only leaving it threw.
+The `Invalid scope` spam, the `GSAP target null not found` on `float.current`
+and the `float is not defined` trace in the same terminal were **stale
+Fast-Refresh state from before `ddbd74f`, not separate bugs** — they do not
+reproduce on a clean load.
+
+**The mechanism, from the source.** `Context.add`'s wrapper opens with
+`prev && prev !== self && prev.data.push(self)`
+(`node_modules/gsap/gsap-core.js:3925`). When `mm.add`'s condition first
+matches, that line runs with the outer `useGSAP` context as `prev`, so the
+matchMedia's inner context lands in the outer's `data` — correct, and how
+nesting is meant to work. Calling `contextSafe` **from inside that handler**
+then runs the *same* line the other way round: `contextSafe` is bound to the
+outer context, the inner one is live as `prev`, so the outer gets pushed into
+the inner's `data`. The two now point at each other, and `getTweens` recurses
+over `data` with no cycle guard (`:3949`), so the next `revert()` blows the
+stack.
+
+**The rule: `contextSafe` is for callbacks that fire *after* the hook has
+returned, never for work done inline.** Anything created synchronously inside
+an `mm.add` handler is already inside a live context and is already reverted by
+`mm.revert()` — wrapping it is not belt-and-braces, it is the bug.
+`journal-mark.tsx` keeps its `contextSafe` correctly: it calls `buildHover`
+from the entrance tween's `onComplete`, on a later tick, with no context active
+(`prev` is null, so the line never fires).
+
+Verified after the fix at 1280 on the dev server: **four `/` ⇄ `/journal`
+round trips with no page error**, and all four behaviours still live — drift
+`matrix(1,0,0,1,0,2.16)`, fall `matrix(0.999984, 0.00563, …)`, asterisk
+`matrix(0.5, 0.866, …)`, counter running (`611.2 ↑4.7%` → `548.9`), hover
+`matrix3d(0.939693, 0, -0.34202, …)` = `cos 20°` exactly and an exact return to
+rest. `Image-3.png` serves at `w=750&q=90` with no `images.qualities` warning,
+so `next.config.ts`' allowlist is working — that warning in the terminal was
+only ever the pre-restart bundle.
+
+**The returned JSX is untouched**, so no route's prerendered HTML changes; only
+the homepage's client chunk does. `npm run lint`, `npm run typecheck` and
+`npm run build` all clean.
+
 ### The journal rows' thumbnails
 
 **CSS, not GSAP** — `journal.tsx` stays a server component. The image gains a
