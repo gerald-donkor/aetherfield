@@ -2570,9 +2570,12 @@ constants cannot drift; `PERF_PITCH` no longer exists in `sections.tsx`.
 **The tweens**: two `gsap.to`s, `x: ±pitch`, `duration: CYCLE`, `ease: "none"`,
 `repeat: -1`, `paused: true`.
 
-- **`CYCLE = 2` s per pitch — the user's choice**, from three paces offered
-  (gentle 3.5 / moderate 2 / brisk 1.2). ≈25 user units per second, ≈25 px/s at
-  1280. A judgement, not a measurement; say so if it is ever revisited.
+- **`CYCLE = 1.2` s per pitch** — ≈41.3 user units per second, ≈41 px/s at 1280.
+  Three paces were offered (gentle 3.5 / moderate 2 / brisk 1.2); the user picked
+  2, then asked for it faster having seen it run, so it ships at the brisk one
+  rather than an invented number (prompt 29). A judgement, not a measurement;
+  say so if it is ever revisited. **Speed does not touch the loop's
+  seamlessness** — that is a property of the pitch, not of the duration.
 - **`ease: "none"` is not a default being restated.** A conveyor must not
   accelerate — any easing makes the wrap read as a stutter.
 - **`x` is in user units**, so the drift scales with the viewport for free,
@@ -2600,23 +2603,30 @@ Against a worktree build of `f0ad19f` **carrying prompt 27's uncommitted
 
 | | 375 | 800 | 1280 |
 | --- | --- | --- | --- |
-| top row, `t` → `t+1s` | `27.08` → `2.78` | `27.63` → `3.25` | `27.97` → `3.60` |
+| top row drift | **41.6 u/s** | **40.8 u/s** | **40.9 u/s** |
 | bottom row | the exact negation at all three | | |
 | stamp box | `335×129.67+20+60` | `760×294.19+20+60` | `1232×476.89+24+60` |
 | page height | **3801** | **5160** | **3486** |
 | gated off screen | transform frozen | frozen | frozen |
-| reduced motion | `transform: none` | `none` | `none` |
+| reduced motion | no `transform` attribute written | none | none |
 | JS off, stamp box | `335×129.67+20+60` | `760×294.19+20+60` | `1232×476.89+24+60` |
 
-Top `x` rises and bottom falls, both wrapping inside `[0, ±49.6]` — 24.3 units
-in 1 s at every breakpoint, i.e. one pitch per 2 s as authored. Page heights and
-the stamp box are the recorded numbers **unchanged**, with and without JS.
-Scrolling past the stamp freezes both transforms; returning resumes them.
+Top `x` rises and bottom falls, both wrapping inside `[0, ±49.6]`, against the
+authored 41.33 u/s. The 2 s original measured 24.5 / 25.1 / 24.6 against its own
+24.8, so the two builds are 1.67× apart as authored — **run the old build as a
+control when re-measuring a speed change**, since the rate is sampled over a
+window and carries ~2 % of jitter. Page heights and the stamp box are the
+recorded numbers **unchanged**, with and without JS. Scrolling past the stamp
+freezes both transforms; returning resumes them.
 
-**Scoped `AE` at 5 % fuzz is `0` outside the stamp box at all three widths.**
-Inside it, 450 / 2048 / 4308 (0.7–1.0 % of the box's pixels) — the rows at a
-different phase, exactly as with the capabilities cloth. **Never report a bare
-page-wide `AE` for `/journal` now**; report the two numbers separately.
+**Scoped `AE` at 5 % fuzz is `0` outside the stamp box at all three widths** —
+at both speeds. Inside it, 450 / 2048 / 4308 at 2 s and 458 / 2311 / 6567 at
+1.2 s (0.7–1.1 % of the box's pixels) — the rows at a different phase, exactly
+as with the capabilities cloth. **Never report a bare page-wide `AE` for
+`/journal` now**; report the two numbers separately.
+
+**The speed change itself is a tween var, not markup**: all 16 pages are
+byte-identical across it once the build id and the chunk names are normalised.
 
 **`/journal` is the only route whose prerendered HTML changes**, and its only
 diff is the perforation restructure: today's 26 per-index `<g>`s pairing a top

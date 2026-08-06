@@ -5,10 +5,13 @@ import { ScrollTrigger, gsap, useGSAP } from "../motion/register";
 
 /** Seconds for a row to travel exactly one perforation pitch.
  *
- * ~25 user units per second, i.e. ~25px/s at 1280. Chosen by the user from
- * three offered paces (gentle 3.5 / moderate 2 / brisk 1.2) — a judgement, not
- * a measurement. */
-const CYCLE = 2;
+ * ~41 user units per second, i.e. ~41px/s at 1280. The "brisk" one of three
+ * paces offered (gentle 3.5 / moderate 2 / brisk 1.2): the user picked 2, then
+ * asked for it faster having seen it run. A judgement, not a measurement.
+ *
+ * Speed does not touch the loop's seamlessness — that is a property of the
+ * uniform pitch, not of the duration. */
+const CYCLE = 1.2;
 
 type Props = {
   /** Stamp viewBox width in user units. */
