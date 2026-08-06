@@ -2,6 +2,7 @@ import Image from "next/image";
 import { ARTICLES } from "../../_content/articles";
 import { ArticleCardStacked } from "../cards";
 import { Reveal } from "../motion/reveal";
+import { StampPerforations } from "./stamp-perforations";
 
 /* -------------------------------------------------------------------------- */
 /*  Masthead stamp                                                              */
@@ -16,9 +17,10 @@ import { Reveal } from "../motion/reveal";
 const STAMP_W = 1240;
 const STAMP_H = 480;
 
-/* 26 perforations across, half-circles centred on the corners. */
+/* 26 perforations across, half-circles centred on the corners. The pitch —
+   STAMP_W / (PERF_COUNT - 1) — is derived inside `StampPerforations`, which
+   also owns the two rows' opposing drift. */
 const PERF_COUNT = 26;
-const PERF_PITCH = STAMP_W / (PERF_COUNT - 1);
 const PERF_R = 15;
 
 /* Inner rule, inset 20 across and 30 down. Drawn as an explicit path with a
@@ -79,19 +81,15 @@ export function JournalStamp() {
         aria-label="Aetherfield Journal"
         className="absolute inset-0 h-full w-full text-ink"
       >
-        {/* Perforations. Painted white rather than masked — the page behind the
-            stamp is white, so the result is identical and far simpler. */}
-        <g fill="white">
-          {Array.from({ length: PERF_COUNT }, (_, i) => {
-            const cx = i * PERF_PITCH;
-            return (
-              <g key={i}>
-                <circle cx={cx} cy={0} r={PERF_R} />
-                <circle cx={cx} cy={STAMP_H} r={PERF_R} />
-              </g>
-            );
-          })}
-        </g>
+        {/* Perforations, drifting in opposite directions — the leaf owns both
+            the drawing and the motion, and derives the pitch from these
+            constants so the two files cannot drift apart. */}
+        <StampPerforations
+          width={STAMP_W}
+          height={STAMP_H}
+          count={PERF_COUNT}
+          r={PERF_R}
+        />
 
         {/* The lozenge is drawn twice the weight of the frame, as in the comp. */}
         <g fill="none" stroke="currentColor">

@@ -2535,6 +2535,99 @@ the capabilities cloth is still the site's only scroll-linked element. No file
 under `app/_components/home/` was touched. `ArticleCardHorizontal` and
 `ArticleCardCompact` are left alone.
 
+## The journal stamp's perforation drift
+
+Prompt 28. The user circled the stamp's **top and bottom perforation rows** in
+`~/Pictures/Screenshots/Screenshot_20260806_140054.png` and asked for them to be
+permanently in motion — the top travelling right, the bottom left. It is the
+site's third continuous loop, after the capabilities asterisk and counter, and
+it obeys the same on-screen gate.
+
+**The loop is seamless because the spacing is uniform.** The perforations sit at
+a constant pitch of `1240/25 = 49.6` user units, so translating a row by exactly
+one pitch lands every circle where its neighbour started: the row at `t + CYCLE`
+is pixel-identical to the row at rest and `repeat: -1` has no seam. No cloning,
+no wrap bookkeeping, no modulo. **Verified, not assumed** — under
+`prefers-reduced-motion: reduce` (no tween running), screenshotting the stamp at
+rest and again with `transform="translate(±49.6,0)"` forced onto the two row
+groups compares at **`AE` 0** at 1280.
+
+**One circle per row is added beyond the drawn set, and it is required rather
+than padding.** The right-moving top row carries one at `x = -pitch` so a
+perforation enters the left edge as the leftmost one leaves; the left-moving
+bottom row carries the mirror past the right edge. Both sit outside the viewBox
+and are clipped by the SVG root, so **the rest state is pixel-identical to the
+comp** — the comp's 26 per edge are still the 26 that are ever visible.
+
+`app/_components/journal/stamp-perforations.tsx` — `"use client"`, the section's
+**only** client module, rendered as a child of the existing `<svg>` so
+`journal/sections.tsx` stays a server component and its `next/image` never
+reaches the client bundle. Keep it **component-only**, the `principles-data.tsx`
+rule. Geometry arrives as props (`width` / `height` / `count` / `r`) and the
+pitch is derived inside the leaf, so the file and `sections.tsx`' comp-measured
+constants cannot drift; `PERF_PITCH` no longer exists in `sections.tsx`.
+
+**The tweens**: two `gsap.to`s, `x: ±pitch`, `duration: CYCLE`, `ease: "none"`,
+`repeat: -1`, `paused: true`.
+
+- **`CYCLE = 2` s per pitch — the user's choice**, from three paces offered
+  (gentle 3.5 / moderate 2 / brisk 1.2). ≈25 user units per second, ≈25 px/s at
+  1280. A judgement, not a measurement; say so if it is ever revisited.
+- **`ease: "none"` is not a default being restated.** A conveyor must not
+  accelerate — any easing makes the wrap read as a stutter.
+- **`x` is in user units**, so the drift scales with the viewport for free,
+  exactly as the rest of the stamp does. Nothing is sized per breakpoint, the
+  `JournalStamp` discipline.
+- Two tweens rather than one timeline with `yoyo`: the rows never reverse.
+- **No `contextSafe`** — both are created synchronously inside the `mm.add`
+  handler, and wrapping that is the documented `RangeError` crash.
+
+**The gate is the capabilities `ScrollTrigger.create({ start: "top bottom", end:
+"bottom top", onToggle })`**, on the outer `<g>` (which spans the full stamp
+height, so it has a usable bounding box). It is what makes a `repeat: -1` loop
+affordable. **Reduced motion gets nothing at all** — no tween, no ScrollTrigger;
+the branch returns immediately. Nothing was ever hidden, so `globals.css` needed
+no new start-state rule.
+
+`Reveal` is untouched: it tweens `opacity`/`y` on the **wrapper div** while these
+tweens write `transform` on `<g>`s inside the SVG. Different elements, and no
+`clearProps` anywhere.
+
+### Measured in the production build
+
+Against a worktree build of `f0ad19f` **carrying prompt 27's uncommitted
+`cards.tsx` patch**, so the comparison isolates this change alone.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| top row, `t` → `t+1s` | `27.08` → `2.78` | `27.63` → `3.25` | `27.97` → `3.60` |
+| bottom row | the exact negation at all three | | |
+| stamp box | `335×129.67+20+60` | `760×294.19+20+60` | `1232×476.89+24+60` |
+| page height | **3801** | **5160** | **3486** |
+| gated off screen | transform frozen | frozen | frozen |
+| reduced motion | `transform: none` | `none` | `none` |
+| JS off, stamp box | `335×129.67+20+60` | `760×294.19+20+60` | `1232×476.89+24+60` |
+
+Top `x` rises and bottom falls, both wrapping inside `[0, ±49.6]` — 24.3 units
+in 1 s at every breakpoint, i.e. one pitch per 2 s as authored. Page heights and
+the stamp box are the recorded numbers **unchanged**, with and without JS.
+Scrolling past the stamp freezes both transforms; returning resumes them.
+
+**Scoped `AE` at 5 % fuzz is `0` outside the stamp box at all three widths.**
+Inside it, 450 / 2048 / 4308 (0.7–1.0 % of the box's pixels) — the rows at a
+different phase, exactly as with the capabilities cloth. **Never report a bare
+page-wide `AE` for `/journal` now**; report the two numbers separately.
+
+**`/journal` is the only route whose prerendered HTML changes**, and its only
+diff is the perforation restructure: today's 26 per-index `<g>`s pairing a top
+and a bottom circle become two row `<g>`s of 27 each. The other **15 pages are
+byte-identical** once the build id and the CSS and JS chunk names are
+normalised, and every route keeps its chunk set (`/` and `/journal` 10, the rest
+9) — the leaf bundled into the existing page chunk.
+
+Four `/journal` ⇄ `/` round trips plus a `/journal` → `/about` → back, each with
+a full scroll pass: **zero page errors and zero console errors.**
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
