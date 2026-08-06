@@ -139,6 +139,36 @@ body {
   }
 }
 
+/* ---- The open-application card's marching dashes -----------------------
+   `/careers`' dashed frame, drawn as an SVG rect with a 7 on / 9 off pattern.
+   One period is 16, so translating the offset by exactly -16 lands every dash
+   where its neighbour started: the frame at `t + duration` is pixel-identical
+   to the frame at rest and `infinite` has no seam. Same argument as the
+   journal stamp's 1240/25 perforation pitch — the pitch is what makes the loop
+   seamless, not the duration.
+
+   Negative, so the pattern advances along the path's own direction; the rect
+   is drawn clockwise from its top-left corner, so the dashes travel
+   left-to-right along the top edge.
+
+   `linear` because a conveyor must not accelerate — any easing makes the wrap
+   read as a stutter, the reason the perforation drift ships `ease: "none"`.
+
+   Deliberately OUTSIDE the `scripting: enabled` block above: that block exists
+   to hide GSAP's start states, and this animation needs no script and should
+   run with JavaScript off. */
+@keyframes job-frame-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .job-frame-march {
+    animation: job-frame-march 0.8s linear infinite;
+  }
+}
+
 /* Fluid display type: the 80/56/40px scale is authored at the 1400px frame
    and steps down on narrow viewports without changing the ratios. */
 @utility display-fluid-h1 {

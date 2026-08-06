@@ -679,6 +679,91 @@ file plus one comp artefact:
 mistake. The comp is the source of truth, so it ships; drop the line if the
 designer confirms.
 
+### The open-application card's marching dashes
+
+Prompt 31. The user circled the dashed frame in
+`~/Pictures/Screenshots/Screenshot_20260806_203153.png` and asked for the dashes
+to move around it. It is the site's fourth continuous loop, after the
+capabilities asterisk and counter and the journal stamp's perforation drift —
+and the only one that is **not** GSAP.
+
+**CSS keyframes, not GSAP**, at the user's choice, and it is the cheaper route:
+`cards.tsx` stays a server component, `/careers` gains no client reference, and
+the loop needs no `matchMedia`, no `useGSAP` and no on-screen gate. One
+`@keyframes` plus one class in `app/globals.css`, and `className="job-frame-march"`
+on the existing `<rect>`. Nothing else.
+
+**The loop is seamless because the dash pitch is uniform.** 7 on + 9 off = 16, so
+a `stroke-dashoffset` of exactly `-16` lands every dash where its neighbour
+started: the frame at `t + duration` is pixel-identical to the frame at rest and
+`infinite` has no seam. Identical argument to the journal stamp's `1240/25 =
+49.6` perforation pitch — **the pitch is what makes it seamless, not the
+duration**, so a speed change cannot break it. **Verified, not assumed**: under
+`prefers-reduced-motion: reduce` (animation not running), the dashed card's box
+screenshotted at rest and again with `stroke-dashoffset: -16px` forced onto the
+rect compares at **`AE` 0 at 375, 800 and 1280.**
+
+- **Negative, i.e. clockwise** — a decreasing offset advances the pattern along
+  the path's own direction, and the rect is drawn from its top-left corner
+  clockwise, so the dashes travel left-to-right along the top edge. The user's
+  choice, and it matches the journal stamp's top row.
+- **`0.8s` per pitch = 20 px/s is a judgement, not a measurement.** The user
+  picked "brisk" from three offered paces (0.5 / 0.8 / 1.2 s). Half the
+  perforation drift's ~41 px/s, which is right for a 1px hairline against that
+  loop's 15px circles. Say *judgement* if it is ever revisited.
+- **`linear`.** A conveyor must not accelerate; any easing makes the wrap read as
+  a stutter. Same reason the perforation drift ships `ease: "none"`.
+- **No on-screen gate, deliberately.** The GSAP loops carry a `ScrollTrigger`
+  `onToggle` because their ticker runs regardless. A CSS animation on an
+  off-screen element is the browser's own problem, and this one repaints a single
+  1px stroke. Do not add a gate, and do not convert this to GSAP to get one.
+- **It sits OUTSIDE the `(scripting: enabled)` block.** That block exists to hide
+  GSAP's start states; this animation needs no script and is authored to run with
+  JavaScript off. It is gated on `prefers-reduced-motion: no-preference` alone.
+
+**No geometry changed.** The 7/9 pattern, the `strokeWidth="2"`-clipped 1px, the
+radius 16 and the interior transparency are all comp-measured and untouched.
+`/design-system` renders `JobCard` **without** `open`, so it draws no frame and
+contains the class zero times.
+
+Confirmed in the **built** stylesheet, the discipline every CSS mechanic here
+follows: `@keyframes job-frame-march{to{stroke-dashoffset:-16px}}` at top level
+and `@media (prefers-reduced-motion:no-preference){.job-frame-march{animation:.8s
+linear infinite job-frame-march}}` — Lightning CSS keeps both and adds the `px`.
+Content detection does not strip a hand-authored class used in a `className`.
+
+#### Measured in the production build
+
+Against a worktree build of `ec70823`.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| drift rate | **19.95 px/s** | **19.95 px/s** | **20.10 px/s** |
+| seam check (`AE`, rest vs −16 forced) | **0** | **0** | **0** |
+| dashed card box | `335×224+20+1200` | `760×170+20+1001` | `820×170+230+1036` |
+| page height | **1895** | **1770** | **1925** |
+| reduced motion | `animation-name: none`, `stroke-dashoffset: 0px` | same | same |
+| JS off | animation runs; card box unchanged | same | same |
+
+Card boxes and page heights are the recorded numbers **unchanged**, and
+connected components on `/careers` gives an **identical box list** against the
+base build at all three widths. Reduced motion also keeps `stroke-dasharray:
+7px, 9px` and `stroke-width: 2px`. With JavaScript off, two shots of the card
+box 400 ms apart differ (`AE` 1548) — the animation is genuinely running without
+script. An ink-row profile across the top border at rest is a **single row of
+ink** with runs of 7 separated by 9, i.e. the comp's pattern intact.
+
+**Scoped `AE` at 5 % fuzz is `0` outside the dashed card's box at all three
+widths**; inside it, 449 / 294 / 859 (0.2–0.6 % of the box's pixels) — the dashes
+at a different loop phase. **Never report a bare page-wide `AE` for `/careers`
+now**, for the same reason `/journal` and `/` already carry that warning.
+
+`/careers` is the only route whose prerendered HTML changes and its only diff is
+the one `class="job-frame-march"` attribute; the other **15 pages are
+byte-identical** once the build id and the CSS and JS chunk names are normalised.
+Every route keeps its chunk set (`/`, `/journal` and `/about` 10, the rest 9, the
+two error pages 8).
+
 ## Job listing page (`/job-listing/[slug]`)
 
 `app/job-listing/[slug]/page.tsx` with its sections in
@@ -3355,6 +3440,24 @@ magick identify -format '%wx%h %m %B bytes' o.bin
 
 The optimizer caps output at the source's own width, so `delivered =
 min(requested_w, source_w)`; compare that against `rendered_css_width × DPR`.
+
+**Verifying a dash-pattern loop is seamless is one command, so do it rather than
+argue it.** Any looping `stroke-dashoffset` (or perforation row, or conveyor)
+is seamless *iff* one period of travel maps the pattern onto itself. Force
+exactly one period onto the element with the animation stopped — emulate
+`prefers-reduced-motion: reduce`, screenshot the element's box, set the offset
+inline, screenshot again — and require `magick compare -metric AE -fuzz 5%` = 0.
+It caught nothing on `/careers`' frame, which is the point: the claim is now
+measured rather than reasoned. Note the clipped screenshot needs
+`{ clip, fullPage: true }` when the element is below the fold — a bare `clip` in
+page coordinates throws *"Clipped area is either empty or outside the resulting
+image."*
+
+**A CSS animation's rate is read off `getComputedStyle`, unwrapped modulo the
+period.** Sample the animated property at two timestamps ~2 s apart; the raw
+difference is only correct modulo one period, so add `round((expected × dt −
+raw) / period) × period` before dividing. Expect ~2 % of sampling jitter — the
+frame's authored 20 px/s measures 19.95 / 19.95 / 20.10.
 
 **A page-wide `magick compare` is the wrong instrument once anything is
 scroll-linked.** A scrubbed element sits wherever the screenshot's scroll put it,

@@ -189,6 +189,7 @@ export function JobCard({
           className="pointer-events-none absolute inset-0 size-full text-ink"
         >
           <rect
+            className="job-frame-march"
             x="0"
             y="0"
             width="100%"
