@@ -2093,13 +2093,17 @@ the inner's `data`. The two now point at each other, and `getTweens` recurses
 over `data` with no cycle guard (`:3949`), so the next `revert()` blows the
 stack.
 
-**The rule: `contextSafe` is for callbacks that fire *after* the hook has
-returned, never for work done inline.** Anything created synchronously inside
-an `mm.add` handler is already inside a live context and is already reverted by
-`mm.revert()` — wrapping it is not belt-and-braces, it is the bug.
-`journal-mark.tsx` keeps its `contextSafe` correctly: it calls `buildHover`
-from the entrance tween's `onComplete`, on a later tick, with no context active
-(`prev` is null, so the line never fires).
+Anything created synchronously inside an `mm.add` handler is already inside a
+live context and is already reverted by `mm.revert()` — wrapping it is not
+belt-and-braces, it is the bug.
+
+~~**The rule: `contextSafe` is for callbacks that fire *after* the hook has
+returned, never for work done inline.** `journal-mark.tsx` keeps its
+`contextSafe` correctly: it calls `buildHover` from the entrance tween's
+`onComplete`, on a later tick, with no context active (`prev` is null, so the
+line never fires).~~ **Both sentences are wrong**, and the exemption crashed
+`/journal` the same way — see "Fix — the journal mark's `contextSafe`" below
+for the corrected rule and the measurement that overturns them.
 
 Verified after the fix at 1280 on the dev server: **four `/` ⇄ `/journal`
 round trips with no page error**, and all four behaviours still live — drift
@@ -2113,6 +2117,100 @@ only ever the pre-restart bundle.
 **The returned JSX is untouched**, so no route's prerendered HTML changes; only
 the homepage's client chunk does. `npm run lint`, `npm run typecheck` and
 `npm run build` all clean.
+
+#### Fix — the journal mark's `contextSafe`, and the corrected rule
+
+Prompt 26. **The exemption above was wrong and `journal-mark.tsx` crashed the
+same way** — navigating `/` → `/journal` after the mark's entrance flip had
+completed threw `RangeError: Maximum call stack size exceeded` out of
+`JournalMark`, `at Array.forEach`, on Next.js 16.2.12.
+
+**The discriminator is the flip, and it is what points at `buildHover`.** Two
+scripted variants at 1280:
+
+| variant | result |
+| --- | --- |
+| scroll the whole page so the flip fires and completes, wait, then navigate | **`PAGEERROR: Maximum call stack size exceeded`** |
+| navigate immediately, mark never revealed | **no errors** |
+
+`gsap-core.js` was then patched temporarily to log every `prev.data.push(self)`
+in `Context.add`'s wrapper with both context ids and a stack (and **restored
+from a backup afterwards** — nothing under `node_modules/` ships). Two lines
+are the cycle:
+
+```
+CTXPUSH prev#17 <- self#32   MatchMedia.add ← JournalMark.useGSAP     (normal nesting)
+CTXPUSH prev#32 <- self#17   JournalMark.useGSAP ← _callback ← Tween.render
+```
+
+`#17` is the outer `useGSAP` context, `#32` the inner `matchMedia` one. The
+second push puts the outer inside the inner's `data`, which is already inside
+the outer's — and `Context.getTweens` recurses over `data` with no cycle guard
+(`:3949`), so the `revert()` on unmount blows the stack. The user's
+`Array.forEach` frame is that recursion.
+
+**Why "a later tick, with no context active" is false.** `_callback`
+(`gsap-core.js:981`) does `context && (_context = context)` before invoking the
+callback, where `context` is `animation._ctx` — the context the tween was
+*created* in. **Every GSAP callback runs with its creating context active**, on
+whatever tick it fires. So inside the entrance tween's `onComplete`, `prev` is
+`#32`, not null.
+
+**The corrected rule: `contextSafe` is only safe where no gsap Context is
+active. A tween's own `onStart` / `onUpdate` / `onComplete` is not such a place,
+and neither is anything synchronous inside an `mm.add` handler.** In this
+codebase that leaves **no legitimate use of `contextSafe` at all** — it appears
+nowhere in `app/` today, only in comments explaining why.
+
+**The fix is to build the hover tween eagerly**, inside the `mm.add` handler
+alongside the entrance tween, with no `contextSafe` anywhere. Nothing about it
+depended on the entrance having landed: it is `paused: true` with
+`immediateRender: false`, and its `fromTo` start vars are *authored literals*
+(`rotation: REST_ROTATION`, `rotationY: 0`, `transformPerspective: 800`) rather
+than values read off the element. **The listener binding stays gated on the
+flip's `onComplete`**, so the documented behaviour is unchanged — hovering
+mid-flip still does nothing, because the tween exists but nothing can reach it.
+`REST_ROTATION`, `HOVER_ROTATION`, `HOVER_ROTATION_Y`, `DUR * 0.7`, `EASE`, the
+four named conditions, the entrance tween and **the returned JSX** are all
+untouched. This is a lifecycle fix, not a motion change.
+
+##### Measured after the fix
+
+Production build at 3001 against a worktree build of `528914f` at 3002.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| `display` | `none` | `block` | `block` |
+| resting rect | `0×0` | **`307×184`** | **`421×252`** |
+| resting inline | — | `perspective(800px) rotate(-8deg)` | same |
+| hovered | no tween, no listener | `rotate(-45deg) rotateY(12deg)`, `304×304` | `rotate(-45deg) rotateY(12deg)`, `416×416` |
+| after mouse-out | — | exactly `rotate(-8deg)`, `307×184` | exactly `rotate(-8deg)`, `421×252` |
+| interrupted at 150 ms | — | `rotate(-39.63) rotateY(10.26)` → rest | `rotate(-41.06) rotateY(10.72)` → rest |
+
+The resting matrix is **unchanged and exact** at 800 and 1280 —
+`matrix3d(0.990268, -0.139173, 0, 0, 0.139173, 0.990268, 0, 0, 0, 0, 1,
+-0.00125, 0, 0, 0, 1)`, the 2D block `cos/sin 8°`. A `pointerenter` dispatched
+mid-flip leaves the mark at rest, so the gate holds. Under
+`prefers-reduced-motion: reduce`: `opacity: 1`, computed `rotate: -8deg` still
+present, **no inline transform written at all**, hover inert.
+
+**Four `/` → `/journal` round trips and four `/` → `/about` round trips, each
+with a full scroll pass first: zero page errors and zero console errors.**
+
+**No route's prerendered HTML changes.** 15 of 16 pages are byte-identical once
+the build id and the CSS chunk name are normalised, and `/` is identical too
+once the **`.js`** chunk names are normalised as well — its only diffs are the
+renames. Every route keeps its chunk set (`/` and `/journal` 10, the other 14
+nine). Page heights unchanged at **6350 / 6006 / 5595**, and `/` is
+pixel-identical **outside the capabilities cloth box** at all three widths
+(`AE` 0), with 0 / 69 / 0 differing pixels inside it — the scrubbed cloth at a
+different phase.
+
+**Settle for 6 s before the `fullPage` shot, not 2.5.** At 2.5 s the first pass
+read `AE` 272 outside the box at 375, all of it at y 6278–6330 — the footer's
+split words, which are authored to take **3.02 s**. It is not a regression and
+it is not the cloth; it is the shot being taken mid-animation. Re-shot at 6 s
+it is 0.
 
 ### The journal rows' thumbnails
 
@@ -2743,7 +2841,9 @@ magick compare -metric AE -fuzz 5% \( new.png -crop WxH+X+Y +repage \) \
 
 Report the two numbers separately. Screenshot the *settled* state by stepping the
 scroll down the whole page (400px at a time) to fire every reveal, then returning
-to 0 and waiting, before the `fullPage` shot.
+to 0 and waiting, before the `fullPage` shot. **Wait at least 6 s** — the
+footer's split blur-in is authored at 3.02 s, and at 2.5 s it shows up as a few
+hundred `AE` at the very bottom of the page that reads like a regression.
 
 **GSAP consumes an element's independent `rotate` / `translate` / `scale`.**
 `_parseTransform` folds them into one `transform` and sets all three to `none`
@@ -2753,6 +2853,13 @@ tween on that element must land on the authored angle explicitly. Probe
 `getComputedStyle(el).rotate` before and after the tween to see it happen.
 Corollary: a CSS start state that combines a perspective with an authored
 `rotate` decomposes into a spurious `rotationX` the tween never clears.
+
+**Every GSAP callback runs with its creating context active.** `_callback`
+(`gsap-core.js:981`) does `context && (_context = context)` before invoking
+`onStart` / `onUpdate` / `onComplete`, where `context` is `animation._ctx`. So
+"it fires on a later tick, so no context is active" is never a valid reason to
+reach for `contextSafe` — and in this codebase `contextSafe` has no valid use
+at all. See "Fix — the journal mark's `contextSafe`".
 
 **Building the parent commit needs a sibling worktree with hard-linked
 `node_modules`.** Turbopack rejects a symlinked `node_modules` outright

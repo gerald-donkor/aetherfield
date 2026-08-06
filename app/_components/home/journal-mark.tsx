@@ -43,7 +43,7 @@ export function JournalMark() {
   const root = useRef<HTMLDivElement>(null);
 
   useGSAP(
-    (_context, contextSafe) => {
+    () => {
       const mm = gsap.matchMedia();
 
       mm.add(
@@ -85,41 +85,56 @@ export function JournalMark() {
           // flip travels much further than a 36px rise and reads rushed at DUR.
           const el = root.current as HTMLDivElement;
 
-          // The hover tween writes `rotation` on the same element as the enter
-          // flip, so it is not built — and no listener is bound — until the
-          // flip has landed. Hovering mid-flip therefore cannot leave the mark
-          // off its resting angle; there is nothing to hover yet.
-          let hover: gsap.core.Tween | null = null;
+          /* The hover tween. **Built here, synchronously, and NOT through
+             `contextSafe`** — even though it is only *used* later.
 
-          const buildHover = contextSafe?.(() => {
-            // Paused, and driven with play()/reverse() rather than a `gsap.to`
-            // per event: a mouse-out mid-flight then unwinds along the same
-            // curve from wherever it is. `quickTo` cannot reverse like that,
-            // and stacked tweens fight each other.
-            //
-            // The start vars are the *composed* resting pose, never
-            // `rotation: 0` — GSAP has already folded the authored
-            // `rotate: -8deg` into `transform` by this point.
-            hover = gsap.fromTo(
-              el,
-              {
-                rotation: REST_ROTATION,
-                rotationY: 0,
-                transformPerspective: 800,
-              },
-              {
-                rotation: HOVER_ROTATION,
-                rotationY: HOVER_ROTATION_Y,
-                transformPerspective: 800,
-                duration: DUR * 0.7,
-                ease: EASE,
-                paused: true,
-                // Nothing may be written until the pointer arrives; the enter
-                // tween has just set the resting pose.
-                immediateRender: false,
-              },
-            );
-          });
+             `contextSafe` is bound to the outer `useGSAP` context, and
+             `Context.add`'s wrapper does
+             `prev && prev !== self && prev.data.push(self)`
+             (`gsap-core.js:3925`). Whatever tick it runs on, if a gsap Context
+             is active as `prev` it pushes the outer context into that one's
+             `data` — and the matchMedia context is already inside the outer's
+             from the same line. The two then reference each other and
+             `Context.getTweens` recurses over `data` with no cycle guard
+             (`:3949`), so the next `revert()` — any client-side navigation away
+             from `/` — throws `RangeError: Maximum call stack size exceeded`.
+
+             Building it from the entrance tween's `onComplete` does not escape
+             that: `_callback` restores the tween's *creating* context before
+             invoking any callback (`gsap-core.js:981`), so `prev` is the
+             matchMedia context there too. Measured — this is the crash that was
+             reported on `/journal`. See AGENTS.md.
+
+             Created inline it is inside a live context and `mm.revert()`
+             already reverts it. Paused and driven with play()/reverse() rather
+             than a `gsap.to` per event, so a mouse-out mid-flight unwinds along
+             the same curve from wherever it is; `quickTo` cannot reverse like
+             that and stacked tweens fight each other. The start vars are the
+             *composed* resting pose, never `rotation: 0` — GSAP folds the
+             authored `rotate: -8deg` into `transform` the moment it parses —
+             and they are authored literals, so nothing here depends on the
+             entrance having landed. `immediateRender: false` keeps a paused
+             `fromTo` from writing its start values at creation, on top of the
+             entrance tween. */
+          const hover = hasHover
+            ? gsap.fromTo(
+                el,
+                {
+                  rotation: REST_ROTATION,
+                  rotationY: 0,
+                  transformPerspective: 800,
+                },
+                {
+                  rotation: HOVER_ROTATION,
+                  rotationY: HOVER_ROTATION_Y,
+                  transformPerspective: 800,
+                  duration: DUR * 0.7,
+                  ease: EASE,
+                  paused: true,
+                  immediateRender: false,
+                },
+              )
+            : null;
 
           const onPointerEnter = () => hover?.play();
           const onPointerLeave = () => hover?.reverse();
@@ -144,9 +159,12 @@ export function JournalMark() {
                 start: "top 88%",
                 once: true,
               },
+              // The hover tween writes `rotation` on the same element as this
+              // one, so no listener is bound until the flip has landed.
+              // Hovering mid-flip therefore cannot leave the mark off its
+              // resting angle — the tween exists, but nothing can reach it.
               onComplete: () => {
-                if (!hasHover) return;
-                buildHover?.();
+                if (!hover) return;
                 el.addEventListener("pointerenter", onPointerEnter);
                 el.addEventListener("pointerleave", onPointerLeave);
               },

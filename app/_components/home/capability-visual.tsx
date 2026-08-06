@@ -213,11 +213,16 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
                the next unmount, which on `/` means any client-side navigation
                away — throws `RangeError: Maximum call stack size exceeded`.
 
-               `journal-mark.tsx` may keep its `contextSafe` because it calls
-               it from the entrance tween's `onComplete`, on a later tick, with
-               no context active. The rule is: `contextSafe` is for callbacks
-               that fire *after* the hook has returned, never for work done
-               inline. */
+               `journal-mark.tsx` was originally exempted here on the grounds
+               that it called `contextSafe` from the entrance tween's
+               `onComplete`, "on a later tick, with no context active". That is
+               wrong, and it crashed `/journal` the same way: `_callback`
+               restores the tween's *creating* context before invoking any
+               callback (`gsap-core.js:981`), so `prev` is the matchMedia
+               context there too. The corrected rule is: **`contextSafe` is only
+               safe where no gsap Context is active** — which a tween callback
+               is not, and neither is anything synchronous inside an `mm.add`
+               handler. It appears nowhere in `app/` today. */
             lean = gsap.fromTo(
               cardEl,
               { rotationY: 0, transformPerspective: 900 },
