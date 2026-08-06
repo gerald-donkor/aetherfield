@@ -2628,6 +2628,137 @@ normalised, and every route keeps its chunk set (`/` and `/journal` 10, the rest
 Four `/journal` ⇄ `/` round trips plus a `/journal` → `/about` → back, each with
 a full scroll pass: **zero page errors and zero console errors.**
 
+## The article cards' hover fade — the last `group-hover:underline`
+
+Prompt 27. `ArticleCardStacked`'s title carried `group-hover:underline`, which
+snapped a solid underline on with no transition. It now fades the **title and
+the description** instead, the idiom `home/journal.tsx` already ships. This was
+the last `group-hover:underline` in `app/`; the site's only remaining
+`hover:underline` is the job listing's "Back to Careers" prose link
+(`job/sections.tsx:22`), which is out of scope.
+
+**CSS-only, two class strings**, both gaining
+`transition-opacity duration-300 ease-in-out group-hover:opacity-70
+motion-reduce:transition-none`. `cards.tsx` stays a server component; no new
+module, no client reference, no `globals.css` rule.
+
+### What the reference shows — measured, not eyeballed
+
+`~/Videos/Screencasts/Screencast_20260806_141143.webm` (1264×598) is the target;
+`…_141027.webm` is the current behaviour. The recording is 1264 CSS px with no
+browser chrome, so distances read as CSS pixels. Sampled at 10 fps over
+t 7.5–12.0 s, box means in an 8-bit grey channel, boxes in full-frame coords:
+
+| element | box | at rest | hovered |
+| --- | --- | --- | --- |
+| left title | `370x24+20+410` | 197.51 | **217.18** |
+| right title | `545x24+640+410` | 196.65 | **215.99** |
+| left description | `590x50+20+476` | 223.19 | **233.93** |
+| right description | `565x50+640+476` | 231.45 | **239.10** |
+| left / right meta | `200x16+…+441` | 240.73 / 240.82 | **240.89 / 240.99** |
+| image interior | `580x300+30+70` | 197.52 / 94.52 | **197.53 / 94.49** |
+
+**Exactly one card is light at a time, and it is the hovered one** — verified
+against the cursor, not inferred. So no `:has()` and no container group.
+**Meta and image are measured unchanged and are not touched.** Title ink height
+and title x are constant: no underline, no slide.
+
+**The fade fits 0.666 and ships as `opacity-70`.** Against a white field,
+`α = (255 − dim) / (255 − rest)` gives 0.658 / 0.669 / 0.662 / 0.675 across the
+four boxes. **Same evidence, same call as prompt 19** (which measured 0.67 on
+the homepage rows and shipped `opacity-70`): one fade value site-wide.
+
+**The timing is `duration-300 ease-in-out`.** Three transitions traced at full
+frame rate and fitted over 150–500 ms, normalised SSE:
+
+| curve | best duration (in / in / out) | SSE |
+| --- | --- | --- |
+| CSS `ease` (.25,.1,.25,1) | 335 / 355 / 390 ms | 0.0004 / 0.0011 / 0.0007 |
+| linear | 210 / 225 / 250 ms | 0.0014 / 0.0008 / 0.0012 |
+| **Tailwind `ease-in-out` (.4,0,.2,1)** | **290 / 315 / 345 ms** | 0.0030 / 0.0020 / 0.0020 |
+| CSS `ease-out` (0,0,.58,1) | 280 / 300 / 325 ms | 0.0014 / 0.0024 / 0.0021 |
+| Tailwind `ease-out` (0,0,.2,1) | 415 / 440 / 485 ms | 0.0069 / 0.0091 / 0.0088 |
+
+CSS `ease` at ~360 ms is the nominal best fit; Tailwind's `ease-in-out` at
+~300 ms is in the same band and is **the curve already fitted and shipped for
+these rows' sibling behaviour on `/`**. 60 ms on an opacity fade is not
+perceptible, so consistency wins. The alternative is on file above.
+
+Four v4 mechanics, confirmed in the **built** stylesheet (`tailwindcss` 4.3.3):
+`.transition-opacity{transition-property:opacity}`;
+`.group-hover\:opacity-70…{opacity:.7}`, and walking the enclosing at-rules puts
+it inside **`@media (hover:hover)`**, which v4 wraps for free — no touch guard
+authored, and `matchMedia('(hover: hover)')` reads `false` in a touch context;
+`@media (prefers-reduced-motion:reduce){.motion-reduce\:transition-none{transition-property:none}}`;
+`--ease-in-out: cubic-bezier(.4, 0, .2, 1)` with `.duration-300{…:.3s}`.
+
+### Measured in the production build
+
+At **1264 wide on `/journal`**, scrolled so the first card's `h3` lands at
+y 409.81 — within 0.2 px of the reference's box top, with the meta at 441.81
+against 441 and the description at 475.81 against 476, i.e. **the render aligns
+with the reference to under a pixel.**
+
+| | rest | hovered | α |
+| --- | --- | --- | --- |
+| left title | 194.14 | 212.03 | **0.7060** |
+| right title | 192.29 | 210.74 | **0.7058** |
+| left description | 227.62 | 235.65 | **0.7067** |
+| right description | 234.62 | 240.60 | **0.7066** |
+| left / right meta | 240.76 / 240.61 | **unchanged** | — |
+
+**Report α, not the absolute box means.** The meta boxes match the reference to
+0.15 grey levels, but the title and description boxes carry different ink (our
+copy wraps differently inside those crops), so their absolute means sit 3–4
+levels from the recording's and are not comparable. α is crop-invariant, and it
+lands at the authored 0.706 against the reference's 0.666 — **the deliberate
+`opacity-70` rounding**, worth ~2.5 grey levels in the title box and ~1.1 in the
+description box. That is the known cost of the prompt 19 call, not a miss.
+
+`getComputedStyle` on the first card, `h3` and `p` alike: `1 → 0.7 → 1` across
+`pointerenter` / `pointerleave`, with **0.791569 at 140 ms in** and 0.908537 at
+140 ms out. 0.791569 is `1 − 0.3 × cubic-bezier(.4,0,.2,1)(140/300)` to six
+places — the curve confirms itself. `text-decoration-line` is `none` in **both**
+states. `Meta` opacity stays `1`; the image keeps its own `scale` `none → 1.05`.
+Reduced motion: `transition-property: none` and the hover reaches `0.7` in
+30 ms. On `/article/[slug]` and `/design-system` the same computed
+`opacity / 0.3s / cubic-bezier(0.4, 0, 0.2, 1)` applies; `/design-system`'s
+sample has no `group` link, so it is visually unchanged.
+
+### Impact
+
+- **Server-rendered markup is identical on all 16 pages** once the two class
+  strings are substituted and the build id and chunk names normalised. Eight
+  pages are **byte-identical without any substitution** — `/`, `/careers`,
+  `/about`, all three job listings, `_not-found`, `_global-error`.
+- The eight that change are `/journal`, the six articles and `/design-system`.
+  **Their residual whole-file diff beyond the two class strings is RSC
+  flight-payload row segmentation only** — the longer class strings shift where
+  Next splits `self.__next_f.push(…)` rows, so row labels renumber. Strip the
+  flight scripts and compare the markup to see through it; that is the cheap
+  check, and it is now in section 3.
+- **Every route keeps its exact chunk set and chunk names** — `/` and `/journal`
+  10, the other twelve 9, the two error pages 8. No module added.
+- Page heights unchanged: `/journal` 3801 / 5160 / 3486, `/article/[slug]`
+  4583 / 4813 / 3633, `/design-system` 7887 / 7773 / 7243, `/` 6350 / 6006 /
+  5595.
+- `magick compare -metric AE -fuzz 5%` in the settled state, against a worktree
+  build of the parent: **0 at 375 / 800 / 1280 on `/article/[slug]` and
+  `/design-system`**, and **0 on `/journal` outside the journal stamp** (78 / 109
+  inside it at 800 / 1280 — the perforation drift at a different loop phase,
+  present in both builds). `/` is **0 outside the capabilities cloth box** at all
+  three, with 68 / 0 / 155 inside it.
+
+### Non-goals
+
+- **The image zoom stays.** The reference shows no zoom, but
+  `group-hover:scale-105` was shipped deliberately in prompt 24 at the user's
+  explicit request. The recording is read as showing the *type* treatment.
+- **No slide** — the homepage rows translate +10 px, the reference's card titles
+  do not move.
+- `ArticleCardHorizontal`, `ArticleCardCompact`, `Meta` and the job listing's
+  prose `hover:underline` are untouched.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -2869,6 +3000,58 @@ use `[A-Za-z0-9_-]+`. And `SequenceMatcher` over a 200 KB single-line page runs
 for minutes — scan the common prefix and suffix instead (two `while` loops) and
 print only the middle. For the one page that legitimately differs, re-split on
 `(?<=>)` and run `unified_diff` over the tags, which is fast and readable.
+
+**A class-string change makes pages differ far beyond the class string, and it
+is not a real diff.** The prerendered HTML carries the RSC flight payload inline
+as `<script>self.__next_f.push([1,"…"])</script>`; changing a string's length
+shifts where Next splits those rows, so the row labels renumber (`8:I[…]` →
+`a:I[…]`) and a naive prefix/suffix scan reports tens of kilobytes. **Strip the
+flight scripts and compare the markup instead** — that is the thing that
+renders:
+
+```python
+markup = re.sub(r'<script>self\.__next_f\.push\(.*?\)</script>', '', html, flags=re.S)
+```
+
+Then substitute the old class string for the new one in the *base* side and the
+16 pages come back identical. Report the two results separately: which pages are
+byte-identical untouched, and that the rest differ only in the class strings
+plus flight-row segmentation.
+
+**Screenshotting for `AE` must wait on `document.fonts.ready` before the scroll
+pass, not just after it.** The footer's split blur-in is driven by a
+ScrollTrigger, and `autoSplit` re-splits on font load; if the 400px scroll pass
+races the fonts, the footer's reveal never fires and the whole footer stays at
+`opacity: 0` in the shot. It is intermittent, it looks exactly like a
+regression, and it bit both sides of a comparison independently. The procedure
+that is deterministic:
+
+```js
+await p.goto(url, { waitUntil: 'networkidle' });
+await p.evaluate(() => document.fonts.ready);
+await p.waitForTimeout(2000);                      // fonts + autoSplit settle
+for (let y = 0; y < H + 900; y += 400) { await p.evaluate(y => scrollTo(0, y), y);
+                                         await p.waitForTimeout(150); }
+await p.waitForTimeout(4000);                      // settle AT the footer
+await p.evaluate(() => scrollTo(0, 0)); await p.waitForTimeout(3000);
+```
+
+Assert it rather than trusting it — read
+`[...document.querySelectorAll('footer [data-footer-split]')].map(e => getComputedStyle(e).opacity)`
+and require all `1` before the shot.
+
+**`cd <dir>` alone can be swallowed by the shell's `zoxide` alias** (`zoxide: no
+match found`, and the directory never changes), so a follow-up `ls`/`git status`
+silently describes the *old* directory. `cd X && cmd` short-circuits correctly,
+but a bare `cd` does not. Use absolute paths, `git -C`, or `(cd X && …)`.
+
+**Another session may be committing to `main` while you work.** In prompt 27 a
+concurrent agent committed, rebuilt `.next`, and removed this session's
+`../aetherfield-base` worktree mid-comparison — which showed up as a base server
+returning 500 for its CSS chunk and screenshots of an unstyled page. Re-check
+`git log --oneline -1` and `git worktree list` before trusting a
+parent-commit comparison, and rebuild against the *current* parent if HEAD has
+moved.
 
 **`page.accessibility.snapshot()` is gone from the cached `playwright-core`.**
 It throws `Cannot read properties of undefined`. Use

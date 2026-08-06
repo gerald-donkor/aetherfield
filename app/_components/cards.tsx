@@ -58,12 +58,19 @@ export function ArticleCardStacked({
       ) : (
         <Placeholder ratio="612 / 356" />
       )}
-      <h3 className="mt-6 font-sans text-p1 font-bold group-hover:underline">
+      {/* The reference draws no underline — the title and the description just
+          fade. Measured 0.665 ± 0.005 against a white field; 0.7 is the value
+          the homepage journal rows already ship, so the site keeps one fade.
+          `duration-300 ease-in-out` is that same fitted curve. Meta and image
+          measure unchanged in the reference and are left alone. */}
+      <h3 className="mt-6 font-sans text-p1 font-bold transition-opacity duration-300 ease-in-out group-hover:opacity-70 motion-reduce:transition-none">
         {article.title}
       </h3>
       <Meta className="mt-2" items={[article.category, article.readTime]} />
       {article.description ? (
-        <p className="mt-5 font-serif text-p2">{article.description}</p>
+        <p className="mt-5 font-serif text-p2 transition-opacity duration-300 ease-in-out group-hover:opacity-70 motion-reduce:transition-none">
+          {article.description}
+        </p>
       ) : null}
     </>
   );
