@@ -3060,6 +3060,311 @@ list length** — `/about` is **775 793 → 776 791 raw (+998)** and **242 879 �
 - **No new timing constant** — `DUR` and `EASE` come from `register.ts`.
 - **`primitives.tsx`, `cards.tsx` and `home/` are untouched.**
 
+## `/careers`' reveals, and the masthead's per-character blur-in
+
+Prompt 32. `/careers` was the last **built** route with no motion of its own.
+It now carries the site's existing `Reveal` on the job list and **one new client
+leaf** for the masthead, which is split to **characters** and blurred in. Two
+pieces from one request, and the second overrides the first: the user supplied
+`~/Videos/Screencasts/career.webm` and asked for the page to animate "like
+this", then added *"Use the ones circled and do a split words for each letter in
+a blurry fashion too"* — the circle in
+`~/Pictures/Screenshots/Screenshot_20260806_210121.png` is around the masthead
+`h1` and nothing else.
+
+### `career.webm` is the designer's build — geometry must not be read off it
+
+Connected components at threshold 97 % on the settled frame:
+
+| card | recording | our render at 1280 |
+| --- | --- | --- |
+| card 1 (UX Designer) | `820×218+223` | `820×218` |
+| **card 2 (Data Scientist)** | **`820×194+223`** | **`820×218`** |
+| card 3 (Product Manager) | `820×218+223` | `820×218` |
+
+**194 is the comp's number**, and ours is 218 for the fixed 20 px
+`--text-p1` / `--text-p2` floor already on file for `/careers`, `/journal` and
+every article. So this is the designer's own implementation at ~17 px body type,
+exactly as `career-joblisting.webm` was. **Only timing, opacity, easing and
+travel transfer. No position, no box and no page height from this recording is a
+target.** Put this first; it is what stops a later session fitting geometry to
+it.
+
+The file is **variable frame rate**, so frames were extracted once with
+`-fps_mode passthrough` and indexed against the full `pts_time` list — see
+section 3, where the trap is recorded.
+
+### The fade is the site's own constants
+
+α read as `(bg − mean) / (bg − final)`, linear in opacity because browsers
+composite in sRGB. Background from a sky-only crop at the same y band
+(`355x60+90+155` → 209.3), confirmed by the first painted frame reading α = 0.00
+against it. Best fit over duration and onset, 38 samples:
+
+| curve | masthead line 1 | masthead line 2 | job card 1 |
+| --- | --- | --- | --- |
+| power4.out | 0.67 s, SSE **0.0269** | 0.85 s, **0.0145** | 0.82 s, **0.0994** |
+| **power3.out** | **0.53 s, 0.0298** | 0.69 s, 0.0184 | 0.65 s, 0.1000 |
+| expo.out | 0.98 s, 0.0365 | 1.16 s, 0.0210 | 1.19 s, 0.1278 |
+| power2.out | 0.39 s, 0.0409 | 0.54 s, 0.0315 | 0.47 s, 0.1102 |
+| linear | 0.28 s, **0.0909** | 0.40 s, 0.0924 | 0.29 s, 0.1826 |
+
+A decelerating curve beats linear by 3–5×, and `power3.out` at 0.53 s is inside
+the winning band on every channel. **`DUR` and `EASE` ship from `register.ts`
+unchanged.** Say *"measurement cannot separate power3.out / 0.53 s from
+power4.out / 0.67 s; the site's constants sit inside the band"* if this is
+revisited — **never "0.5 was measured"**.
+
+**The masthead's two lines are one target.** Fitted onsets: line 1 4.418 s,
+line 2 4.384–4.418 s — under two frames apart, against `Reveal`'s 0.08 s ≈ five
+frames.
+
+**`delay={0.16}` is two steps, and two recordings agree.** Fitted onsets put the
+masthead at 4.418 and job card 1 at 4.557 → **Δ 0.139 s**; the unexecuted
+`prompts/30-careers-and-job-listing-reveals.md` measured **0.167 s** the same way
+on a *different* recording (`career-joblisting.webm`). Two independent readings
+side by side make two steps of the site's 0.08 the honest number.
+
+### The rise: measured floors, judged amplitudes
+
+Two opacity-invariant channels, both on a page that is **not** scrolling:
+
+- **Half-max row-profile top edge** of "Careers at": 208.05 → 161.86, i.e.
+  **46.2 px observed**, and the first sample is already at α ≈ 0.10, so the true
+  amplitude is larger.
+- **Half-contrast top edge of job card 1** (a solid white block against the sky,
+  the cleanest channel on the page): 385.08 → 328.44, **56.6 px observed**.
+
+Both corroborated by normalised row-profile cross-correlation (masthead ≈ +30 px,
+card ≈ +28 px, both decaying to 0).
+
+**No single power curve fits amplitude, onset and duration together.** Free fits:
+
+| channel | best | A | duration | rms |
+| --- | --- | --- | --- | --- |
+| masthead top edge | power3.out | 55 px | 0.76 s | 0.53 px |
+| card 1 top edge | expo.out | 80 px | 1.00 s | 0.74 px |
+| card 1 top edge | power4.out | 87 px | 0.81 s | 0.83 px |
+| card 1 top edge | power3.out | 157 px | 0.83 s | 1.14 px |
+
+Holding the fade's fitted `power3.out` / 0.53 s and solving for amplitude frame
+by frame gives A = 44.7 → 46.3 → 58.2 → 72.5 → 229 — it climbs monotonically,
+i.e. the position is still moving long after the opacity has landed. Prompt 30
+hit the same runaway on the other recording.
+
+**So `y={56}` on the masthead and `y={72}` on the job list are judgements
+anchored on the 46 px and 57 px observed floors**, not measurements — but the
+floors are what make `Reveal`'s default 36 definitely short. Both are multiples
+of the 8 px rhythm and neither introduces a constant; `y` is an existing prop.
+**Do not add a second duration or a second ease to `Reveal`** — the site has one
+reveal curve and a per-page fork is not worth it.
+
+### There is no blur and no split in the recording
+
+Five masthead crops stacked at α ≈ 0.13 / 0.24 / 0.51 / 0.75 / 1.0 and enlarged
+300 % show **crisp glyph edges at every stage**, every letter at the same α. This
+matters twice: it confirms the rise is real rather than a blur artefact (a
+symmetric blur pushes a half-max top edge *up*; the measured edge moves the
+other way), and it establishes that **the chars split and the blur are the
+user's explicit addition**, in the same spirit as the seal's offsets and the
+20 % speed-up.
+
+**Nothing reveals on scroll and there is no hover.** Cards 2, 3 and the
+open-application card read `max = 255` on the first frame their top edge enters
+the viewport across both scroll passes — in the designer's build the whole
+document reveals at load. The cursor crosses several cards with no measurable
+change. No scrub, no pin, no parallax, no loop.
+
+### `motion/careers-masthead-text.tsx`
+
+`"use client"`, component-only, `children` as a prop, and it renders the `<h1>`
+itself with the class string taken over **verbatim** — so no box is added and no
+class string changes. **It lives in `motion/`, never in `careers/` and never in
+`home/`**: `motion/` is the shared surface and nothing outside `home/` may
+import `home/hero-text.tsx`. Keep it component-only, the `principles-data.tsx`
+rule. One `useGSAP` with `{ scope: root }`, one `gsap.matchMedia()` with the
+named `isDesktop` / `isMobile` / `reduceMotion` / `fullMotion` set,
+`mm.add(…, root)`, `mm.revert()` as cleanup, `DUR` / `EASE` from `register.ts`.
+`careers/sections.tsx` **stays a server component**; `app/careers/page.tsx` is
+unchanged.
+
+**The 20-glyph count is what makes a chars split affordable, and it supersedes
+the standing "chars is out of scope" note for this element only.** That note's
+objection is a target count — an animated `filter: blur()` repaints each
+target's layer every frame — and the masthead is **20 glyphs** ("Careersat" 9 +
+"Aetherfield" 11; the space is not a char), the same order as the footer's 12
+words and the hero's five. **Measured in the render: exactly 20.** The objection
+still stands everywhere else.
+
+```
+type: "chars", smartWrap: true, tag: "span", aria: "auto" (default), autoSplit: true
+```
+
+- **`smartWrap: true` is required.** Splitting chars without words or lines lets
+  the browser break mid-word; without it "Aetherfield" can wrap between glyphs at
+  a narrow viewport. It is what makes the mid-flight span count **25** — two
+  authored line spans + 20 chars + three `white-space: nowrap` word wrappers.
+- **`tag: "span"`** — a `<div>` inside the authored `<span className="block">` is
+  invalid markup, the reason `hero-text.tsx` gives.
+- **`autoSplit: true`, with the animation created inside and returned from
+  `onSplit(self)`.** A tween created outside it targets orphaned nodes after the
+  first re-split. It is also why **no `document.fonts.ready` promise is used**: a
+  tween created in a promise callback is outside every gsap Context, and
+  reaching for `contextSafe` to fix that is the documented `RangeError` crash.
+  Everything is created synchronously inside the `mm.add` handler.
+- The two authored `<span className="block">` lines are untouched, and **one**
+  `SplitText.create` runs over the whole `h1` — `self.chars` is then in document
+  order, so the stagger is a single sweep left-to-right and top-to-bottom across
+  both lines. Do not create two instances.
+
+**The split is reverted when the tween lands, and that is load-bearing.**
+`onComplete: () => self.revert()`. The hero could get away with
+`clearProps: "filter,display"` because a **words** split leaves word-internal
+kerning intact; a **chars** split puts every glyph in its own inline box, which
+breaks every kerning pair and rounds every advance to a whole pixel — and line 1
+is Newsreader, which kerns. `revert()` restores the original text nodes, so the
+settled masthead is the plain server markup the comps were measured against:
+original kerning, original rasterisation, no leftover `aria-hidden` spans.
+**`clearProps` is then unnecessary and is deliberately absent.** Verified: the
+settled `h1` holds **2** spans (the authored ones) and the settled render is
+`AE` 0 — see the table below. Reverting from inside the tween's own `onComplete`
+does not throw, and needs no `contextSafe`: it runs after the tween has finished
+and, being a GSAP callback, with the creating context active
+(`gsap-core.js:981`).
+
+**`aria: "auto"` derives the label from `textContent.trim()`
+(`SplitText.js:213`) and the two line spans have no whitespace between them**,
+so the split element was labelled **"Careers atAetherfield"** — measured, and
+the one defect this work found. The leaf now joins the two lines with a space
+and re-applies the label inside `onSplit` (which runs *after* SplitText writes
+its own, and on every re-split). The label is read off the markup rather than
+hardcoded, so the copy cannot drift, and it is captured **before** the split
+because `h1.children` is the split spans afterwards. An authored `aria-label` in
+the JSX would not work — `aria: "auto"` overwrites it unconditionally. The
+revert restores the original attributes, so the settled heading carries no
+`aria-label` at all and reads natively. **Verified in the accessibility tree at
+375, 800 and 1280: `- heading "Careers at Aetherfield" [level=1]` both during
+the split and after the revert.**
+
+The tween: `gsap.set(h1, { opacity: 1 })` (the CSS start state hides the `h1`),
+`gsap.set(self.chars, { display: "inline-block" })` — required or the `y` will
+not render on a span, and it goes away with the revert — then
+`gsap.from(self.chars, { opacity: 0, filter: blur(N), y, duration: DUR, ease:
+EASE, stagger: CHAR_STAGGER })`.
+
+- **`gsap.from` is correct here and `fromTo` is not needed.** The trap on file
+  ("`gsap.from` reads the element's *current* value as the tween's end value")
+  bites only on an element `globals.css` is holding at 0 — that is the `h1`, and
+  the `h1` is lifted by the `gsap.set` rather than tweened. The chars are fresh
+  spans at their default opacity 1.
+- **`blur(0px)`, never `none`** — GSAP interpolates a filter numerically only
+  between two `blur()` functions.
+- **`BLUR = 12` at `lg`, `Math.round(12 × 0.66) = 8` below — reused from the
+  hero, not measured.** `display-careers-title` is 36 / 64 / 80 px, the same
+  curve as the article title and the same range the hero's type spans.
+- **`CHAR_STAGGER = 0.03` is a judgement**, and the only new timing number.
+  20 × 0.03 = 0.57 s of run alongside `DUR 0.5` gives a masthead beat of ~1.07 s,
+  close to the footer's authored 1.0 s. The hero's 0.06 would run 1.2 s of
+  stagger alone here and read as a crawl. It stays **local to this leaf** and does
+  not go into `register.ts`, as the hero's `STAGGER` does.
+
+**Reduced motion splits nothing at all** — no `SplitText.create`, no tween — and
+lands only `gsap.set(h1, { opacity: 1 })`, as `hero-text.tsx` and
+`footer-reveal.tsx` do.
+
+**`Reveal`'s `as` union was NOT widened.** Prompt 32 proposed adding `"h1"`; the
+masthead is the split leaf and never a `Reveal`, so `"h1"` would have been a dead
+type. Dropped, per that step's own escape clause. `reveal.tsx` is untouched.
+
+### `globals.css` — one selector
+
+`[data-careers-split]` joins the existing
+`(scripting: enabled) and (prefers-reduced-motion: no-preference)` block,
+**opacity only**, alongside `[data-hero-split]` and `[data-footer-split]`. No
+start transform, for the reason `[data-journal-mark]` records. **Confirmed in
+the built chunk**, not assumed:
+`…[data-journal-mark],[data-hero-split],[data-footer-split],[data-footer-wordmark],[data-careers-split]{opacity:0}`.
+
+### The job list — one staggered trigger, not one `Reveal` per card
+
+`JobList`'s `<ul>` is `<Reveal as="ul" stagger delay={0.16} y={72}>` with the
+identical class string, and each `<li>` gains `data-reveal-item`. `/journal` uses
+per-card triggers because its grid is ~3000 px tall and a single trigger would
+run four cards far below the fold; this list is ~900 px at 1280 and the recording
+reveals all four together at load, so one trigger at `Reveal`'s default
+`start: "top 88%"` — which fires at load at every breakpoint, the list top being
+y ≈ 216–332 — is both simpler and closer to the source. Note `stagger` mode
+emits no `data-reveal` on the `<ul>`, so the `<ul>`'s markup is unchanged.
+
+### Measured in the production build
+
+Against a worktree build of `9fd6cd3`.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| page height | **1895** | **1770** | **1925** |
+| dashed card box | `335×224+20+1200` | `760×170+20+1001` | `820×170+230+1036` |
+| `AE` @ 5 % fuzz, **outside** the dashed card | **0** | **0** | **0** |
+| `AE` inside the dashed card box | 47 | 143 | 546 |
+| settled `h1` spans | **2** | **2** | **2** |
+| mid-flight chars / spans | 20 / 25 | 20 / 25 | 20 / 25 |
+| tail char at t ≈ 250 ms | `blur(8px)`, `y 37` | — | `blur(12px)`, `y 56` |
+| head char at the same instant | α 0.79, `blur(1.67px)` | — | α 0.80, `blur(2.39px)` |
+
+Page heights and every card box are the recorded numbers **unchanged**, and the
+`h1` box is identical to the base build at all three widths. **Never report a
+bare page-wide `AE` for `/careers`** — the open-application card's marching
+dashes sit at a different loop phase in any two shots, the warning already on
+file. Masked, the remainder is **0**, which is the proof that the revert lands
+exactly.
+
+**Reduced motion**: `h1` at `opacity: 1` with **0** split spans, all four `li` at
+`opacity: 1`. `Reveal`'s reduce branch writes `matrix(1, 0, 0, 1, 0, 0)` — the
+pre-existing shared behaviour verified on `/journal` in prompt 30, not a
+regression. **JavaScript off**: `h1` and all four `li` at `opacity: 1` with
+`transform: none`; the `scripting: enabled` gate never applies and the dashed
+frame's CSS march still runs.
+
+**Eight round trips (`/careers` ⇄ `/` and `/careers` ⇄ `/journal`), each with a
+full scroll pass: zero page errors and zero console errors.** That is what the
+new `self.revert()`-in-`onComplete` lifecycle surface was tested for.
+
+### Impact
+
+**`/careers` is the only route whose prerendered HTML changes**, and its markup
+diffs are exactly six attributes plus one script: `data-careers-split=""` on the
+`h1`, `data-reveal-item="true"` on each of the four `<li>`, and the client
+reference `<script>`. Every class string is carried over verbatim, so there is
+**no RSC flight-payload re-segmentation to see through** — the other **15 pages
+are byte-identical** once the build id and the CSS and JS chunk names are
+normalised, with no stripping required.
+
+Chunks: `/careers` goes **9 → 10**, the way `/journal` and `/about` did. **Diff
+the bytes, not the count** — GSAP is already in the shared chunk site-wide, so
+`/careers` is **775 793 → 777 863 raw (+2 070)** and **242 198 → 243 160 gzipped
+(+962)**. Every other route's chunk set, chunk names and byte totals are
+**identical**.
+
+### Non-goals held
+
+- **`/job-listing/[slug]` is not touched.** The unexecuted prompt 30 bundled it
+  in; the user's request names `/career` and the recording covers `/careers`
+  only. It stays unanimated and wants its own prompt.
+- **No geometry, type, spacing, colour or asset change.** The card heights, the
+  20 px `--text-p1` / `--text-p2` floor, the masthead's fitted
+  `pt-[66px] sm:pt-[89px] lg:pt-[88px]` and the 120 px foot are all
+  already-recorded, comp-measured decisions and none was chased.
+- **The dashed frame's marching CSS animation is untouched** — prompt 31, still
+  outside the `scripting: enabled` block.
+- **The footer keeps its split blur-in** and `chrome.tsx` is not edited.
+- **No scroll-triggered reveal below the fold, no hover, no scrub, no pin, no
+  parallax, no loop.** The capabilities cloth is still the site's only
+  scroll-linked element.
+- **No change to `DUR`, `EASE` or `Reveal`'s `stagger: 0.08`**, and `reveal.tsx`
+  is not edited at all.
+- **`cards.tsx` / `JobCard` is not touched** — it is shared with
+  `/design-system`.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -3285,6 +3590,34 @@ magick montage frames/f0*.jpg -tile 6x -geometry +2+2 -resize 320x sheet.png
 1 fps first, to find where each pass and each section starts; then 12–15 fps
 over the two or three seconds that matter. **A 1 fps sample makes clean opacity
 fades look like blur** — do not diagnose an effect off the coarse pass.
+
+**A variable-frame-rate capture must be extracted once and indexed against its
+own `pts_time` list.** `~/Videos/Screencasts/*.webm` from this user's recorder is
+VFR: a `-ss/-to` slice returns a **different frame count** from the matching
+`ffprobe` window, so every frame number is silently mis-timed and every fitted
+onset is wrong. Extract everything once and build the timestamp table:
+
+```
+ffprobe -v error -select_streams v -show_entries frame=pts_time \
+  -of csv=p=0 ref.webm > pts.csv
+ffmpeg -v error -i ref.webm -fps_mode passthrough -q:v 2 all/f%04d.jpg
+```
+
+Frame *n* (1-based) is then line *n* of `pts.csv`. Quote frame numbers alongside
+times so a later session can re-derive the reading.
+
+**Measuring a rise on a page that is NOT scrolling: use a half-max row-profile
+edge crossing, not an ink centroid.** The centroid is the right channel for a
+*scroll-pass* recording, where everything moves; on a load-entrance it is
+confounded on any multi-line element, because at low α the heavier line
+dominates and the centroid moves for reasons that are not travel. Take the ink
+count per row over a crop, find where the profile crosses half its settled
+maximum, and track that row. For a solid block against a gradient (a white card
+on the sky) the half-*contrast* crossing is cleaner still and is the most
+sensitive channel on the page. Both are opacity-invariant. Corroborate with
+normalised row-profile cross-correlation against the settled frame — the lag
+should decay to 0 as the element lands. **Report the observed travel as a floor**,
+since the first measurable frame is already part-way in.
 
 **Measuring a rise off a scroll-pass recording: use an ink-weighted centroid,
 relative to a settled neighbour.** A recording of a continuous scroll moves

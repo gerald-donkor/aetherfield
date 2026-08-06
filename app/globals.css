@@ -137,6 +137,15 @@ body {
   [data-footer-wordmark] {
     opacity: 0;
   }
+  /* The /careers masthead, split to characters. Opacity only, and on the
+     *unsplit* `h1`, for the two reasons the hero's rule records: the split
+     nodes do not exist when the stylesheet is parsed, and an authored
+     transform or filter would be decomposed into the element's own stack and
+     outlive the tween. The split is reverted when the tween lands, so the
+     settled masthead is the plain server markup this rule was hiding. */
+  [data-careers-split] {
+    opacity: 0;
+  }
 }
 
 /* ---- The open-application card's marching dashes -----------------------
