@@ -59,6 +59,28 @@ body {
   font-family: var(--font-sans);
 }
 
+/* ---- The pointer cursor on buttons --------------------------------------
+   Tailwind v4 dropped v3's Preflight rule `button, [role="button"] { cursor:
+   pointer }` (confirmed against node_modules/tailwindcss@4.3.3's
+   preflight.css, which now only carries the Safari spinner note), so a
+   `<button>` falls back to the UA's `cursor: default` and stops advertising
+   itself as clickable. This is v4's documented replacement — do not delete it
+   as redundant.
+
+   Anchors need no rule: the UA stylesheet already gives `a[href]` a pointer,
+   and every link in this tree has an href (`next/link` always emits one), so
+   the fix is deliberately scoped to `button` / `[role="button"]`.
+
+   `@layer base` so any future `cursor-*` utility still wins — v4 orders the
+   layers `theme, base, components, utilities`. `:not(:disabled)` so a
+   disabled control keeps the default cursor. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
 /* ---- Homepage motion: the hidden start state ----------------------------
    The server sends every section fully visible and the browser paints it, then
    the client sets opacity 0 and animates — a real flash, because useGSAP runs
