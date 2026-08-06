@@ -1912,27 +1912,72 @@ autonomous. So the outer wrapper takes the scroll parallax (`yPercent -4 → 4`,
 carries a continuous drift. **Two wrappers, not one** — sharing an element would
 make the two tweens fight over its transform.
 
-The fall is three yoyoing tweens on **deliberately coprime-ish periods — 7 / 11
-/ 13 s** (`yPercent 2`, `xPercent 1.5`, `rotation 1`, all `sine.inOut`). Their
-compound period is minutes long, so the cloth never visibly repeats and never
-lines up into an obvious bounce; that is what makes a looping drift read as
+The fall is three yoyoing tweens on **deliberately coprime-ish periods — 3.5 /
+5.5 / 6.5 s** (`yPercent 6`, `xPercent 1.8`, `rotation 1.1`, all `sine.inOut`).
+Their compound period is minutes long, so the cloth never visibly repeats and
+never lines up into an obvious bounce; that is what makes a looping drift read as
 organic rather than mechanical. `sine` because a falling cloth decelerates into
-each turn. The timeline is `seek(3.5)` at build so the cloth is already mid-sway
+each turn. The timeline is `seek(1.75)` at build so the cloth is already mid-sway
 the first time the section scrolls in, and it joins the same on-screen gate as
 the counter and the spin.
 
-**The overscan is asymmetric CSS insets — `-inset-x-[4%] -inset-y-[11%]` — and
-that is a resolution decision, not a styling one.** It shipped first as a
-uniform `gsap.set(scale: 1.16)`, and the user reported the photograph looking
-blurry. A uniform scale makes the image paint 16 % wider than its box, and
-`Image-3.png` is only **768×768**: at 800 that pushed the required source width
-to 884 and visibly softened it. The motion is mostly vertical, and a square
-source cropped into this 692:566 box already has vertical pixels to spare — so
-**vertical overscan is free and horizontal overscan is not**. 11 % down each side
-covers 4 % of parallax + 2 % of fall + ~1 % of rotation sweep; 4 % across covers
-the 1.5 % x-sway plus its share of the rotation. Rendered width drops from 1.16×
-the box to **1.08×**, which is what puts desktop back inside the 750w candidate.
-Verified at the scrub's start, middle and end: no edge enters the frame.
+**The periods are one 7 : 11 : 13 ratio, halved — keep the ratio.** They shipped
+first at 7 / 11 / 13 s with `yPercent 2` / `xPercent 1.5` / `rotation 1`, and the
+user asked for the fall to be more visible and faster (prompt 23). Halving every
+period preserves the coprime structure exactly; a round "make everything 2 s"
+would destroy it and the cloth would visibly bounce. `seek` halves with them, so
+the entry phase is unchanged. Vertical travel is 3× and every period is half, so
+peak vertical velocity is **6×** the original.
+
+**The overscan is asymmetric CSS insets — `-inset-x-[4%] -inset-y-[16%]` — and
+the two numbers are not the same kind of number.** It shipped first as a uniform
+`gsap.set(scale: 1.16)`, and the user reported the photograph looking blurry. A
+uniform scale makes the image paint 16 % wider than its box, and `Image-3.png` is
+only **768×768**: at 800 that pushed the required source width to 884 and visibly
+softened it.
+
+- **The x inset is a hard resolution ceiling.** The box is wider than it is tall,
+  so `object-fit: cover` scales by *width* and the rendered width — hence the
+  srcset candidate — depends on the x inset alone. 4 % puts the render at
+  **1.083×** the box, which is what keeps desktop inside the 750w candidate.
+  Raising it re-softens the source. Do not.
+- **The y inset is free up to 16.02 %, and no further.** At `-inset-y-[16.02%]`
+  the wrapper is 1.3204H tall against 1.08W = 1.3204H wide — exactly square, the
+  point where cover flips to scaling by height and the rendered width starts to
+  grow. 16 % sits on that ceiling, and that is what buys the fall its 6 % of
+  travel. Verified after the change: rendered/box is **1.083× at 375, 800 and
+  1280**, unchanged, and `currentSrc` is still the `w=750&q=90` candidate at 1280
+  and 375.
+
+**`object-fit: cover` clips — the source's overhang is not spare coverage.**
+Prompt 23 originally budgeted an extra `(1.3204 − 1.22)/2 = 0.0502H` of margin
+from the image overhanging its box. It does not exist: cover crops to the element
+box, so the only coverage the fall can spend is the inset itself. At the old
+11 % the requested `yPercent 6` would have overrun it (0.1220H of travel into
+0.1100H of margin) and the cloth's top edge would have entered the frame. The
+0.0502H was converted into real inset instead, which is where 16 % comes from.
+
+**The budget, per side.** `W`, `H` are the root box (aspect 692:566); the wrapper
+is `1.08W × 1.32H`; the rotation term is the half-side × `sin θ`, the coverage the
+leading corner of an edge gives up.
+
+| | available | consumed |
+| --- | --- | --- |
+| vertical | `0.16H` | parallax `0.04 × 1.22H` + fall `0.06 × 1.22H` + `0.66H·sinθ` = **`0.1347H`** |
+| horizontal | `0.04W` | fall `0.018 × 1.08W` + `0.499W·sinθ` = **`0.0290W`** |
+
+Measured spare, worst case: **6.9 / 15.8 / 12.2 px** vertical and **3.7 / 8.4 /
+6.5 px** horizontal at 375 / 800 / 1280. Horizontal is the binding constraint, so
+the x-sway and the rotation are held small. **More travel is not a reason to
+raise an inset** — solve it against this table, and if it will not fit, it will
+not fit.
+
+Verified by forcing the composite worst-case transform onto both wrappers with an
+`!important` rule (five phase combinations × three breakpoints) and comparing the
+`<img>` rect against the root's: no edge enters the frame at any of them. Note
+`getBoundingClientRect()` returns the *axis-aligned* box of a rotated element and
+so overstates corner coverage — take the rotation term from the table, not from
+the rect.
 
 **`sizes` must advertise the *rendered* width, not the box.** This is the trap
 that made the image soft in the first place. The wrapper overscans, so the image
@@ -2111,6 +2156,19 @@ The other **15 pages are byte-identical** once the build id and the CSS chunk
 name are normalised, and **every page keeps an identical chunk set** — `/` still
 has 10 and the rest 9, so `CapabilityVisual` bundled into the existing page chunk
 and no GSAP leaked.
+
+**Prompt 23's amplitude and speed change measures the same way.** Page heights
+stay 6350 / 6006 / 5595 and the image box stays `335×274+20+903` /
+`760×622+20+1125` / `588×481+24+1346`. Scoped `AE` at 5 % fuzz is **`0` outside
+the box at all three** and 295 / 1629 / 854 inside it (0.30–0.34 % of the box's
+pixels) — the cloth at a different phase, not a regression. **15 of 16 pages are
+byte-identical** and `/`'s only content diff is the one class attribute
+(`-inset-y-[11%]` → `-inset-y-[16%]`) plus the page-chunk rename; every page
+keeps its chunk set (`/` still 10). The lean still measures `cos 20° =
+0.939693` and returns exactly to rest, the asterisk still turns at 40 °/s, the
+counter still runs the six readings to `583.7 ↓12.4%`, the on-screen gate still
+holds the fall paused at scroll 0, and reduced motion still writes no transform
+at all.
 
 # Content and asset conventions
 

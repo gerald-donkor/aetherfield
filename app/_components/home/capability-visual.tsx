@@ -123,20 +123,30 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
           );
 
           /* The fall itself: three yoyoing tweens on *deliberately coprime-ish
-             periods* (7 / 11 / 13 s). Their compound period is minutes long, so
-             the cloth never visibly repeats and never lines up into an obvious
-             bounce — the trick that makes a looping drift read as organic. Sine
-             easing because a falling cloth decelerates into each turn rather
-             than snapping out of it. `y` leads; `x` and the rotation are the
-             sway around it. Transform-only, so this composites on the GPU and
-             never touches layout. */
+             periods* — 3.5 / 5.5 / 6.5 s, i.e. the same 7 : 11 : 13 ratio at
+             half the duration. That ratio is what keeps the compound period
+             minutes long, so the cloth never visibly repeats and never lines up
+             into an obvious bounce; a round "make everything 2 s" would destroy
+             it. Sine easing because a falling cloth decelerates into each turn
+             rather than snapping out of it. `y` leads; `x` and the rotation are
+             the sway around it. Transform-only, so this composites on the GPU
+             and never touches layout.
+
+             **The amplitudes are solved against the wrapper's overscan budget,
+             not chosen.** At 6 / 1.8 / 1.1 the worst-case vertical consumption
+             is 0.1347H against the 0.16H the inset gives, and the horizontal
+             0.0290W against 0.04W. The horizontal figure is the binding one:
+             the x inset cannot grow without re-softening a 768x768 source, so
+             x-sway and rotation are held small. See the wrapper's class below,
+             and AGENTS.md, for why the two insets are not the same kind of
+             number. */
           const fall = gsap
             .timeline({ paused: true })
             .to(
               float.current,
               {
-                yPercent: 2,
-                duration: 7,
+                yPercent: 6,
+                duration: 3.5,
                 ease: "sine.inOut",
                 repeat: -1,
                 yoyo: true,
@@ -146,8 +156,8 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
             .to(
               float.current,
               {
-                xPercent: 1.5,
-                duration: 11,
+                xPercent: 1.8,
+                duration: 5.5,
                 ease: "sine.inOut",
                 repeat: -1,
                 yoyo: true,
@@ -157,8 +167,8 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
             .to(
               float.current,
               {
-                rotation: 1,
-                duration: 13,
+                rotation: 1.1,
+                duration: 6.5,
                 ease: "sine.inOut",
                 repeat: -1,
                 yoyo: true,
@@ -166,8 +176,9 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
               0,
             );
           // Start mid-sway rather than at a dead stop, so the cloth is already
-          // in motion the first time the section is scrolled into view.
-          fall.seek(3.5);
+          // in motion the first time the section is scrolled into view. Halved
+          // with the periods, so the entry phase is unchanged.
+          fall.seek(1.75);
 
           /* 2 — the card's lean. A paused tween driven by play()/reverse(),
              not a `gsap.to` per event: a mouse-out mid-flight then unwinds
@@ -326,12 +337,25 @@ export function CapabilityVisual({ children }: { children: React.ReactNode }) {
           800 that pushed the required source width to 884 and visibly softened
           it. The motion is mostly vertical, and a square source cropped into
           this 692:566 box already has vertical pixels to spare, so the vertical
-          overscan is free while the horizontal one is not. 11% down each side
-          covers 4% of parallax + 2% of fall + ~1% of rotation sweep; 4% across
-          covers the 1.5% x-sway plus its share of the rotation. Rendered width
-          drops from 1.16x the box to 1.08x, which is what puts desktop back
-          inside the 750w candidate. */}
-      <div ref={drift} className="absolute -inset-x-[4%] -inset-y-[11%]">
+          overscan is free while the horizontal one is not. Rendered width drops
+          from 1.16x the box to 1.08x, which is what puts desktop back inside
+          the 750w candidate.
+
+          **The 4% is a hard resolution ceiling; the 16% is a different kind of
+          number and the two must not be reasoned about together.** `object-fit:
+          cover` *clips* to this box, so the only coverage the fall can spend is
+          the inset itself — there is no bonus from the source's overhang. But
+          while the box is wider than it is tall, cover scales by *width*, so
+          the rendered width — and therefore the srcset candidate — depends on
+          the x inset alone. The box is 1.08W = 1.3204H wide, so vertical
+          overscan is free right up to 16.02% and costs sharpness past it. 16%
+          sits on that ceiling, which is what buys the fall its 6% of travel.
+          Raising the x inset by even a point re-softens a 768x768 source.
+
+          The budget, per side: vertical 0.16H available against 0.0488H of
+          parallax + 0.0732H of fall + 0.0127H of rotation sweep = 0.1347H;
+          horizontal 0.04W against 0.0194W + 0.0096W = 0.0290W. */}
+      <div ref={drift} className="absolute -inset-x-[4%] -inset-y-[16%]">
         <div ref={float} className="absolute inset-0">
           {children}
         </div>
