@@ -3581,6 +3581,145 @@ flight-payload re-segmentation to see through**.
 - **No `will-change`, no pin, no scrub.** The capabilities cloth is still the
   site's only scroll-linked element.
 
+## `/job-listing/[slug]`'s two reveals
+
+Prompt 34, the last content route with no motion of its own. Two `Reveal` calls
+and a two-word type widening — **no new client module, no new timing constant,
+and no `globals.css` rule** (`[data-reveal]` is already in the
+`(scripting: enabled) and (prefers-reduced-motion: no-preference)` block).
+`job/sections.tsx` stays a **server** component, and all three roles render the
+same two components, so one change covers three routes.
+
+```tsx
+<Reveal as="p"       immediate              y={24}>  {/* Back to Careers */}
+<Reveal as="article" immediate delay={0.08} y={72}>  {/* the whole card */}
+```
+
+`Reveal`'s `as` union gains `"p" | "article"`, inert, for the reason the `"h2"`
+and `"table"` widenings already record: the reveal **takes the existing element
+over via `className` instead of wrapping it**, so no box is added and no class
+string changes. `app/job-listing/[slug]/page.tsx` is unchanged, as are
+`primitives.tsx`, `cards.tsx`, `chrome.tsx` and everything under `home/`.
+
+### Read off `career-joblisting.webm`, which is the designer's build
+
+Same warning as everywhere else it is cited: its `/careers` card 2 measures
+`820×194` where ours renders `820×218` on the fixed 20 px `--text-p1` /
+`--text-p2` floor. **Only timing, opacity, easing and travel transfer — no
+position, box or page height from it is a target.**
+
+**The fade is the site's own constants.** α as `(bg − mean) / (bg − final)`,
+linear in opacity because browsers composite in sRGB. Best fit over duration and
+onset, 32 samples: **power3.out 0.57 s (SSE 0.0177)**, power4.out 0.72 s
+(0.0178), Tailwind `ease-out` 0.49 s (0.0200), power2.out 0.42 s (0.0298),
+linear 0.30 s (0.0918). A decelerating curve beats linear by 5× and `power3.out`
+— which *is* `EASE` — wins. Say *"measurement cannot separate power3.out / 0.57 s
+from power4.out / 0.72 s; the site's constants sit inside the band"*, **never
+"0.5 was measured"**.
+
+**`delay={0.08}` is one step, measured.** Onsets at 60 fps: back link f046, card
+f052 → **100 ms**, against 0.08 s = 4.8 frames. One frame of error, and it
+corroborates `/careers`, whose masthead → list gap measured two steps.
+
+**The whole card is one target, and that is measured.** Its background, the role
+title, the meta line and the lede all begin within one frame of each other. Do
+not animate the card's contents separately, and do not give the `Seal` or the
+closing CTA a reveal of their own.
+
+### The rise, and the measurement error it corrects
+
+**The unexecuted prompt 30 measured this wrong, and its `y={12}` was never
+shipped.** It read the careers masthead's rise at **8.5 px** with a plain
+`max(0, bg − v)` ink centroid. Re-measured with a **per-row background sampled
+from a text-free column band at the same rows**, the same recording gives 32 px
+observed and a frame-by-frame amplitude of **38–46 px** — landing on the 46.2 px
+floor prompt 32 measured independently on `career.webm` and on the 55 px it
+fitted. `/careers`' shipped `y={56}` is right; the 8.5 px was a clipped crop plus
+sky in the weights. The corrected recipe is in section 3.
+
+Measured here with that method:
+
+| channel | observed floor | fits |
+| --- | --- | --- |
+| **back link**, background-subtracted ink centroid, 35 samples | **23.8 px** | power4.out 24 px / 0.67 s (rms 0.38), power5.out 24 px (0.41), power2.out 29 px (0.45), power3.out 49 px / 0.71 s (0.33). Held at the site's power3.out / `DUR`: **23 px** |
+| **the card**, "Apply now" button top — a black block on white, immune to the sky | ~41 px from the first thresholdable frame | holding power3.out / `DUR` and solving frame by frame gives 70 → 75 → 85 → 89 → 117, i.e. **it climbs** |
+
+The climbing amplitude is the pathology `/careers` already records: the position
+is still moving after the opacity has landed, so no single power curve fits
+amplitude, onset and duration together. **Read the floors, judge the values.**
+`y={24}` is the back link's floor and what two of four eases pick; `y={72}` is
+the card's ~70 px floor **and exactly what `/careers` ships on its job cards**,
+so this introduces no constant the site did not already have.
+
+**`immediate` on both**, because each is above the fold at 375, 800 and 1280 and
+the recording's entry fires on mount rather than on a scroll threshold — the call
+`JournalStamp` and the `/careers` masthead both make.
+
+### The recording shows nothing else — do not re-sample it for these
+
+- **No blur and no split.** Stacked masthead crops from α 0.27 to 1.0 show crisp
+  glyph edges at every stage. The per-character blur is scoped to the `/careers`
+  masthead and was the user's own addition on top of this recording.
+- **No per-section scroll reveal.** Sampled at 6 fps across the whole job-listing
+  scroll (t 27.5–34 s), every heading, paragraph, bullet, the `Seal` and the
+  closing CTA are fully opaque the instant they cross the fold.
+- **No hover** on either Apply button or on "Back to Careers".
+- No scrub, pin, parallax or loop.
+
+### Measured in the production build
+
+**Isolated in two sibling worktrees at `cc664d4`**, one carrying only this
+patch, servers on 3021 / 3022 — the main tree carried another session's in-flight
+navbar work, so a working-tree build would not have isolated this change. The
+behavioural numbers were then **re-verified on `9d96006`**, i.e. with the navbar
+drop-in playing alongside: identical, and still zero errors.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| `AE` @ 5 % fuzz, `/job-listing/data-scientist` | **0** | **0** | **0** |
+| `AE` @ 5 % fuzz, `/job-listing/ux-designer` | **0** | **0** | **0** |
+| page height, data-scientist | 3383 | 2551 | 2580 |
+| page height, ux-designer | 3255 | 2479 | 2456 |
+| back-link travel observed | 14.3 | — | 21.1 |
+| card travel | **48** = round(72 × 0.66) | — | **72** |
+
+Page heights are **identical** to the parent build at every width. A bare
+page-wide `AE` is the right instrument on these routes — they carry no
+scroll-linked element and no CSS loop, unlike `/`, `/journal` and `/careers`.
+
+- **The back link leads the card**: sampled at 0.11 opacity with the card still
+  at 0, at both 1280 and 375.
+- **Reduced motion**: both at `opacity: 1`, `y: 0`. `Reveal`'s reduce branch is
+  `gsap.set(targets, { opacity: 1, y: 0 })`, so it does write
+  `matrix(1, 0, 0, 1, 0, 0)` — pre-existing shared behaviour, not a regression.
+- **JavaScript off**: back link `1232×102+24+60`, card `820×1657+230+204` — the
+  recorded settled geometry.
+- **The `Seal` still spills 65 px past the card's right edge** and the card
+  computes `overflow: visible`. `Reveal` writes `opacity`, which makes a stacking
+  context; harmless alone, but **nothing in this chain may become
+  `overflow-hidden`**.
+- **Four `/careers` ⇄ `/job-listing/data-scientist` round trips plus a
+  `/job-listing/data-scientist` → `/` → back, each with a scroll pass: zero page
+  errors and zero console errors.** No `contextSafe` is used here.
+
+**Only the three `/job-listing/*` routes' prerendered HTML changes.** A tag-level
+diff shows exactly three markup diffs — `data-reveal=""` on the `<p>`,
+`data-reveal=""` on the `<article>`, and one added client-reference `<script>` —
+plus RSC flight-row renumbering from the inserted `Reveal` reference. **The other
+13 pages are byte-identical** once the build id and the CSS and JS chunk names
+are normalised, with no class-string substitution needed. Chunk count goes
+**9 → 10** on those three routes and is unchanged everywhere else (`/`,
+`/careers`, `/journal`, `/about` 10; `/design-system` 9).
+
+### Non-goals held
+
+- **`SiteNav` was not touched here.** The recording fades the header in ~0.55 s
+  after the page content on both entries; that is prompt 33's scope, and it
+  shipped separately in `9d96006`.
+- The back link's `hover:underline` stays, as prompt 27 already declared.
+- No geometry change, and the 20 px `--text-p1` / `--text-p2` floor stands.
+- No change to `DUR`, `EASE`, `Reveal`'s `stagger: 0.08` or its 36/24 default.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -3784,6 +3923,39 @@ per step rather than fitting one and scaling it.
 over a sans line have different cap-height-to-baseline offsets, so an ink-top
 difference overstates the leading. Measure ink *bottoms* on lines with no
 descenders instead.
+
+**Measuring a rise *through* a fade: subtract a per-row background, and make the
+crop tall enough.** An ink centroid — `Σ(bg − I)·y / Σ(bg − I)` — is invariant to
+a uniform opacity scale, which is exactly what you want when an element fades and
+translates at once. But on this site's `hero-sky` pages a naive
+`bg = max(crop)` makes **the sky itself carry weight**, and a crop sized to the
+settled ink **clips the glyph band at its starting offset**. Both errors pull the
+answer down. Prompt 30 hit both at once and measured the `/careers` masthead at
+**8.5 px** where the true amplitude is **38–46 px** — a 5× under-read that would
+have shipped a quarter of the intended travel.
+
+Take the background per row from a **text-free column band at the same rows**,
+subtract a noise floor, and size the crop to hold the glyphs at their full
+starting offset:
+
+```python
+bg  = median(background_band[y].values())          # per row, not per crop
+wgt = max(0, bg - v - 4)                           # 4 levels of JPEG noise
+cy  = sum(wgt*y) / sum(wgt)
+```
+
+Sanity-check it: the weighted ink total must be ~0 on the first painted frame and
+must rise monotonically with α. If frame 1 already reports half the settled ink,
+the sky is in the weights.
+
+**Prefer a hard edge to a centroid where one exists** — a black button on a white
+card, or a white card against the sky. Those need no background model at all.
+And expect the amplitude to **climb** when you hold the fade's fitted ease and
+solve frame by frame (70 → 75 → 85 → 89 → 117 on one job-listing channel): the
+position keeps moving after the opacity lands, so no single power curve fits
+amplitude, onset and duration together. **Report the observed floor as the
+measurement and the shipped value as a judgement on it**, the way `/careers` and
+`/job-listing/[slug]` both do.
 
 **`pkill -f "next start"` kills the tool's own shell** (exit 144, and the rest
 of the command never runs). Kill by port instead:
