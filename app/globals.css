@@ -146,6 +146,18 @@ body {
   [data-careers-split] {
     opacity: 0;
   }
+  /* The header, hidden behind the top edge of the window until it drops in.
+     An authored start *transform* is correct here, unlike the split elements
+     and the journal mark above: that warning is about a transform that
+     decomposes badly — a perspective folded against an independent `rotate` —
+     and a plain `translateY` has no such interaction. `[data-chart-bar]` and
+     `[data-chart-grid]` in this same block are the precedent. -100 % is the
+     bar's own height, so it stays tied to the geometry rather than to a magic
+     60px, and it matches the tween's `yPercent: -100` exactly. */
+  [data-nav-drop] {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
 }
 
 /* ---- The open-application card's marching dashes -----------------------

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Reveal } from "../motion/reveal";
 import { Button, ButtonLink, Seal } from "../primitives";
 import type { Job, JobBody } from "../../_content/jobs";
 
@@ -13,10 +14,18 @@ import type { Job, JobBody } from "../../_content/jobs";
  * The top padding is fitted per breakpoint, not scaled from one number: the
  * cap-top inset from the content box differs by step, exactly as the careers
  * masthead records.
+ *
+ * `Reveal` takes the `<p>` over via `className` rather than wrapping it, so no
+ * box is added and the padding above is untouched. `immediate` because the link
+ * is above the fold at all three breakpoints and the recording's entry fires on
+ * mount, not on scroll — the call the journal stamp and the careers masthead
+ * both make. `y={24}` is the observed floor of the link's background-subtracted
+ * ink centroid in `career-joblisting.webm` (23.8px), which is also what the fit
+ * gives when it is held at the site's own `power3.out` / `DUR`. See AGENTS.md.
  */
 export function BackToCareers() {
   return (
-    <p className="pt-[58px] text-center sm:pt-[78px]">
+    <Reveal as="p" immediate y={24} className="pt-[58px] text-center sm:pt-[78px]">
       <Link
         href="/careers"
         className="font-serif text-p2 text-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
@@ -26,7 +35,7 @@ export function BackToCareers() {
         </span>
         Back to Careers
       </Link>
-    </p>
+    </Reveal>
   );
 }
 
@@ -42,12 +51,33 @@ export function BackToCareers() {
  * Width is 335 / 720 / 820 across the three comps. Tablet gutters are 40 rather
  * than the container's usual 20, so the cap is authored at `md` as well as `lg`
  * instead of letting the container decide.
+ *
+ * **The whole card is one reveal target, and that is measured**: in
+ * `career-joblisting.webm` the card's background, the role title, the meta line
+ * and the lede all begin within one frame of each other. Do not animate the
+ * contents separately. `delay={0.08}` is the 100ms the recording puts between
+ * the back link and the card — one step of the site's stagger, inside a frame of
+ * measurement. `y={72}` is the value `/careers` ships on its job cards and the
+ * floor measured here on the Apply button's top edge (~70px); the frame-by-frame
+ * amplitude climbs, so it is a judgement on a floor rather than a fit.
+ *
+ * `Reveal` takes the `<article>` over via `className`, so `relative` survives —
+ * the top Apply button and the `Seal` both resolve against it — and no box is
+ * added. It writes `opacity`, which makes a stacking context; that is harmless
+ * on its own but **nothing in this chain may become `overflow-hidden`**, because
+ * the `Seal` deliberately spills past the card's right edge onto the sky.
  */
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <article className="relative mx-auto mt-6 w-full rounded-card bg-white p-6 sm:mt-[42px] sm:p-10 md:max-w-[720px] lg:max-w-[820px]">
+    <Reveal
+      as="article"
+      immediate
+      delay={0.08}
+      y={72}
+      className="relative mx-auto mt-6 w-full rounded-card bg-white p-6 sm:mt-[42px] sm:p-10 md:max-w-[720px] lg:max-w-[820px]"
+    >
       {children}
-    </article>
+    </Reveal>
   );
 }
 

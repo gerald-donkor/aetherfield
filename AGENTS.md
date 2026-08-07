@@ -3365,6 +3365,222 @@ the bytes, not the count** — GSAP is already in the shared chunk site-wide, so
 - **`cards.tsx` / `JobCard` is not touched** — it is shared with
   `/design-system`.
 
+## The navbar's drop-in (`motion/nav-drop.tsx`)
+
+Prompt 33. `SiteNav` was **the last piece of the site with no motion at all**,
+and it was an omission rather than a decision: `chrome.tsx` imported exactly one
+motion module (`FooterMotion`), and the structure that keeps the bar pinned also
+puts it out of reach of every page's `Reveal` — `SiteNav` renders *outside*
+`Container`, and on `/careers` and the job listings `main` is a **sibling** of
+the header, because a wrapper round `SiteNav` unpins the sticky bar. So the
+header needs its own leaf. `/job-listing/[slug]` remains the last unanimated
+*route* and still wants its own prompt.
+
+`app/_components/motion/nav-drop.tsx` — `"use client"`, component-only, renders
+the `<header>` itself and takes its class string over **verbatim**, exactly as
+`FooterMotion` takes over `<footer>`. One `useGSAP` with `{ scope: root }`, one
+`gsap.matchMedia()` with the named `reduceMotion` / `fullMotion` pair,
+`mm.add(…, root)`, `mm.revert()` as cleanup, `EASE` from `register.ts`. **No
+`contextSafe`** — the tween is created synchronously inside the handler, and
+wrapping that is the documented `RangeError` crash. Keep it component-only, the
+`principles-data.tsx` rule. `chrome.tsx`'s `CONTAINER` row, the wordmark `Link`,
+`NAV_ITEMS`, the `LinkButton`, the mobile toggle, the mobile panel and the
+`useState` are all unchanged.
+
+### The measurement that says "drop", not "fade"
+
+References: `~/Videos/Screencasts/career.webm` (1263×569, VFR, 750 frames) and
+`~/Videos/Screencasts/about.webm` (1264×573, VFR, 827 frames). **There is no
+navbar-specific recording and none is needed** — every existing capture contains
+the bar at load. `navbar-demo.webm` is about the *blur radius* and constrains
+nothing here. Both are **the designer's build** (prompt 32's finding for
+`career.webm`), so **only timing, opacity, easing and travel transfer — no
+geometry.** Both are VFR and were extracted once with `-fps_mode passthrough`
+and indexed against the full `pts_time` list.
+
+The channel is the **ink bounding box of the wordmark**, thresholded at 60 %:
+
+| | `career.webm` | `about.webm` |
+| --- | --- | --- |
+| first ink | f232, `102×1` at Y 1 | f198, `101×4` at Y 1 |
+| full height | f240, `102×20` at Y 2 | f204, `101×20` at Y 2 |
+| settled | f253, `102×20` at **Y 14** | f222, `101×20` at **Y 17** |
+
+**A box that grows downward from a fixed top edge and then translates down is an
+element entering from behind the viewport's top edge**, clipped by the window —
+a fade holds the box still, and a rise moves it the other way. The nav links
+reproduce it in the same frames (`390×12`, Y 1 → 15 and 1 → 18), so **the
+wordmark and the links move together as one element**: the `<header>`
+translating, not its contents staggering. Observed bottom-edge travel is **32 px
+on both files**, and both are *floors* — the element is off-screen and
+unmeasurable before the first ink frame.
+
+### The fit, and the three sentences that must not drift
+
+Free fit over onset, duration and travel against the bottom-edge trace:
+
+| curve | `career.webm` | `about.webm` |
+| --- | --- | --- |
+| **power3.out** | onset 4.841, **0.74 s**, 70 px, rms **0.38 px** | onset 3.872, 0.67 s, 58 px, rms 0.69 px |
+| **power4.out** | onset 4.911, 0.81 s, 55 px, rms 0.41 px | onset 3.952, **0.72 s**, 41 px, rms **0.54 px** |
+| power2.out | onset 4.801, 0.64 s, 69 px, rms 0.64 px | onset 3.787, 0.62 s, 70 px, rms 1.08 px |
+| expo.out | onset 4.946, 0.89 s, 59 px, rms 1.19 px | onset 3.907, 0.89 s, 67 px, rms 0.86 px |
+| linear | onset 4.521, 0.79 s, 76 px, rms 1.62 px | onset 3.792, 0.46 s, 54 px, rms 2.11 px |
+
+- **`power3.out` and `power4.out` cannot be separated** — 0.03 px of rms apart,
+  and a decelerating curve beats linear by 3–4× on both files. **`EASE` ships
+  unchanged.**
+- **Travel does not resolve (41–70 px across the fits)**, because the start of
+  the motion is off-screen. **`yPercent: -100` is a judgement anchored on the
+  32 px observed floor, never a measurement.** It is the bar's own height, so it
+  stays tied to the geometry rather than to a magic 60 that a future 72 px bar
+  would break, and it matches the CSS start state exactly.
+- **Duration fits 0.62–0.89 s across both files and every curve, and `DUR` (0.5)
+  is outside that band** — which is why `NAV_DUR = 0.7` (the band centre) is
+  **local to this leaf**, exactly as `FOOTER_DUR = 1.0` is. It does **not** go
+  into `register.ts`.
+
+**The chrome arrives after the page, by about half a second.** `career.webm` is
+the only file that can show this, because it carries both onsets in one
+recording: masthead **4.418 s** (prompt 32's fitted value), bar **4.84–4.95 s**
+→ **Δ 0.42–0.53 s**. `NAV_DELAY = 0.48`, six steps of the site's 0.08. Prompt 30
+already records that `about.webm`'s load beat is progressive SSR paint with no
+readable content onset, so it cannot corroborate it. **Do not "improve" it to 0**
+— the page composes itself first and the chrome follows.
+
+**The opacity ramp is present in the trace but confounded.** Minimum grey inside
+the wordmark crop (sky 205) keeps falling *after* the ink box has reached full
+height — f234 70.8, f238 35.0, f240 26.3, f243 16.6, f247 5.2, f252 0.1 — so it
+is not just clipping; as α that is ≈0.87 at f240 → 1.0 by f252. But the bar is
+moving fastest exactly where the ink is lightest, and both a rolling-shutter
+smear and JPEG quantisation lift a dark minimum. **The fade ships because every
+other reveal on this site fades, not because it was measured.**
+
+### Three traps, two of them found by measurement in this build
+
+- **`fromTo`, never `from`, on any element `globals.css` hides.** The CSS start
+  state holds the header at `translateY(-100%)`, and `gsap.from` reads the
+  element's *current* value as the tween's **end** value — it would animate
+  −100 % → −100 % and the bar would never arrive. Second time this trap has come
+  up; the footer wordmark was the first.
+- **`y: 0` must be authored on both ends of the `fromTo`, and this one bit.**
+  GSAP writes a transform as `translate(x, y) translate(xPercent%, yPercent%)`
+  and parses the element's existing transform into the ***px*** pair — so the CSS
+  `translateY(-100%)` is read as `y: -60px`, not as `yPercent: -100`. Animating
+  `yPercent` alone leaves that −60 in place. **Measured before the fix: the
+  settled bar sat at inline `translate(0px, -60px)` at 375, 800 and 1280, one bar
+  height above the viewport and permanently off-screen.** Not a theoretical risk
+  — a page-wide `AE` would not have caught it either, since the bar is
+  transparent glass at the top of the page.
+- **It plays once per document load, and that needs a module-scope flag — the
+  bar does NOT survive a client-side navigation on its own.** Every page renders
+  its own `<SiteNav />`, so React unmounts and remounts it across routes and a
+  bare `useGSAP` with no dependencies runs *again*: measured before the flag, the
+  bar sat at `yPercent −98` half a second after each of eight in-app clicks, i.e.
+  it re-dropped every time. `let hasDropped = false` at module scope survives a
+  remount but not a document load, which is exactly the lifetime wanted. On a
+  remount the branch must `gsap.set(header, { yPercent: 0, y: 0, opacity: 1 })`
+  rather than simply return — the CSS start state applies to the fresh element
+  and would leave the bar hidden. `useGSAP` runs in a layout effect, so it lands
+  before paint and there is no flash. **Do not add a route listener to re-run the
+  entrance**: the bar is "one constant bar", and re-dropping it on every in-app
+  navigation would fight that. A judgement — no recording covers a client-side
+  navigation.
+
+**`overflow-hidden` must never go on the `<header>`.** The mobile panel is a
+*sibling of the row inside the same `<header>`*, so clipping the header to
+contain the entrance would clip the open menu. The window's own edge does the
+clipping, which is what both recordings show. Verified: header `overflow`
+computes `visible` with the panel open, and the panel measures
+`375×424 +0+60` with its four links.
+
+### `globals.css` — one selector
+
+`[data-nav-drop]` joins the existing
+`@media (scripting: enabled) and (prefers-reduced-motion: no-preference)` block
+with **an authored start transform**, unlike `[data-journal-mark]` and the split
+elements. That warning is about a transform that *decomposes* badly — a
+perspective folded against an independent `rotate` — and a plain `translateY` has
+no such interaction; `[data-chart-bar]` and `[data-chart-grid]` in the same block
+are the precedent. **Confirmed in the built chunk**, not assumed:
+`…[data-careers-split]{opacity:0}[data-nav-drop]{opacity:0;transform:translateY(-100%)}`,
+inside the gate.
+
+### Measured in the production build
+
+Against a worktree build of `cc664d4`.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| settled inline transform | `translate(0px, 0px)`, opacity 1 | same | same |
+| mid-flight (700 ms) | `matrix(…, -28.47)`, α 0.525 | `-29.87`, α 0.502 | `-33.70`, α 0.438 |
+| settles at | 1327 ms | 1323 ms | 1310 ms |
+| reduced motion | `transform: none`, opacity 1, **no inline transform** | same | same |
+| JS off | `transform: none`, opacity 1, box `1280×60` | same | same |
+
+Authored end-to-end is `NAV_DELAY + NAV_DUR` = 1.18 s from tween creation; the
+~140 ms on top is hydration, measured from navigation commit.
+
+**Page heights are unchanged on every route** — a transform is not layout, so any
+movement here would be a bug: `/` 6350 / 6006 / 5595, `/journal` 3801 / 5160 /
+3486, `/careers` 1895 / 1770 / 1925, `/about` 5242 / 4129 / 4279.
+
+**The sticky bar still pins past the fold**, which is the specific risk of a
+`position: sticky` element carrying a residual inline transform. Scrolled well
+past the fold, `getBoundingClientRect().top` is **0** with `position: sticky` on
+`/` (document-level sky sibling), `/careers` (`main` pulled up under the bar) and
+`/article/[slug]`, at all three breakpoints.
+
+**Eight client-side round trips (`/` ⇄ `/journal` ×4, `/` ⇄ `/` via Product ×4,
+plus `/about`), each with a full scroll pass: zero page errors and zero console
+errors**, and the bar reads `matrix(1, 0, 0, 1, 0, 0)` / opacity `1` after every
+one — it does not re-drop.
+
+`magick compare -metric AE -fuzz 5%` in the settled state:
+
+| route | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| `/about`, `/article/[slug]`, `/design-system`, `/job-listing/data-scientist` | **0** | **0** | **0** |
+| `/` | **0** | 0 outside the cloth box, 33.6 inside | **0** |
+| `/journal` | **0** | 0 outside the stamp, 106.6 inside | 0 outside, 80.7 inside |
+| `/careers` | 0 outside the dashed card, 47.9 inside | 0 outside, 294.3 inside | 0 outside, 313.1 inside |
+
+The three non-zero routes are the ones that already carry that warning — the
+scrubbed capabilities cloth, the journal stamp's perforation drift and the
+open-application card's marching dashes, each at a different loop phase in any
+two shots. **Outside those boxes it is 0 everywhere.** Report it scoped.
+
+### Impact
+
+**Every route's prerendered HTML changes**, as prompt 24's footer did, and the
+diff is exactly **one attribute — `data-nav-drop=""` on the `<header>`** — on all
+15 content pages; `_not-found` and `_global-error` are byte-identical. The class
+string is carried over verbatim, so there is **no other markup diff and no RSC
+flight-payload re-segmentation to see through**.
+
+**Every route keeps its exact chunk set** (`/`, `/journal`, `/about` and
+`/careers` 10, the rest 9) — `NavDrop` bundled into the existing shared chunk.
+**Diff the bytes, not the count**: every route is **+563 raw / +87 gzipped**.
+
+### Non-goals held
+
+- **No geometry, type, colour, spacing or asset change.** The 60 px bar, the
+  `bg-white/10` over `backdrop-blur-[32px]` and its `bg-white/85` fallback, the
+  `CONTAINER` gutters, the `text-nav` links and the drawn "Get started" arrow are
+  all fitted numbers and none is touched.
+- **No scroll behaviour.** The bar still never hides, shrinks or changes state on
+  scroll — this is a load entrance and nothing else.
+- **No stagger across the wordmark and the links.** The recordings move them
+  together in the same frames; one element, one tween.
+- **No split, no blur.** The footer's treatment is not extended upward — nothing
+  in either recording shows it, and a split would strip the wordmark link and
+  each nav link of its accessible name for the duration.
+- **`SiteFooter` and `CtaBand` are untouched**, as are `NAV_ITEMS` and every
+  `href`.
+- **No change to `DUR`, `EASE` or `Reveal`**; `reveal.tsx` is not edited.
+- **No `will-change`, no pin, no scrub.** The capabilities cloth is still the
+  site's only scroll-linked element.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -3618,6 +3834,25 @@ sensitive channel on the page. Both are opacity-invariant. Corroborate with
 normalised row-profile cross-correlation against the settled frame — the lag
 should decay to 0 as the element lands. **Report the observed travel as a floor**,
 since the first measurable frame is already part-way in.
+
+**Telling a drop from a fade: watch the ink bbox's *shape*, not its position.**
+An element entering from behind the viewport's top edge is clipped by the window,
+so its ink box first appears **short and pinned to the top of the crop**, grows
+downward to full height, and only then translates down. A fade holds the box
+still at full height; a rise moves it the other way. Threshold the crop at ~60 %
+and report the box per frame:
+
+```
+magick f0232.jpg -crop WxH+X+Y +repage -colorspace Gray -threshold 60% -negate \
+  -define connected-components:verbose=true -connected-components 8 null: | head -3
+```
+
+Run it on two independent recordings before believing it. Sibling elements (the
+wordmark and the nav links) reproducing the same growth in the **same frames** is
+what says one element is translating rather than its contents staggering. The
+travel is a **floor** — the element is off-screen and unmeasurable before the
+first ink frame — so a free fit for amplitude will not resolve; author the
+self-evident value (`yPercent: -100`) and record it as a judgement.
 
 **Measuring a rise off a scroll-pass recording: use an ink-weighted centroid,
 relative to a settled neighbour.** A recording of a continuous scroll moves

@@ -13,7 +13,9 @@ type RevealProps = {
     | "header"
     | "figure"
     | "h2"
-    | "table";
+    | "table"
+    | "p"
+    | "article";
   /** Animate `[data-reveal-item]` descendants in document order, not the box. */
   stagger?: boolean;
   /** Seconds before the sequence starts. */

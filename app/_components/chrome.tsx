@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { FooterMotion } from "./motion/footer-reveal";
+import { NavDrop } from "./motion/nav-drop";
 import { Button, LinkButton, Wordmark } from "./primitives";
 
 /* There is no /product route, so Product resolves to the home page — the
@@ -41,7 +42,12 @@ export function SiteNav() {
     // 10 % is 4 levels out of 255 on the sky, and keeps the black links off the
     // near-black sunset photograph on /article/[slug]. Where backdrop-filter is
     // unsupported the bar falls back to a near-opaque white.
-    <header className="sticky top-0 z-50 w-full bg-white/85 backdrop-blur-[32px] supports-[backdrop-filter]:bg-white/10">
+    //
+    // `NavDrop` renders the `<header>` itself and takes this class string over
+    // verbatim, so the settled bar gains its load entrance and not a single box
+    // — exactly as `FooterMotion` takes over `<footer>` below. Everything
+    // inside here is unchanged.
+    <NavDrop className="sticky top-0 z-50 w-full bg-white/85 backdrop-blur-[32px] supports-[backdrop-filter]:bg-white/10">
       <div className={`${CONTAINER} flex h-[60px] items-center justify-between`}>
         <Link href="/" aria-label="Aetherfield, home">
           <Wordmark className="text-[26px]" />
@@ -109,7 +115,7 @@ export function SiteNav() {
           </nav>
         </div>
       ) : null}
-    </header>
+    </NavDrop>
   );
 }
 
