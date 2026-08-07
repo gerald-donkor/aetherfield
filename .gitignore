@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the canonical variable list, which AGENTS.md 8.4 requires to be
+# committed. Without this negation `.env*` swallows it, `git add` skips it
+# silently, and the list never lands in the repository. Names only, never values.
+!.env.example
 
 # vercel
 .vercel
