@@ -485,13 +485,34 @@ file beyond that line** — read it from `vercel integration list` and
 
 | need | provider | package | resolved by |
 | --- | --- | --- | --- |
-| relational data | **Neon Postgres** — *provisioned* | `@neondatabase/serverless` | `vercel:vercel-storage` — the preferred Marketplace path for SQL, and what the sunset `@vercel/postgres` became |
+| relational data | **Neon Postgres** — *provisioned* | **`pg`** + `@vercel/functions`, with **Drizzle** as the ORM | `vercel:vercel-storage` for the provider; the driver is corrected below |
 | transactional email | **Resend** | `resend` | `vercel:marketplace` `discover --category messaging` — the **only** result |
 | authentication | **Better Auth** v1.6 | `better-auth` | see below — chosen over Clerk on the user's explicit "best and free" criterion |
 | rate limiting | **Upstash Redis** | `@upstash/redis` + `@upstash/ratelimit` | `vercel:vercel-storage` — §8.2 requires a limiter on every public write path, and a Postgres counter is the wrong tool |
 
 `@vercel/postgres` and `@vercel/kv` **no longer exist** as first-party products.
 Do not import either; do not reintroduce them from training data.
+
+### The driver is `pg`, not `@neondatabase/serverless`
+
+**This corrects the `vercel:vercel-storage` skill**, which names
+`@neondatabase/serverless`. That is the generic Neon answer; the Vercel-specific
+one is different, and it comes from Neon's own docs
+(<https://neon.com/docs/connect/choose-connection.md>, confirmed 7 Aug 2026):
+
+> Vercel Fluid keeps functions warm long enough to reuse TCP connections, so you
+> skip the connection setup cost on subsequent requests.
+
+So this project uses **`pg` (node-postgres)** with `attachDatabasePool` from
+`@vercel/functions`, which is what gives the pool connection reuse across
+requests and a graceful shutdown. `@neondatabase/serverless` exists for runtimes
+with **no** persistent pooling — Netlify Functions, Deno Deploy, Cloudflare
+Workers without Hyperdrive. Its HTTP transport is faster for a single one-shot
+query (~3 round trips against TCP's ~8) and that advantage does not apply here.
+
+**Drizzle is the ORM**, per Neon's own recommendation, and it owns schema and
+migrations exclusively — never a hand-run `ALTER TABLE` against the database
+(§9). It lives in `lib/db/` like everything else that touches Postgres (§7.5).
 
 ### Why Better Auth and not Clerk
 
@@ -553,15 +574,25 @@ away from being hit.
 
 **Neon**
 
+- **Two connection strings, and using the wrong one is silent.** `DATABASE_URL`
+  is **pooled** (PgBouncer, the `-pooler` host) and is what the app uses.
+  `DATABASE_URL_UNPOOLED` is **direct** and is what **migrations, `pg_dump`,
+  logical replication and `LISTEN`/`NOTIFY` require** — PgBouncer breaks session
+  state, so a migration over the pooled URL can fail in confusing ways or leave
+  a partial apply. Drizzle Kit gets the unpooled URL; the app never does.
 - **Never wrap the database client in a `Proxy`.** The idiomatic-looking lazy
   `Proxy` breaks any library that inspects the adapter object — and Better Auth
   is exactly such a library. The request chain hangs with **no error**. Use a
   plain `getDb()` over a module-level `let`.
-- **`neon()` throws at import time when `DATABASE_URL` is unset**, and Next
-  evaluates top-level module code during `next build`. Initialise lazily or the
-  first build without env vars fails.
+- **Construct the pool lazily.** Next evaluates top-level module code during
+  `next build`, so a client built at import time against an unset
+  `DATABASE_URL` fails the build before any route renders.
 - **Nothing but Next.js auto-loads `.env.local`.** `drizzle-kit`, `tsx` and any
   seed or migration script need `dotenv -e .env.local --` in front of them.
+- **Scale-to-zero is on** (free plan, 5-minute idle suspend, not disableable
+  below Launch). The first query after an idle period pays a cold start of
+  roughly a few hundred ms. That is expected behaviour, **not** a performance
+  bug to chase, and any latency measurement must say whether it was warm.
 
 **Blob**
 
