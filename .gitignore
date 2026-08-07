@@ -43,3 +43,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agent skills
+# The Drizzle docs snapshot is ~4 MB across 240 pages and is regenerable by
+# .agents/skills/drizzle-docs/scripts/sync_drizzle_docs.py, so it is not
+# tracked — the script and the source stanza next to it are. The Zod snapshot
+# is 13 pages / ~288 KB and IS committed, deliberately, so that skill needs no
+# setup on a fresh clone.
+/.agents/skills/drizzle-docs/references/docs/
+/.agents/skills/drizzle-docs/references/docs-index.md
