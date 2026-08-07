@@ -338,7 +338,10 @@ export default function Page() {
 
       {/* ---- Composed ---- */}
       <Section label="Components · CTA band">
-        <CtaBand headline="Ready to operationalize your sustainability goals?" />
+        <CtaBand
+          demo
+          headline="Ready to operationalize your sustainability goals?"
+        />
       </Section>
 
       <Section label="Components · Footer">

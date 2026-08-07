@@ -1,3 +1,4 @@
+import { withBotId } from "botid/next/config";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -11,4 +12,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/* `withBotId` adds BotID's proxy rewrites — the challenge is served from this
+   origin so ad blockers and third-party script blockers cannot quietly disable
+   it. It adds rewrites only; no route's render mode changes. */
+export default withBotId(nextConfig);

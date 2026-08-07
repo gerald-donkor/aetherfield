@@ -455,3 +455,306 @@ or recorded.
   link were not exercised because no interactive Google test-account access
   was available. No Google-backed user or OAuth token was created during these
   checks; those three outcomes remain an operational browser check.
+
+---
+
+## Step 2 — demo-request capture, and the write path
+
+Implemented by prompt 42 on 7 Aug 2026. **This is the step §5.2 calls
+load-bearing: steps 4 and 5 copy the files below rather than inventing their
+own.** Read this section before writing the newsletter or the job-application
+form.
+
+### The contract, in file order
+
+The stage letters are `AGENTS.md` §10's.
+
+| file | role | server-only |
+| --- | --- | --- |
+| `lib/validation/lead.ts` | the shared Zod schema, the `SubmitResult` type, the field-error record | **no — deliberately** |
+| `lib/rate-limit/index.ts` | the Upstash client and limiter, lazily constructed | yes |
+| `lib/db/lead-queries.ts` | `insertLead()` — the only caller of Drizzle for this table | yes |
+| `app/_actions/demo-request.ts` | the action: stages a, b, c, e | yes (`"use server"`) |
+| `app/_components/lead/demo-request-dialog.tsx` | the client leaf | client |
+| `instrumentation-client.ts` | BotID's client half | client |
+
+**A later form changes five of those six.** The one that does not is
+`lib/validation/lead.ts`'s `SubmitResult` — import it, do not restate it.
+
+### `lib/validation/` is not server-only, and must not import `lib/db/`
+
+The schema is imported by the browser leaf *and* by the action, which is what
+makes §10 rule 1 true rather than aspirational. It follows that it may never
+read a secret.
+
+**It also may not import `lib/db/schema.ts`, and this is not a style rule.**
+That file calls `pgEnum` and `pgTable` at module scope, so importing it from a
+browser-reachable module puts `drizzle-orm/pg-core` in `/`'s bundle. The
+`source` discriminator is therefore composed onto the schema **in the action**:
+
+```ts
+const demoRequestSchema = demoRequestFieldsSchema.extend({
+  source: z.enum(leadSource.enumValues),
+});
+```
+
+The union is still never re-declared (§9.2 rule 2) — it is derived from the
+database enum one layer up, on the server, where `leadSource` is already in
+scope. Step 4 does the same with `subscriberStatus` if it needs it.
+
+`source` is validated because it arrives from the browser like every other
+field: a request may not write an arbitrary `lead_source` value. It is not a
+user-facing field, so a failure on it produces no field error — a forged
+request, not a typo.
+
+The email is trimmed and lowercased **before** the format check, so a pasted
+address with a trailing space is corrected rather than rejected, and `lead`'s
+`lead_email_lowercase` CHECK can never be what catches a missed `toLowerCase()`
+(§9.2 rule 4). Verified against Zod 4.4.3: `"  ADA@Example.COM "` parses to
+`ada@example.com`, and a whitespace-only message parses to `undefined` rather
+than `""` — `lead.message` is nullable and an empty string is not a message.
+
+### The limiter — five per hour per IP, and it is a judgement
+
+`Ratelimit.slidingWindow(5, "1 h")`, prefix `aetherfield:demo-request`,
+`analytics: false`.
+
+**Both numbers are a judgement, not a measurement**, and the front matter's
+measured-or-judged rule applies: the form had never shipped when they were
+chosen, so there was no traffic to fit against and nothing was measured. The
+reasoning: a demo request is a considered act a person performs once, so five
+per hour is far above any honest use and far below what makes the table worth
+spamming. Sliding rather than fixed so an hour boundary is not a free refill for
+a client that times its burst. **Revisit against real traffic; do not treat
+these as fitted.**
+
+The key is the caller's IP and nothing else — §8.3 rule 2 keeps names and
+addresses out of every store that is not `lead` itself. The IP is read with
+`ipAddress()` from `@vercel/functions`, which reads `x-real-ip` as Vercel Proxy
+calculates it. **Not `x-forwarded-for`**: a client can write that header and
+cannot write this one. It falls back to the literal `"unknown"`, which buckets
+all unattributable callers together — deliberately conservative.
+
+Redis and the limiter are constructed lazily, for the same reason `getDb()` is:
+`next build` evaluates top-level module code, so a client built at import time
+against unset variables fails the build before any route renders. Proven —
+see the checks below.
+
+**A rate-limit infrastructure failure fails closed**, returning the generic
+error. An unlimited public write path is a worse outcome than a form that is
+briefly unavailable, and §8.2 rule 4 requires the failure be visible rather than
+a silent success.
+
+### The action's stages
+
+`a` BotID → `b` rate limit → `c` parse → `d` skipped, this path is public by
+design (§11) → `e` write → `f` **absent, step 3 owns it.** No email is sent, no
+template exists, and nothing is stubbed "to wire up later".
+
+It returns `{ ok: true } | { ok: false, error, fieldErrors? }` and never throws
+to the client. `z.flattenError()` produces the field errors — **not**
+`error.flatten()`, which is deprecated in Zod 4.
+
+Retry timing is rendered in words, not seconds: "Try again in 58 minutes".
+
+**Nothing personal is logged anywhere on any path** — not the body, not the
+address, not in a catch. There is no `console` call in the action at all, which
+is the easiest form of that guarantee to verify.
+
+### BotID — both halves, and no root provider
+
+The package is **`botid`**. `@vercel/botid` does not exist on npm; it 404s.
+
+- `next.config.ts` wraps the config in `withBotId()`, which adds the proxy
+  rewrites that serve the challenge from this origin so script blockers cannot
+  quietly disable it. Verified present in `.next/routes-manifest.json`.
+- `instrumentation-client.ts` calls `initBotId()`. **This file rather than a
+  component in `app/layout.tsx`**: Next 15.3+ supports it, and it is what lets
+  BotID ship without the root provider §8.1 forbids. The README documents the
+  layout component as the pre-15.3 path; do not take it.
+- The protected paths are **page paths** — `/` and `/design-system` — because a
+  Server Action POSTs to the page it was invoked from. A fourth trigger surface
+  means editing this list too, or the action's check **fails** rather than
+  passes.
+
+**Honest scope:** `initBotId` is bundled into the shared client entry chunk, so
+its script loads on **every** page, not only the two protected ones. Only the
+listed paths are challenged.
+
+**`/api/auth/*` is not covered, so prompt 38's gap on it stays open.** Covering
+Better Auth's catch-all is a separate decision with its own failure modes, not a
+side effect of this step.
+
+### The dialog
+
+`app/_components/lead/demo-request-dialog.tsx`, one component for both trigger
+sites.
+
+**It takes the settled `<Button>` over and adds no box**, exactly as `NavDrop`
+and `FooterMotion` do — it renders the button itself with the same props, so the
+class string is unchanged and nothing enters the measured layout. The `<dialog>`
+is a sibling in a fragment, and its contents render only while open, so a closed
+page carries one empty element.
+
+**Native `<dialog>` + `showModal()`** supplies the focus trap, the inert
+background, the top layer and Escape from the platform; none of them is
+hand-rolled and there is no GSAP (§7.5). Focus moves to the heading on open
+rather than the first input, so the dialog is announced before the person is
+dropped in a text box, and `onClose` returns focus to the trigger by every route
+out — button, Escape and backdrop click alike. A click landing on the `<dialog>`
+element itself is the backdrop signal, since the backdrop is not a child.
+
+The announcement copies `sign-up-form.tsx`'s mechanics rather than inventing a
+second pattern: `role="status"`, `aria-live="polite"`, `tabIndex={-1}`, focused
+on message change, and legible without colour — every error carries a square
+bullet and a border, no colour alone.
+
+**Success swaps the body in place**, no redirect (§10 rule 5): the page keeps
+its scroll position and its motion state.
+
+### `Field` gained a textarea, and it was extended rather than forked
+
+`app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.
+Both wrap the same non-exported `FieldFrame` (label, hint, error) and share the
+same `CONTROL_BASE` class string, so there is no second field vocabulary.
+
+**Sizing is deliberately not in `CONTROL_BASE`** and is prefixed by each
+variant: it is what keeps `Field`'s emitted class string byte-identical to the
+one `/sign-in` and `/sign-up` already prerender. Reordering it would have
+changed two settled pages for nothing. The `/design-system` exhibit is not
+extended for it in this prompt — the dialog is the exhibit.
+
+### `/about` and `/journal` opt out, and `CtaBand` takes an explicit prop
+
+`CtaBand` gained `demo?: boolean`, **opt-in, defaulting to false**. Inferring it
+from the `action` string would make the wiring a property of a copy string, and
+three of the four call sites are not demo bands: `/journal`'s is the
+newsletter's (step 4) and `/about`'s reads "View open roles".
+
+The user decided on 7 Aug 2026 that `/about` opts out too. Prompt 42's trigger
+table had listed it as a demo trigger; a button labelled "View open roles"
+opening a demo form is a behaviour bug, and `AGENTS.md` §5.2's step 2 row is
+corrected in the same change. `/about` and `/journal` needed **no edit at all**
+as a result, which is the strongest possible guarantee that their prerendered
+HTML is unchanged.
+
+Presentation was settled before implementation: a modal dialog, not an inline
+disclosure (it pushes the hero dashboard and the band's measured height) and not
+a `/demo` route (it discards the page's scroll and motion state).
+
+### `lead_source`'s `nav` value stays unwritten
+
+The nav's "Get started" goes to `/sign-in` (step 6), so nothing writes `nav`. It
+stays in the enum for a possible mobile-drawer demo CTA. Dropping it is a
+migration and it is not this step's.
+
+### Environment and personal data
+
+The resource is **`upstash-kv-camel-lamp`**, product `upstash/upstash-kv`
+("Upstash for Redis"), `primaryRegion=iad1`, provisioned 7 Aug 2026 after the
+user accepted the marketplace terms in the browser — the CLI returns
+`integration_terms_acceptance_required` and does not wait, so that handoff is
+mandatory and must not be worked around (§7.4 rule 5). No `--plan` was passed;
+the CLI's `--help` does not enumerate this product's plan IDs.
+
+**The variable names are `KV_REST_API_URL` and `KV_REST_API_TOKEN`, and this
+contradicted `AGENTS.md` §8.4, which predicted `UPSTASH_REDIS_REST_URL` /
+`_TOKEN`.** §8.4 was corrected in the same change (§12 rules 6 and 8). The
+distinction is live rather than cosmetic: **`Redis.fromEnv()` looks for the
+`UPSTASH_*` names and finds nothing here**, which is why `lib/rate-limit/`
+constructs the client explicitly. Use the write token —
+`KV_REST_API_READ_ONLY_TOKEN` is also set and a limiter counts. `KV_URL` and
+`REDIS_URL` are the TCP endpoints and are deliberately unused; the REST client
+is what suits Fluid Compute.
+
+Both are server-only. **BotID needs no environment variable** — the challenge is
+proxied through the app's own origin. No `NEXT_PUBLIC_*` was added; phase one
+still has none.
+
+Stored: name, work email, company, an optional message and the source — exactly
+`lead`'s existing columns. No new column, no migration; `npm run db:generate`
+reported "No schema changes, nothing to migrate".
+
+**Retention is stated and nothing enforces it yet.** The intent is that a lead
+is kept while it is an active sales conversation and soft-deleted on request or
+when it goes cold, through `lead.deletedAt`, which exists for exactly that. No
+scheduled deletion, no retention window and no erasure endpoint is implemented;
+an erasure request today is a manual `UPDATE`. Step 7 is where a real control
+would land.
+
+### Two API traps hit during implementation
+
+Both cost a debugging cycle and neither is guessable from the docs.
+
+**`ipAddress()` from `@vercel/functions` must be handed `{ headers }`, not the
+headers object.** Its implementation is
+`const headers = "headers" in input ? input.headers : input`, and Next 16's
+awaited `headers()` result *has* a `headers` property that is not itself a
+`Headers` — so the bare call takes the Request branch and throws
+`TypeError: headers.get is not a function`, surfacing as a 500 and a "couldn't
+reach the server" state in the dialog. Wrapping it as
+`ipAddress({ headers: await headers() })` hits the documented Request-shaped
+branch. Step 4 and step 5 copy the wrapper.
+
+**Focus-on-open has to run in an effect.** The dialog's body renders only once
+`open` is true, so `headingRef` is still null inside the click handler and
+`showModal()` leaves focus on the `<dialog>` element. Measured before the fix:
+`document.activeElement` was `DIALOG`; after, `demo-request-heading`.
+
+### Verified, prompt 42
+
+Every result below was produced by running the command, on 7 Aug 2026.
+
+- `npm run lint` exited 0 with no output; `npm run typecheck` exited 0.
+- `npm run build` exited 0 on Next 16.2.12. **The route table is unchanged**:
+  `/`, `/about`, `/careers`, `/design-system`, `/journal`, `/sign-in`,
+  `/sign-up` all ○ Static; the six articles and three job listings ●;
+  `/account` and `/api/auth/[...all]` ƒ, as they already were. No route became
+  dynamic.
+- **Prerender diff** against a clean `../aetherfield-base` worktree at the
+  parent commit `7f37b48`, with RSC flight scripts stripped and generated chunk
+  names normalised. **16 of 18 pages are markup-identical** with unchanged
+  script and stylesheet counts: `/journal`, `/careers`, all six articles, all
+  three job listings, `/about`, `/sign-in`, `/sign-up`, `_not-found`,
+  `_global-error`. The only differences are **one empty `<dialog>` added per
+  trigger** — two on `/`, one on `/design-system`. A tag-level diff of
+  `index.html` shows `Request a demo</button>` as *unchanged context* on both
+  sides: the buttons' class strings are byte-identical, as §8.1 requires. The
+  gitignored Tailwind and Drizzle doc snapshots were mirrored into the base
+  worktree first, per `docs/automation.md`.
+- `npm run db:generate` → "No schema changes, nothing to migrate".
+- **`npm run build` with `.env.local` moved aside exited 0**, proving the lazy
+  construction in `lib/rate-limit/` holds the guarantee `getDb()` does.
+- **A real submission wrote a real row.** Driven through a headless browser
+  against the dev server. `"Prompt42.Check@Example.COM"` was stored as
+  `prompt42.check@example.com` — lowercasing verified end to end, not just in
+  the schema — with `source = hero` and the message intact. The dialog swapped
+  to "Request received" in place, no navigation.
+- **The rate limit rejects, with retry timing.** A burst past the threshold
+  returned, verbatim: `That's a few too many requests. Try again in 15
+  minutes.` The count was consistent with a limit of 5 — earlier valid and
+  rejected-at-parse requests had already consumed tokens, which confirms stage
+  b runs *before* stage c as §10 rule 3 requires.
+- **An invalid submission was rejected with per-field errors** and wrote no
+  row: `Enter your name.`, `Enter a valid work email address.`,
+  `Enter your company.`, announced through the live region, heading unchanged.
+- **A forged `source` is refused.** The Server Action's POST body was rewritten
+  in flight, `"hero"` → `"superuser"`. The action returned "Check the marked
+  fields and try again." and **no row was written** — confirmed by query.
+- **Nothing personal reached the logs.** Grepping the dev server log for every
+  test address, name and company returned **0** occurrences. There is no
+  `console` call anywhere in `app/_actions/`, `lib/rate-limit/`,
+  `lib/db/lead-queries.ts` or `lib/validation/`.
+- `vercel env ls` shows `KV_REST_API_URL` and `KV_REST_API_TOKEN` present for
+  Production, Preview and Development. Names only; no value is quoted here.
+- The staged change was grepped for connection strings and tokens before
+  committing: no match.
+- **All four test rows were deleted afterwards** and `lead` returned to 0 rows.
+
+**Not verified, and why.** BotID's real classification was never exercised — it
+returns `HUMAN` in development ("[Dev Only] Without setting the
+developmentOptions.bypass value, the bot protection will return HUMAN") and a
+production build run from localhost cannot complete a real challenge. That its
+wiring is correct is established by the challenge rewrites being in
+`routes-manifest.json` and the protect list being in the shipped client chunk;
+that it actually *blocks a bot* is an operational check on a deployment.

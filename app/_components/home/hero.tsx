@@ -1,5 +1,6 @@
+import { DemoRequestDialog } from "../lead/demo-request-dialog";
 import { Reveal } from "../motion/reveal";
-import { Button, ButtonLink } from "../primitives";
+import { ButtonLink } from "../primitives";
 import { Container } from "./container";
 import { HeroDashboard } from "./dashboard";
 import { HeroText } from "./hero-text";
@@ -43,7 +44,10 @@ export function Hero() {
             className="mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row"
             data-reveal-item
           >
-            <Button>Request a demo</Button>
+            {/* The leaf renders this button itself and adds no box, exactly as
+                `NavDrop` and `FooterMotion` do — the class string and the
+                position in the row are unchanged. */}
+            <DemoRequestDialog source="hero">Request a demo</DemoRequestDialog>
             <ButtonLink href="/sign-in">Explore the platform</ButtonLink>
           </div>
         </HeroText>

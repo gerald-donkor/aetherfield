@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { DemoRequestDialog } from "./lead/demo-request-dialog";
 import { FooterMotion } from "./motion/footer-reveal";
 import { NavDrop } from "./motion/nav-drop";
 import { Button, ButtonLink, LinkButton, Wordmark } from "./primitives";
@@ -133,6 +134,7 @@ export function CtaBand({
   headline,
   action = "Request a demo",
   tone = "surface",
+  demo = false,
 }: {
   headline: string;
   action?: string;
@@ -140,6 +142,13 @@ export function CtaBand({
      already a surface panel, and two surfaces touching read as one. Defaults to
      "surface" so every settled caller is untouched. */
   tone?: "surface" | "white";
+  /* Whether this band's button opens the demo-request dialog (build step 2).
+     **Explicit, and opt-in.** Inferring it from `action` would make the wiring
+     a property of a copy string, and three of the four call sites are not demo
+     bands at all: /journal's is the newsletter's (step 4) and /about's is
+     "View open roles". Defaulting to false is what keeps their prerendered
+     HTML byte-identical without either page needing an edit. */
+  demo?: boolean;
 }) {
   return (
     <section
@@ -150,7 +159,15 @@ export function CtaBand({
       <h2 className="display-fluid-h4 max-w-[980px] font-sans font-bold text-balance">
         {headline}
       </h2>
-      <Button className="mt-[38px]">{action}</Button>
+      {demo ? (
+        // The leaf renders the button itself and takes the class string over,
+        // so the band's geometry is untouched.
+        <DemoRequestDialog source="cta_band" className="mt-[38px]">
+          {action}
+        </DemoRequestDialog>
+      ) : (
+        <Button className="mt-[38px]">{action}</Button>
+      )}
     </section>
   );
 }

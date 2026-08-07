@@ -211,6 +211,62 @@ export function ButtonLink({
 /*  Fields                                                                      */
 /* -------------------------------------------------------------------------- */
 
+/* The control's shared classes, so `Field` and `TextareaField` cannot drift
+   into a second field vocabulary. Sizing is deliberately *not* in here and is
+   prefixed by each variant instead: it keeps `Field`'s emitted class string
+   byte-identical to the one /sign-in and /sign-up already prerender. */
+const CONTROL_BASE =
+  "w-full border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-muted/70 focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
+
+/** Label, optional guidance and the explicit error state — the chrome both
+    field variants wrap their control in. Not exported: it is an implementation
+    detail of the two below, not a third thing to reach for. */
+function FieldFrame({
+  label,
+  hint,
+  error,
+  className,
+  id,
+  hintId,
+  errorId,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  className: string;
+  id: string;
+  hintId?: string;
+  errorId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <label
+        htmlFor={id}
+        className="block font-sans text-nav font-bold text-ink"
+      >
+        {label}
+      </label>
+      {hint ? (
+        <p id={hintId} className="mt-1.5 font-serif text-[16px] text-muted">
+          {hint}
+        </p>
+      ) : null}
+      {children}
+      {error ? (
+        <p
+          id={errorId}
+          className="mt-2 flex items-start gap-2 font-mono text-[12px] leading-[18px] text-ink"
+        >
+          <span aria-hidden className="mt-[7px] size-1 shrink-0 bg-ink" />
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The site's reusable text field: label, optional guidance, and an explicit
  * error state. Forms own validation and pass the settled state into it.
@@ -235,37 +291,75 @@ export function Field({
     .join(" ");
 
   return (
-    <div className={className}>
-      <label
-        htmlFor={id}
-        className="block font-sans text-nav font-bold text-ink"
-      >
-        {label}
-      </label>
-      {hint ? (
-        <p id={hintId} className="mt-1.5 font-serif text-[16px] text-muted">
-          {hint}
-        </p>
-      ) : null}
+    <FieldFrame
+      label={label}
+      hint={hint}
+      error={error}
+      className={className}
+      id={id}
+      hintId={hintId}
+      errorId={errorId}
+    >
       <input
         {...props}
         id={id}
-        className={`mt-2 h-[52px] w-full border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-muted/70 focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface ${
+        className={`mt-2 h-[52px] ${CONTROL_BASE} ${
           error ? "border-ink" : "border-border"
         }`}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy || undefined}
       />
-      {error ? (
-        <p
-          id={errorId}
-          className="mt-2 flex items-start gap-2 font-mono text-[12px] leading-[18px] text-ink"
-        >
-          <span aria-hidden className="mt-[7px] size-1 shrink-0 bg-ink" />
-          {error}
-        </p>
-      ) : null}
-    </div>
+    </FieldFrame>
+  );
+}
+
+/**
+ * `Field` for prose. Same label / hint / error chrome and the same control
+ * classes — the element is the only difference, which is why it shares
+ * `FieldFrame` and `CONTROL_BASE` rather than restating either. Added by build
+ * step 2 for the demo-request dialog's optional message.
+ */
+export function TextareaField({
+  label,
+  hint,
+  error,
+  className = "",
+  id,
+  rows = 4,
+  ...props
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  id: string;
+} & Omit<ComponentProps<"textarea">, "id">) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [props["aria-describedby"], hintId, errorId]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <FieldFrame
+      label={label}
+      hint={hint}
+      error={error}
+      className={className}
+      id={id}
+      hintId={hintId}
+      errorId={errorId}
+    >
+      <textarea
+        {...props}
+        id={id}
+        rows={rows}
+        className={`mt-2 resize-y py-3 ${CONTROL_BASE} ${
+          error ? "border-ink" : "border-border"
+        }`}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+      />
+    </FieldFrame>
   );
 }
 

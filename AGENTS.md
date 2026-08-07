@@ -322,7 +322,7 @@ auth foundations phase two runs on.
 | # | step | depends on | prerender impact |
 | --- | --- | --- | --- |
 | 1 | **Data layer and schema** — provision Neon, `lib/db/`, the phase-one tables (§9), `.env.example`, the migration workflow and its `package.json` scripts | — | none |
-| 2 | **Demo-request capture** — `/`'s hero "Request a demo" and the `CtaBand`. Provisions Upstash and establishes the **whole write-path pattern** (§10): client-leaf form, shared Zod schema, typed result, rate limit, BotID. `lead_source`'s `nav` value remains for a possible mobile-drawer demo CTA | 1 | `/`, `/journal`, `/about` gain a form leaf — **the only step in phase one that changes a prerendered page's markup** |
+| 2 | **Demo-request capture** — `/`'s hero "Request a demo" and the `CtaBand`. Provisions Upstash and establishes the **whole write-path pattern** (§10): client-leaf form, shared Zod schema, typed result, rate limit, BotID. `lead_source`'s `nav` value remains for a possible mobile-drawer demo CTA | 1 | `/` and the `/design-system` exhibit gain a dialog leaf — **the only step in phase one that changes a prerendered page's markup**. Not `/journal`, whose band is the newsletter's (step 4), and not `/about`, whose band is "View open roles" |
 | 3 | **Transactional email** — provision Resend, `lib/email/`, templates, the send helper. Demo requests get their confirmation and internal notification | 1, 2 | none |
 | 4 | **Newsletter signup, double opt-in** — `/journal`'s subscribe band, the confirm and unsubscribe routes | 3 — **double opt-in cannot exist before email** | `/journal` form leaf; two new routes |
 | 5 | **Blob upload and job applications** — `lib/storage/`, private CV upload, `/job-listing/[slug]` and `/careers`'s open-application card | 1, 3 | `/careers`, `/job-listing/[slug]` form leaves |
@@ -447,17 +447,30 @@ model, or scaffold a prompt before step 9.**
 app/
   api/<external-caller>/route.ts   webhooks, callbacks, cron — thin
   <route>/actions.ts               Server Actions, colocated
+  _actions/                        Server Actions with no one owning route
 lib/
-  db/      schema, client, queries        server-only
-  email/   templates and send             server-only
-  storage/ blob upload and signed reads   server-only
-  auth/    session, roles, org resolution server-only
-  domain/  phase two, pure                no I/O
+  db/         schema, client, queries        server-only
+  validation/ shared Zod schemas             NOT server-only, deliberately
+  rate-limit/ the Upstash limiter            server-only
+  email/      templates and send             server-only
+  storage/    blob upload and signed reads   server-only
+  auth/       session, roles, org resolution server-only
+  domain/     phase two, pure                no I/O
 ```
 
-`lib/` is new and does not exist yet. Every module under it that touches a
-secret carries `import "server-only"` at the top — the import exists to make a
-mistaken client import a **build** error rather than a leaked key at runtime.
+Every module under `lib/` that touches a secret carries `import "server-only"`
+at the top — the import exists to make a mistaken client import a **build**
+error rather than a leaked key at runtime. **`lib/validation/` is the one
+exception and must stay one**: its schemas are imported by client leaves *and*
+by actions, which is what makes "the rules exist once and run twice" true
+(§10 rule 1). Nothing that reads a secret may be added to it, and it must not
+import from `lib/db/` — `schema.ts` calls `pgEnum` at module scope, so an
+import there puts `drizzle-orm/pg-core` in a marketing page's browser bundle.
+
+**`app/_actions/` is for actions with no single owning route.** Colocation at
+`app/<route>/actions.ts` is still the default and assumes one owner; a form
+reached from shared chrome on several pages has none, and `app/_actions/`
+follows the existing `app/_components/` and `app/_content/` convention.
 
 ---
 
@@ -604,6 +617,20 @@ away from being hit.
 - **A CV is `access: 'private'`**, read back through `get()` and a short-lived
   signed URL — never `access: 'public'` (§8.3).
 
+**BotID**
+
+- **The package is `botid`, not `@vercel/botid`.** The scoped name is the
+  natural guess and it 404s on npm. Verified at step 2.
+- **Both halves are required.** `initBotId()` in `instrumentation-client.ts`
+  names the protected paths; `checkBotId()` verifies. A path missing from that
+  list makes the server call **fail**, not pass, so a new trigger surface is a
+  change in two files.
+- **A Server Action's path is the page it was invoked from**, not an API route —
+  the action POSTs to its own page. Protect `/`, not `/api/anything`.
+- Next 15.3+ takes the client half through `instrumentation-client.ts`, which is
+  what lets BotID ship **without** the root-layout component its own README also
+  documents — §8.1 forbids that one.
+
 ## 7.4 The resolution procedure
 
 This is how the table in 7.2 was produced, and how any future provider is
@@ -733,7 +760,7 @@ decision to make a value public:
 | variable | step | source |
 | --- | --- | --- |
 | `DATABASE_URL` | 1 | Neon, auto-provisioned |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | 2 | Upstash, auto-provisioned |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | 2 | Upstash, auto-provisioned — **not** `UPSTASH_REDIS_REST_*`, which is what this table predicted and what `Redis.fromEnv()` looks for. The Marketplace integration sets the KV-prefixed names; corrected from `vercel env ls` at step 2 |
 | `RESEND_API_KEY` | 3 | Resend, auto-provisioned |
 | `BLOB_READ_WRITE_TOKEN` | 5 | Vercel Blob |
 | `BETTER_AUTH_SECRET` | 6 | **generated locally**, ≥ 32 chars (§7.3) |
