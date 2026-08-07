@@ -1056,6 +1056,25 @@ Every result below was produced by running the command, on 7 Aug 2026.
   `lib/email/` makes). It also means Resend's email list and logs endpoints are
   not readable with this key, so **delivery was verified from the send path and
   the recipient's inbox, not from Resend's API.**
+- **Both messages arrived, and the received side was inspected**, not just the
+  send. In Gmail, from `Aetherfield <onboarding@resend.dev>`, both in **Inbox**
+  rather than Spam:
+
+  | | confirmation | notification |
+  | --- | --- | --- |
+  | subject | `Your Aetherfield demo request` | `Demo request — Prompt43 Check3` |
+  | `<h1>` | `We have your demo request` | `New demo request` |
+  | first line | `Gerald Donkor, thank you for the request.` | `Reply to this message to reach Gerald Donkor.` |
+
+  The wordmark, the heading, the body paragraphs, the horizontal rule and the
+  muted footer all render as authored; the em dash in the notification's
+  subject survived; and the notification's `NAME` / `WORK EMAIL` / `COMPANY` /
+  `SOURCE` / `MESSAGE` labels render in the intended order.
+
+  **The Inbox placement is weak evidence and must not be read as
+  deliverability.** It was sent to the Resend account holder's own address from
+  a shared sandbox sender — no domain of ours, no SPF, DKIM or DMARC of ours.
+  Real deliverability is unmeasurable until the domain gap above is closed.
 - **The requester's address had to be the Resend account address.** Both
   messages were addressed to the account holder, because the sandbox sender
   refuses everyone else — the domain gap above, demonstrated rather than
