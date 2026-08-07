@@ -13,13 +13,13 @@ tokens live in `@theme` in `app/globals.css` and there is no
 `tailwind.config.js`. **Cache Components / `use cache`** is not the
 `unstable_cache` of training data; load `vercel:next-cache-components` before
 touching revalidation. **Neon, Resend, Better Auth and Upstash are chosen
-(7.2) and each carries a trap that contradicts its own tutorials — read 7.3
+(§7.2) and each carries a trap that contradicts its own tutorials — read §7.3
 before writing a line against any of them.** If an API cannot be verified from
 `node_modules/`, a skill, or live docs, say so instead of guessing.
 
-**Sections 5–11 are the backend contract** — product and the ordered build
+**Sections 5–12 are the backend contract** — product and the ordered build
 sequence, architecture, stack, standing rules, data model, the write-path flow,
-and roles. Read them before writing any server code. Everything above them is
+roles, and the anti-fabrication rules. Read them before writing any server code. Everything above them is
 the *site* contract and still applies in full: the backend is being added to a
 finished, measured, byte-stable marketing site, and nothing below licenses
 breaking it.
@@ -112,7 +112,7 @@ transcribed from the desktop comp.
 
 **This file is capped, and the cap is on the build record — not on the
 contract.** It holds the index, these invariants, the workflow, the commands,
-the prompt-file contract, and sections 5–11 (product and build sequence,
+the prompt-file contract, and sections 5–12 (product and build sequence,
 architecture, stack, standing rules, data model, write-path flow, roles). It
 does **not** grow with the build: a finished prompt adds at most one index row
 here, and everything it measured or built goes in `docs/`. An invariant earns
@@ -120,7 +120,7 @@ its place here only if a session could break it *without* opening the `docs/`
 file that owns it, and a new one replaces or subsumes an existing line rather
 than stacking on it.
 
-Sections 5–11 are the exception to the growth rule, because they are what a
+Sections 5–12 are the exception to the growth rule, because they are what a
 session needs *before* it opens any `docs/` file — but the same discipline
 applies inside them: they carry decisions and boundaries, never the record of
 what was built against those decisions. **Column types, DDL, a measured latency,
@@ -193,7 +193,7 @@ Report the exact command output; never claim a check passed without running it.
 > **Gaps to flag, not to invent.** There is no test, database, migration or
 > email-preview script. Build step 1 adds the database ones and step 3 the email
 > one, each updating this list **in the same change**; **never reference a script
-> name before it exists.** Because only Next.js auto-loads `.env.local` (7.3),
+> name before it exists.** Because only Next.js auto-loads `.env.local` (§7.3),
 > any script reaching the database or a provider is written as
 > `dotenv -e .env.local -- <command>` from the day it is added.
 
@@ -301,6 +301,13 @@ file unless it says otherwise. A step is "done" when its work is committed —
 resolved from the repository and `git log`, never from this list and never from
 `prompts/` (section 1). Do not tick anything here; the file records the plan,
 not the progress.
+
+> **Citation convention, and it matters — the numbers collide.** Build steps run
+> 1–14 and sections run 1–11, so "10" is ambiguous on its own. **`§N` always
+> means a section of this file; "step N" always means a row of the tables
+> below.** Never write a bare number for either. Prompt-file numbers are a third
+> sequence again (`prompts/NN-…`) and do **not** correspond to build steps —
+> prompt 37 implements step 1.
 
 ### Phase one — the marketing backend
 
@@ -465,7 +472,7 @@ The accepted cost is that **we own the sign-in, reset and verify screens**,
 built from the existing primitives in `app/_components/`. Treat that as design
 work under the front-matter rules, not as scaffolding.
 
-**Better Auth is a library, not a Marketplace integration** — 7.4's provisioning
+**Better Auth is a library, not a Marketplace integration** — §7.4's provisioning
 procedure does not apply to it. There is nothing to `add` and nothing to bill;
 generate `BETTER_AUTH_SECRET` locally.
 
@@ -548,7 +555,7 @@ provider-agnostic. Provision first, then build.
 - a hand-wired provider SDK installed with `npm install` instead of provisioned
   through the resolution procedure above
 - **`@vercel/postgres` or `@vercel/kv`** — both are sunset and no longer exist
-- **a `Proxy` wrapper around the database client** (7.3)
+- **a `Proxy` wrapper around the database client** (§7.3)
 - an ORM, query builder or raw SQL outside `lib/db/`
 - a client-side data-fetching library on primary read paths
 - local JSON or filesystem storage for application data
@@ -640,7 +647,7 @@ decision to make a value public:
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | 2 | Upstash, auto-provisioned |
 | `RESEND_API_KEY` | 3 | Resend, auto-provisioned |
 | `BLOB_READ_WRITE_TOKEN` | 5 | Vercel Blob |
-| `BETTER_AUTH_SECRET` | 6 | **generated locally**, ≥ 32 chars (7.3) |
+| `BETTER_AUTH_SECRET` | 6 | **generated locally**, ≥ 32 chars (§7.3) |
 | `BETTER_AUTH_URL` | 6 | the app's base URL |
 
 Do not invent a variable name before the step that provisions it — read the name
@@ -652,7 +659,7 @@ Backend work is recorded in **`docs/backend.md`** — created by the first backe
 prompt and added to the index at the top of this file in that same change. The
 schema's column types, every endpoint and its fields, the environment variables
 as provisioned, and the measured behaviour all live there. **Never in this
-file** (see the cap rule in the front matter): sections 5–11 hold decisions and
+file** (see the cap rule in the front matter): sections 5–12 hold decisions and
 boundaries; `docs/backend.md` holds what was built against them.
 
 ---
@@ -674,7 +681,7 @@ migrations themselves go in `docs/backend.md`**, not here.
   details, and the CV's private blob reference. Never the CV's bytes.
 - **Better Auth's own tables** — user, session, account, verification. These are
   **generated by `npx auth@latest generate`**; do not hand-author them, and do
-  not add columns to them directly (7.3).
+  not add columns to them directly (§7.3).
 
 ## 9.2 Rules
 
@@ -708,17 +715,20 @@ migrations themselves go in `docs/backend.md`**, not here.
 **Every public form follows this path.** Step 2 of the build sequence
 establishes it; every later flow copies it rather than inventing its own.
 
+Its internal stages are lettered, not numbered, so they can never be confused
+with a build step or a section (see §5.2's citation convention).
+
 ```
 client leaf form  (§8.1 — takes children, adds no box)
    │  validates with the shared Zod schema, for the user's benefit only
    ▼
 Server Action     (§6.2 — the only mutation path for our own forms)
-   │  1. BotID check                    → reject
-   │  2. rate limit, keyed by IP        → reject, with retry timing
-   │  3. parse with the SAME Zod schema → typed field errors
-   │  4. authorise, if the path is not public
-   │  5. write via lib/db/              → the only DB caller
-   │  6. queue/send email via lib/email/
+   │  a. BotID check                    → reject
+   │  b. rate limit, keyed by IP        → reject, with retry timing
+   │  c. parse with the SAME Zod schema → typed field errors
+   │  d. authorise, if the path is not public
+   │  e. write via lib/db/              → the only DB caller
+   │  f. queue/send email via lib/email/
    ▼
 typed result  { ok: true } | { ok: false, error, fieldErrors? }
    │
@@ -732,17 +742,17 @@ the leaf renders it: announced, focus managed, legible without colour (§8.2)
    courtesy; the server copy is the check (§6.2).
 2. **The action returns a typed result. It never throws to the client** and never
    returns a bare string. A thrown error is a bug, not a validation outcome.
-3. **Order matters.** BotID and the rate limit come *before* parsing, and parsing
-   comes before any write — otherwise the cheap rejections pay for the expensive
-   work.
+3. **Order matters — a, b, then c.** BotID and the rate limit come *before*
+   parsing, and parsing comes before any write, otherwise the cheap rejections
+   pay for the expensive work.
 4. **A failed email never fails the write.** The lead is captured first; the
    notification is best-effort and its failure is logged (without the address,
    §8.3) rather than surfaced as a failed submission.
 5. **No redirect on success.** These forms sit inside settled, measured pages;
    they swap to a success state in place. A navigation would discard the page's
    scroll position and its motion state.
-6. **The same path applies to phase two's mutations**, with step 4 doing real
-   work (§11) instead of being skipped.
+6. **The same path applies to phase two's mutations**, with stage **d** doing
+   real work (§11) instead of being skipped.
 
 ---
 
@@ -767,7 +777,7 @@ pre-empt it with a role that spans both.
 ## 11.2 Rules
 
 1. **Every protected page and every action authorises server-side.** A `proxy.ts`
-   redirect is an optimistic convenience and is **not** enforcement — 7.3's
+   redirect is an optimistic convenience and is **not** enforcement — §7.3's
    `getSessionCookie()` trap is exactly this mistake.
 2. **Authorisation is checked inside the action**, not in the component that
    renders the control. Hiding a button is presentation (§6.2).
@@ -778,3 +788,46 @@ pre-empt it with a role that spans both.
 5. **The role lives in the database, never in a cookie or `localStorage`**
    (§7.5), and is re-read per request rather than trusted from the session
    payload.
+
+---
+
+# 12. Do not fabricate
+
+The rules elsewhere in this file each guard one surface. **This section is the
+general one**, and it outranks the instinct to produce a complete-looking answer.
+A gap named is cheap; a gap filled with a plausible invention costs a debugging
+session and can ship.
+
+**The standing rule: an unverified claim is stated as unverified, or not stated.**
+"I don't know", "not checked", and "this needs verifying" are complete,
+acceptable answers. A hedge is not a failure — a confident wrong answer is.
+
+1. **Never cite a path you have not opened.** File paths, component names,
+   exported symbols and function names are *checked*, not recalled — including
+   ones this file names, which may have moved. `docs/` files are the same: quote
+   what one says, never paraphrase it from memory.
+2. **Never write an API you have not verified** in `node_modules/`, a loaded
+   skill, or live docs fetched this session. This is the whole reason §7.3
+   exists: all four chosen providers have surfaces that contradict what a model
+   writes from memory, and Next 16 contradicts almost every tutorial.
+3. **Never claim a check passed without running it and quoting its output**
+   (§2). Never describe a build's route table you did not just produce.
+4. **Never present a judgement as a measurement** — the front matter's rule,
+   generalised. Say which, every time.
+5. **Never assert what is built from this file or from `prompts/`.** A prompt
+   file proves a prompt was written, never that it ran. Resolve from the
+   repository and `git log` (§1). §5.2 is a *plan*; it says nothing about what
+   exists.
+6. **Never invent a name that a provider owns** — an environment variable, a
+   table a library generates, a CLI flag, a package export. Read it back from
+   `vercel env ls`, the generated schema, or `--help`.
+7. **Never invent a number.** Prices, limits, free-tier thresholds, model IDs
+   and version numbers move; fetch them or say they are unchecked. The Clerk
+   free tier moved by 5× in six months and the figure in this file is dated for
+   that reason.
+8. **Contradicting this file is allowed; doing it silently is not.** If the
+   repository disagrees with something written here, the repository is the fact
+   and this file is stale — say so, and fix the line in the same change.
+9. **A blocked or uncertain step is reported, not routed around.** Do not
+   substitute a mock, a placeholder, or a narrower deliverable and present it as
+   the requested one (§7.4 says the same thing about integrations).
