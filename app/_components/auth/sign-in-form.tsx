@@ -2,22 +2,32 @@
 
 import { createAuthClient } from "better-auth/react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Field } from "../primitives";
+import { GoogleSignInButton } from "./google-sign-in-button";
 
 const authClient = createAuthClient();
+
+/* The same discriminated path `/sign-up` uses. A bare boolean would let a
+   Google attempt and an email attempt run at once and report over each other. */
+type PendingPath = "email" | "google" | null;
 
 export function SignInForm() {
   const router = useRouter();
   const statusRef = useRef<HTMLDivElement>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<PendingPath>(null);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState({ email: "", password: "" });
 
   useEffect(() => {
     if (message) statusRef.current?.focus();
   }, [message]);
+
+  const onGooglePendingChange = useCallback(
+    (googlePending: boolean) => setPending(googlePending ? "google" : null),
+    [],
+  );
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +49,7 @@ export function SignInForm() {
       return;
     }
 
-    setPending(true);
+    setPending("email");
     try {
       const { error } = await authClient.signIn.email({
         email,
@@ -56,7 +66,7 @@ export function SignInForm() {
     } catch {
       setMessage("We couldn't sign you in. Check your details and try again.");
     } finally {
-      setPending(false);
+      setPending(null);
     }
   }
 
@@ -73,6 +83,21 @@ export function SignInForm() {
       >
         {message}
       </div>
+      <GoogleSignInButton
+        action="sign-in"
+        errorPath="/sign-in"
+        disabled={pending !== null}
+        pending={pending === "google"}
+        onMessage={setMessage}
+        onPendingChange={onGooglePendingChange}
+      />
+      <div className="my-6 flex items-center gap-4" aria-hidden>
+        <span className="h-px flex-1 bg-border" />
+        <span className="font-mono text-[11px] leading-none text-muted">
+          OR SIGN IN WITH EMAIL
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
       <Field
         id="sign-in-email"
         name="email"
@@ -82,7 +107,7 @@ export function SignInForm() {
         inputMode="email"
         placeholder="name@company.com"
         error={errors.email || undefined}
-        disabled={pending}
+        disabled={pending !== null}
         required
       />
       <Field
@@ -94,12 +119,12 @@ export function SignInForm() {
         minLength={8}
         maxLength={128}
         error={errors.password || undefined}
-        disabled={pending}
+        disabled={pending !== null}
         required
         className="mt-6"
       />
-      <Button type="submit" className="mt-8 w-full" disabled={pending}>
-        {pending ? "Signing in..." : "Sign in"}
+      <Button type="submit" className="mt-8 w-full" disabled={pending !== null}>
+        {pending === "email" ? "Signing in..." : "Sign in"}
       </Button>
     </form>
   );

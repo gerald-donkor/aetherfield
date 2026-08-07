@@ -1086,3 +1086,234 @@ exercised — it is unsatisfiable without a domain (above). Resend's delivery,
 bounce and complaint webhooks are out of scope (phase one sends and never
 receives). And, as at step 2, **BotID's real classification is still an
 operational check on a deployment**: it returns `HUMAN` in development.
+
+---
+
+## Step 6 extension — Google on `/sign-in`, and the mark on both auth cards
+
+Implemented by prompt 44 on 7 Aug 2026 at the user's direction, from a
+screenshot of `/sign-in` with the auth card circled. Two things were asked for:
+Google single sign-on on `/sign-in`, which did not exist; and the Google logo
+displayed properly on that control **and** on `/sign-up`'s existing one, which
+was text only. Like prompt 41 this extends committed step 6 work — no package,
+route, table or migration, and no build step is completed by it.
+
+This is the **sibling** of the section above, not a replacement: the provider
+config, linking decisions and `?error=` discipline recorded there still hold
+except where corrected here.
+
+### The consequential decision — signing in no longer creates an account
+
+Better Auth's `signIn.social()` is one call for both meanings, so before this
+change an unrecognised Google account arriving at `/sign-in` would have been
+silently **registered**. That is not what the page says, and with the control on
+two pages it stops being a hypothetical.
+
+**Chosen: `disableImplicitSignUp: true` on the Google provider**
+(`lib/auth/server.ts`), with only `/sign-up` sending `requestSignUp: true`. So
+`/sign-up` creates accounts and `/sign-in` does not; an unknown Google address
+at `/sign-in` is told no account exists.
+
+Verified in `node_modules` rather than recalled (§12 rule 2), against
+`better-auth@1.6.26`:
+
+- `disableImplicitSignUp` and `disableSignUp` are real per-provider options on
+  `ProviderOptions`
+  (`@better-auth/core/dist/oauth2/oauth-provider.d.mts:76,80`), which
+  `GoogleOptions` extends.
+- `requestSignUp` is a documented body field on the social sign-in route
+  (`better-auth/dist/api/routes/sign-in.mjs:97`), is persisted into the OAuth
+  state (`oauth2/state.mjs:19`) and is read back at the callback
+  (`api/routes/callback.mjs:154`). Enforcement is therefore **server-side at the
+  callback**, not in the two labels.
+- A blocked registration returns `"signup disabled"`
+  (`oauth2/link-account.mjs:79-83`), which the callback space-joins into the
+  `error` query parameter as **`signup_disabled`**.
+- The option is genuinely typed, not silently dropped: a throwaway probe passing
+  `requestSignUp` plus a deliberately bogus sibling key reported
+  `TS2353 … 'bogusOptionThatShouldFail' does not exist` and said nothing about
+  `requestSignUp`. The probe was deleted.
+
+**`disableSignUp` was deliberately not used.** It is read inconsistently — the
+initiation path reads `provider.disableSignUp` but the callback reads
+`provider.options?.disableSignUp` — whereas `disableImplicitSignUp` is read the
+same way in both. `disableImplicitSignUp` is also the option that keeps
+`/sign-up` working, which a blanket `disableSignUp` would not.
+
+Nothing else about the provider changed. Default verified-email linking,
+`account.encryptOAuthTokens: true`, the absent `trustedProviders`, and the
+non-input nullable role all stand, so social signup still cannot request
+`staff` or `admin` (§11.2 rule 3).
+
+### The shared control
+
+`app/_components/auth/google-sign-in-button.tsx` is one client leaf rendered by
+both forms; the handler, the `?error=` cleanup and the button were **not**
+copied into `sign-in-form.tsx`. It exports one component and nothing else.
+
+The parent still owns pending state. `sign-in-form.tsx`'s `pending` was a bare
+`boolean` and is now the same `"email" | "google" | null` union `/sign-up`
+already used, so a Google attempt and an email attempt cannot race; the button
+holds no second flag and reports transitions upward through `onPendingChange`.
+`errorPath` is a prop (`/sign-in` and `/sign-up`), so the module hardcodes
+neither page.
+
+`window.location`, never `useSearchParams` — the reason both pages are still
+`○ Static`. The only occurrence of that identifier anywhere in `app/` or `lib/`
+is the comment in `google-sign-in-button.tsx` saying so.
+
+**The `?error=` cleanup now maps before it strips.** On `/sign-in` only,
+`signup_disabled` produces "There's no Aetherfield account for that Google
+address. Create one first, then sign in."; everything else, on both pages,
+produces prompt 41's generic "We couldn't connect your Google account. Please
+try again." The machine-readable `error` and the provider's `error_description`
+are still removed with `history.replaceState` and **never rendered** — reading a
+known code to choose between two strings of our own is not rendering it, and
+prompt 41's decision is not reopened.
+
+### Labels and separators
+
+| page | control | separator |
+| --- | --- | --- |
+| `/sign-in` | `Sign in with Google` | `OR SIGN IN WITH EMAIL` |
+| `/sign-up` | `Sign up with Google` | `OR CREATE WITH EMAIL` |
+
+Both pending to `Connecting to Google...`. `/sign-up` changed from prompt 41's
+`Continue with Google`: with `disableImplicitSignUp` the two pages genuinely do
+different things, and "Continue" names neither.
+
+### Google's branding guidelines — fetched 7 Aug 2026
+
+From <https://developers.google.com/identity/branding-guidelines>, read this
+session rather than recalled (§12 rule 7). What it states:
+
+- **Permitted labels** — "Sign in with Google", "Sign up with Google" or
+  "Continue with Google". Both shipped strings are on that list.
+- **The mark** — always the standard multi-colour version, on a white
+  background; "You can't change the size or color of the Google 'G' logo";
+  monochrome cuts prohibited; preserve aspect ratio.
+- **Padding (Android & Web)** — "12px left padding before the Google logo, 10px
+  right padding after the Google logo and 12px right padding after the Sign in
+  with Google text".
+- **Light theme** — fill `#FFFFFF`, 1px inside stroke `#747775`, font `#1F1F1F`.
+- **Font** — "The button font is Google Sans Medium".
+- **Custom buttons are permitted**, subject to those size, text, colour, font
+  and padding rules; Google's own SDK is "strongly recommended".
+
+**What it does not state, checked explicitly:** no pixel size for the logo, no
+button height and no corner radius. It says to "start with any of the logo sizes
+included in the download bundle" — a bundle not fetched here.
+
+**Met.** Permitted label strings; the standard four-colour G, unmodified,
+unrecoloured, aspect ratio preserved; a white button fill at rest; 10px between
+mark and label, exactly as specified; 53.5px/162px of horizontal padding, well
+past the 12px minimum.
+
+**Deliberately deviated from, and why.** Three, all so the control stays inside
+the settled design system rather than importing Google's:
+
+1. **Font is JetBrains Mono at `--text-button`, not Google Sans Medium.** Google
+   Sans is not licensed to this project and the auth card's vocabulary is
+   `font-mono`. Adding a fourth family for one button is the larger error.
+2. **Stroke is `--color-border` `#dbe0ec`, not `#747775`;** ink is
+   `--color-ink` `#000000`, not `#1F1F1F`. Prompt 44 fixed the mark's four brand
+   hex values as the *only* non-`@theme` colours in the change, and that holds.
+3. **On hover the fill becomes `--color-surface` `#f6f8fb`, not `#FFFFFF`.** The
+   guideline says the mark appears on white; #f6f8fb is off-white by ~2%. The
+   hover treatment is prompt 41's and the prompt required it to carry over
+   unchanged. Recorded as a knowing deviation, not an oversight.
+
+**Judged, not measured: the mark ships at 18×18 CSS px.** Google states no
+number, so this is a judgement against the 14px mono label rather than a
+measurement of anything. The 48×48 viewBox is the official artwork's own
+coordinate space and is unscaled in aspect.
+
+The mark is **inline SVG, four paths, no network request** — no `next/image`,
+no remote asset, no icon library, no Google SDK or GSI script. It is
+`aria-hidden` beside a real text label, so the button keeps its accessible name
+from its text and the mark is never the only content.
+
+### Composition — centred group, both pages identically
+
+The mark and label are centred **together** as a group (`flex items-center
+justify-center gap-[10px]`), rather than the mark pinned left with the label
+centred in the remainder.
+
+Chosen because the card's other full-width control — the email submit `Button` —
+centres its content, and a lone left-pinned element would be the only
+left-aligned thing in a centred card. Google's own rendered button also centres
+the group once the button is wider than its content, so this is not a deviation
+from their layout so much as their layout at this width. Applied identically to
+both pages.
+
+### Verified, prompt 44
+
+Every item below was run this session; nothing here is asserted from the plan.
+
+- `npm run typecheck` exited 0 (`tsc --noEmit`); `npm run lint` exited 0
+  (`eslint`).
+- `npm run build` exited 0 on Next 16.2.12, emitting one 65949-byte CSS chunk.
+  **`/sign-in` and `/sign-up` are both still `○ Static`**; `/account` and
+  `/api/auth/[...all]` remain `ƒ`; every marketing route keeps its previous
+  mode. Nothing became dynamic.
+- **Prerender diff against parent `7f53872`**, built in a detached worktree with
+  `node_modules` copied in, base CSS chunk 65926 bytes. Normalising the build
+  id and the generated CSS **and JS** chunk names and stripping the inline RSC
+  flight payload: **16 of 18 pages are byte-identical** — all six articles, all
+  three job listings, `/`, `/about`, `/careers`, `/journal`, `/design-system`,
+  `_not-found` and `_global-error`. **Only `sign-in.html` and `sign-up.html`
+  differ**, and each difference is the button, its four SVG paths, the label and
+  (on `/sign-in`) the new separator. Nothing else moved, and `primitives.tsx`
+  was not touched.
+- **Geometry, measured** at 375 and 1280 on both pages: control **52px** high
+  (unchanged from prompt 41), **287px** wide at 375 and **504px** at 1280
+  (identical to prompt 41's recorded form widths, so the control did not
+  resize). Mark **18×18**. Mark-to-label gap **10px**, `column-gap: 10px`.
+  Horizontal padding 53.5px at 375 and 162px at 1280, equal on both sides.
+  No horizontal document overflow at either width.
+- **All five states exercised on both pages**, computed styles read rather than
+  eyeballed. Rest: white fill, `#dbe0ec` border. Hover: `#f6f8fb` fill, ink
+  border. Focus-visible (reached by a real 7-press Tab sequence from the top of
+  the document): `#2683eb` border plus the accent ring. Pending: label
+  `Connecting to Google...`, `disabled`, `cursor: not-allowed`, underlined.
+  Disabled is the same state. **In every one of the five the mark is present at
+  `opacity: 1` with its four fills exactly `rgb(66,133,244)`, `rgb(52,168,83)`,
+  `rgb(251,188,5)`, `rgb(234,67,53)`** — it never disappears and never
+  recolours. Screenshots at both widths were inspected.
+- **Live Google initiation from `/sign-in`** returned HTTP 200 and generated an
+  `accounts.google.com/o/oauth2/v2/auth` URL whose `redirect_uri` is exactly
+  `http://localhost:3000/api/auth/callback/google`, with scopes
+  `email profile openid`, `response_type=code`, PKCE `S256`, and a client id,
+  state and code challenge all present. Fetching that URL returned 200 and
+  reached Google's normal account surface with **neither `redirect_uri_mismatch`
+  nor `invalid_client`** — the same bar prompt 41 met from `/sign-up`. No client
+  id, secret, state, verifier or token was printed or recorded.
+- **The `?error=` path, all four combinations.** `/sign-in?error=signup_disabled`
+  renders only the no-account message; `/sign-in?error=access_denied` and both
+  `/sign-up` cases render only the generic one. In all four the query string is
+  emptied, the status region is focused, and the page contains **neither the
+  error code nor the `error_description`** that was supplied.
+- **Email/password regression on the rebuilt `/sign-in`**, whose pending state
+  machine this change rewrote. A synthetic account signed up, reached `/account`,
+  signed out (200, `/account` then redirected), and signed back in through the
+  form. While the email attempt was in flight the submit read `Signing in...`
+  and **the Google control was `disabled` with its label unchanged**, proving the
+  two paths cannot race. The row had `role` null and one `credential` account
+  (§11.2 rule 3 holds for the form too). It was deleted; user, account and
+  session counts for it all returned 0. Run against a server started with
+  `BETTER_AUTH_URL` pointed at its own port, because ports 3000–3002 were in use.
+- `npx drizzle-kit generate` reported **"No schema changes, nothing to migrate"**
+  and wrote no file; the migrations directory still holds only `0000` and `0001`.
+- The staged diff was grepped for secret-shaped strings before committing;
+  none present. No environment variable was added, no `NEXT_PUBLIC_*` exists,
+  `.env.example` is unchanged, and no `console` call was added.
+
+**Not verified, and why.** Unchanged from prompt 41 and still an operational
+browser check: a complete new-user Google login, a returning-user Google login,
+and a verified-email link to an existing local account. **This change adds a
+fourth: the `signup_disabled` outcome was proved end to end only in the
+application's handling of it** — the message, the focus and the URL stripping
+were driven by a synthetic query string, not by Google actually refusing an
+unknown account at the callback. No interactive Google test-account access was
+available, and no Google-backed user or OAuth token was created during any of
+these checks.

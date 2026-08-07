@@ -31,6 +31,14 @@ function createAuth() {
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID as string,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+        // Google is reachable from two pages now, and the two mean different
+        // things. Without this, an unrecognised Google account signing in from
+        // /sign-in would silently be *registered*, which the page does not say
+        // and the user did not ask for. With it, only /sign-up sends
+        // `requestSignUp`, so only /sign-up can create a user; /sign-in reports
+        // that no account exists. Enforced server-side at the OAuth callback,
+        // not by the two labels.
+        disableImplicitSignUp: true,
       },
     },
     account: {

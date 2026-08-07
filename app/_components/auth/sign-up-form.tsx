@@ -2,13 +2,12 @@
 
 import { createAuthClient } from "better-auth/react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Field } from "../primitives";
+import { GoogleSignInButton } from "./google-sign-in-button";
 
 const authClient = createAuthClient();
-const GOOGLE_ERROR_MESSAGE =
-  "We couldn't connect your Google account. Please try again.";
 
 type PendingPath = "email" | "google" | null;
 
@@ -27,42 +26,10 @@ export function SignUpForm() {
     if (message) statusRef.current?.focus();
   }, [message]);
 
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has("error")) return;
-
-    url.searchParams.delete("error");
-    url.searchParams.delete("error_description");
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${url.pathname}${url.search}${url.hash}`,
-    );
-    const statusTask = window.setTimeout(
-      () => setMessage(GOOGLE_ERROR_MESSAGE),
-      0,
-    );
-    return () => window.clearTimeout(statusTask);
-  }, []);
-
-  async function onGoogleSignIn() {
-    setMessage("");
-    setPending("google");
-
-    try {
-      const origin = window.location.origin;
-      const { error } = await authClient.signIn.social({
-        provider: "google",
-        callbackURL: new URL("/account", origin).toString(),
-        errorCallbackURL: new URL("/sign-up", origin).toString(),
-      });
-      if (error) setMessage(GOOGLE_ERROR_MESSAGE);
-    } catch {
-      setMessage(GOOGLE_ERROR_MESSAGE);
-    } finally {
-      setPending(null);
-    }
-  }
+  const onGooglePendingChange = useCallback(
+    (googlePending: boolean) => setPending(googlePending ? "google" : null),
+    [],
+  );
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -125,16 +92,14 @@ export function SignUpForm() {
       >
         {message}
       </div>
-      <button
-        type="button"
-        onClick={onGoogleSignIn}
+      <GoogleSignInButton
+        action="sign-up"
+        errorPath="/sign-up"
         disabled={pending !== null}
-        className="h-[52px] w-full border border-border bg-white px-4 font-mono text-button font-medium text-ink outline-none transition-[background-color,border-color,box-shadow] hover:border-ink hover:bg-surface focus-visible:border-accent focus-visible:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:border-border disabled:bg-surface disabled:underline"
-      >
-        {pending === "google"
-          ? "Connecting to Google..."
-          : "Continue with Google"}
-      </button>
+        pending={pending === "google"}
+        onMessage={setMessage}
+        onPendingChange={onGooglePendingChange}
+      />
       <div className="my-6 flex items-center gap-4" aria-hidden>
         <span className="h-px flex-1 bg-border" />
         <span className="font-mono text-[11px] leading-none text-muted">
