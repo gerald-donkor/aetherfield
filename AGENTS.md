@@ -476,13 +476,16 @@ price with full Node.js, streaming and SSE included. Edge is a downgrade here.
 
 ## 7.2 The chosen providers
 
-Chosen by the procedure in 7.4, on 7 Aug 2026. **Nothing is provisioned yet** —
-these are decisions on record; `vercel integration add` has not been run and the
-project is not linked.
+Chosen by the procedure in §7.4, on 7 Aug 2026. The project is linked as
+`dgsloxx417s-projects/aetherfield`. **Neon is provisioned** (resource
+`neon-purple-candle`, plan `free_v3`, region `iad1`, `auth=false`); the other
+three are decisions on record only. **Provisioning state is not tracked in this
+file beyond that line** — read it from `vercel integration list` and
+`vercel env ls`, per §12 rule 5.
 
 | need | provider | package | resolved by |
 | --- | --- | --- | --- |
-| relational data | **Neon Postgres** | `@neondatabase/serverless` | `vercel:vercel-storage` — the preferred Marketplace path for SQL, and what the sunset `@vercel/postgres` became |
+| relational data | **Neon Postgres** — *provisioned* | `@neondatabase/serverless` | `vercel:vercel-storage` — the preferred Marketplace path for SQL, and what the sunset `@vercel/postgres` became |
 | transactional email | **Resend** | `resend` | `vercel:marketplace` `discover --category messaging` — the **only** result |
 | authentication | **Better Auth** v1.6 | `better-auth` | see below — chosen over Clerk on the user's explicit "best and free" criterion |
 | rate limiting | **Upstash Redis** | `@upstash/redis` + `@upstash/ratelimit` | `vercel:vercel-storage` — §8.2 requires a limiter on every public write path, and a Postgres counter is the wrong tool |
@@ -577,11 +580,20 @@ chosen. It is not optional, and it runs **before** any code is written.
 3. For a Marketplace need: `vercel integration categories`, then
    `vercel integration discover --category <slug>`. Both are read-only. Take the
    top relevant result unless the user names another provider.
-4. Provision for real — `vercel integration add <name> --yes --no-claim`, then
-   `vercel env pull --yes`. Provisioning creates billable resources: **ask the
-   user before running it.** If the provider hands off to a browser or dashboard
-   step, stop, ask them to finish it, and continue after.
-5. Build against the real environment variables, and record the decision and its
+4. **Read `vercel integration add <name> --help` first.** It prints that
+   provider's own `--plan` values and `-m KEY=VALUE` metadata keys, which cannot
+   be guessed — and the defaults are not always what this project wants (Neon's
+   `auth` defaults to `true`, which would have provisioned a second auth system
+   alongside Better Auth). Then provision:
+   `vercel integration add <name> --plan <id> -m <k>=<v> --no-claim`.
+   **`--yes` is not a valid option** on `integration add` in CLI 58.7.1 and the
+   command errors out; the marketplace skill documents it anyway. `env pull`
+   runs automatically unless `--no-env-pull` is passed.
+5. Provisioning creates billable resources: **ask the user before running it.**
+   If the provider hands off to a browser or dashboard step — Neon required
+   accepting marketplace terms — **stop, ask them to finish it, and retry the
+   command the CLI returns in `next[]`.** Never work around the handoff.
+6. Build against the real environment variables, and record the decision and its
    reasoning in `docs/backend.md`.
 
 **A mock is not a resolution.** A `.env.example` with sample data behind it is
