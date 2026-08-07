@@ -1477,6 +1477,183 @@ top-to-bottom), then the 33 bars `scaleY 0→1` from `bottom center`, then the
   load, the bars run as the chart scrolls in. Verified — all 33 bars still read
   scaleY 0 after 1.2 s at scroll 0.
 
+### The chart's hover readout
+
+Prompt 35. The user circled the whole hero dashboard in
+`~/Pictures/Screenshots/Screenshot_20260807_105228.png`: *"animate the chart to
+be interactive when pointing over it."* It is the chart's **first interactive
+behaviour** — until now it ran its entrance and then did nothing — and it lives
+in the same client leaf, `home/emissions-chart.tsx`, which stays
+component-only. `dashboard.tsx`, `hero.tsx`, `register.ts`, `reveal.tsx` and
+`globals.css` are all untouched.
+
+**The screenshot is static, so it constrains the rest state and nothing about
+the motion. There is no reference recording for this interaction.** Every
+duration, ease and opacity below is either the site's existing constant or an
+explicitly-labelled **judgement** — say *judgement*, never *measured*, if any of
+them is revisited.
+
+**The pill is already the chart's readout; hovering retargets it.** Rather than
+inventing a tooltip in a vocabulary the panel does not have, the hover glides
+the brand-yellow pill along the tops of the bars to the hovered column and reads
+that bar's value; pointer-leave glides it back to the peak and back to `220`.
+
+| element | rest | hovering column `i` |
+| --- | --- | --- |
+| the pill | peak column, `220` | column `i`, `BARS[i]` |
+| bar `i` | `opacity 1`, `scaleX 1` | `opacity 1`, `scaleX 1.6` |
+| every other bar | `opacity 1` | `opacity 0.28` |
+
+Three consequences, and all three are why this shape beat a tooltip card:
+
+- **It invents no data.** The y-axis is unitless (0–240) and the panel's only
+  unit, `192,000 tCO₂e`, belongs to a different tile at a different scale, so a
+  tooltip claiming a unit would fabricate one. **And no date** — the month axis
+  is five `justify-around` labels over 33 bars, so the bar→month mapping is
+  approximate *in the comp itself*. Do not derive one.
+- **It adds no colour token.** The hovered bar lifts by *dimming the rest*, so
+  bars stay `bg-ink` and the pill stays `bg-brand`. `#2683EB` still belongs to
+  the seal and the stat tile's delta.
+- **The hit target is the column band, not the 0.3em bar.** Each bar already
+  sits in a `flex-1` wrapper, so the band including its share of the `0.45em`
+  gap is ~3 % of the plot width and the pointer only has to be *nearest*.
+
+Judgements: pill glide **0.28 s**, bar dim/undim **0.2 s**, both on `EASE`
+(`power3.out`, the site's one reveal curve, a little under `DUR`);
+`scaleX 1.6` on a `0.3em` bar is `0.48em`, visibly selected without touching
+layout, and the bars' `transform-origin` is already `bottom center` from the
+entrance; **`0.28` dim opacity** keeps the trend's shape legible behind the
+selection.
+
+**The pill stays a child of the peak bar's wrapper, and the hover writes a
+delta.** Its rest position is pure CSS (`absolute bottom-full left-1/2
+-translate-x-1/2 mb-[0.6em]`) against a wrapper whose height *is* the peak bar's
+height; re-authoring it at plot level would mean computing that position, and
+the row's `gap-[0.45em]` makes a percentage `left` land a few pixels off — which
+would break the settled render and the JS-off state at once. So `x` carries
+`centres[i] − centres[PEAK]` and nothing else moves.
+
+**`xPercent: -50` is the fix for the consumed `-translate-x-1/2`, and it is
+load-bearing rather than tidy.** The first tween to touch this element's
+transform consumes Tailwind v4's independent `translate` — `_parseTransform`
+folds `translate` / `rotate` / `scale` into one `transform` and sets all three
+to `none` (`node_modules/gsap/CSSPlugin.js:859-866`), baking the centring in as
+a **pixel** half-width. The pill's text changes between `35` and `220`, so that
+pixel value goes stale and the readout would drift off-centre. One
+`gsap.set(pill, { xPercent: -50, x: 0 })` hands the centring to GSAP; it renders
+identically, which is what holds the settled `AE` at 0.
+
+**One delegated `pointermove` on the plot, not 33 `pointerenter`s**, with the
+column centres cached once per `mm.add` run and recomputed on
+`ScrollTrigger.refresh` (the panel is `cqw`-sized, so every resize moves every
+centre). **Never read a rect inside the move handler** — that is per-frame
+layout thrash. The cache is keyed on **`pageX`, not `clientX`**, so a vertical
+scroll cannot invalidate it. The dim runs on **index change only**, tracked
+against a `last` index, not on every move.
+
+**`gsap.quickTo` drives the pill's `x`** — it is built for a continuously
+retargeted value, and nothing here ever needs to *reverse* a tween, which is the
+one thing `quickTo` cannot do.
+
+**`quickTo` is NOT usable at `duration: 0`, and this was measured rather than
+assumed.** Its tween is created paused with a `"+=0.1"` placeholder and driven
+by `resetTo` (`gsap-core.js:4179`); at zero duration the first reduced-motion
+probe read the pill **308.59 px** from the hovered column — it had not moved at
+all — while the text and the dim both landed correctly. The reduce branch
+therefore writes the value with `gsap.set`. The dim's plain `gsap.to` at
+`duration: 0` works fine and is left as one channel.
+
+**Reduced motion keeps the readout and drops the motion** — listeners still
+bound, every channel instant. **This is a deliberate divergence from the
+capabilities section's "reduce gets nothing at all", and the reason is that this
+hover carries *information* rather than decoration**: it is exactly how the CSS
+hovers on `/journal` and the article cards already behave
+(`motion-reduce:transition-none` keeps the hover state and makes it instant).
+
+**Both tweens are built eagerly inside the `mm.add` handler; only the listener
+binding is gated**, on the entrance timeline's `onComplete`. The entrance writes
+`opacity` and `y` on the same pill, so a hover mid-entrance must be inert — and
+the journal-mark fix proved that "bind it later" is the correct half and "create
+it later" is the crash. **No `contextSafe` anywhere in this file**, per the
+standing rule.
+
+**`hasHover: "(hover: hover)"` is a named condition** alongside the existing
+`reduceMotion` / `fullMotion` pair — a JS pointer handler gets none of the
+`@media (hover:hover)` wrapping Tailwind v4 gives its `hover:` utilities, so
+nothing sticks on touch.
+
+**No `globals.css` change.** The rest state is correct and visible with
+JavaScript off, so there is nothing to hide; `[data-chart-pill]`'s existing
+`opacity: 0` rule is untouched and still owned by the entrance.
+
+**Accessibility — a recorded decision, not an oversight.** No keyboard
+affordance, no `<table>` view, no ARIA change. This is a decorative product
+mockup in a marketing hero: it presents no information the page's argument
+depends on, its numbers are fiction, and its peak value stays visible at rest
+without any interaction — the sense in which the readout enhances and never
+gates. Making the 33 bars focusable would put 33 tab stops in front of the
+site's first CTA.
+
+#### Measured in the production build
+
+Against a worktree build of `659725a`, servers on 3013 / 3012.
+
+| | 375 | 800 | 1280 |
+| --- | --- | --- | --- |
+| page height | **6350** | **6006** | **5595** |
+| settled `AE` @ 5 % fuzz, outside the cloth box | **0** | **0** | **0** |
+| inside the cloth box | 62.9 | 0 | 0 |
+
+Page heights are the recorded numbers **unchanged** — a hover that writes
+`scaleX` and `opacity` is not layout, so any movement here would be a bug. The
+cloth-box remainder is the scrubbed capabilities parallax at a different phase;
+**never quote a bare page-wide `AE` for `/`**.
+
+At 1280, `pointermove` dispatched at the measured centre of bars 0, 8, `PEAK`,
+24 and 32:
+
+| bar | 0 | 8 | 20 (`PEAK`) | 24 | 32 |
+| --- | --- | --- | --- | --- | --- |
+| pill-centre error | **−0.01 px** | −0.01 | −0.01 | −0.01 | −0.01 |
+| pill text | `35` | `63` | `220` | `165` | `112` |
+| hovered bar | `opacity 1`, `matrix(1.6, 0, 0, 1, 0, 0)` at every one | | | | |
+| the other 32 | `opacity 0.28` exactly, at every one | | | | |
+
+**The pill is never clipped at the extremes**: at bar 0 it spans 233.8–260.6 and
+at bar 32 1053.4–1086.2, both inside the panel's 184.1–1095.9, and the whole
+ancestor chain computes `overflow: visible`. **Nothing in that chain may become
+`overflow-hidden`.**
+
+**Rest is restored exactly.** After `pointerleave` the pill returns to
+`32.78×19 +745+781.03` reading `220` — its pre-hover rect to the pixel — and all
+33 bars to a single `opacity 1` / `scaleX 1.000`. **Mid-entrance hover is
+inert**: a `pointermove` 120 ms into the entrance leaves the pill reading `220`.
+
+**Reduced motion** at 30 ms after the move: text `63`, pill-centre error
+**−0.008 px**, hovered bar `1`, others `0.28`. **JavaScript off**: pill at
+`32.78×19 +745+781.03` reading `220`, all bars `opacity 1`, `transform: none`
+with the CSS `translate: -50%` intact, and no listener. **Touch** (`hover:
+hover` forced false): no listener bound, pill unmoved at `220`.
+
+**Four `/` ⇄ `/journal` round trips, each with a full scroll pass and four
+hovers over the chart before navigating: zero page errors and zero console
+errors.** That is the surface both `contextSafe` crashes came from.
+
+#### Impact
+
+**`/` is the only route whose prerendered HTML changes**, and its markup diffs
+are exactly the hover hooks — one `data-chart-plot` and 33 `data-chart-col`
+attributes. Verified by substitution: with those 34 attributes stripped, `/` is
+**byte-identical** to the base build. No class string changed, so there is **no
+RSC flight-payload re-segmentation to see through**, and the other **15 pages
+are byte-identical** once the build id and the CSS and JS chunk names are
+normalised, with no stripping and no substitution.
+
+**Every route keeps its exact chunk set** — `/`, `/journal`, `/about`,
+`/careers` and the three job listings 10, the rest 9, the two error pages 8 —
+and every route's chunk **bytes** are identical except `/`: **787 103 → 788 439
+raw (+1 336)** and **245 661 → 246 137 gzipped (+476)**.
+
 ### `Reveal` — the page reveals
 
 `app/_components/motion/reveal.tsx`:
@@ -4225,6 +4402,14 @@ tween on that element must land on the authored angle explicitly. Probe
 `getComputedStyle(el).rotate` before and after the tween to see it happen.
 Corollary: a CSS start state that combines a perspective with an authored
 `rotate` decomposes into a spurious `rotationX` the tween never clears.
+
+**`gsap.quickTo` does not work at `duration: 0`.** Its tween is created paused
+with a `"+=0.1"` placeholder and driven by `resetTo`
+(`gsap-core.js:4179`); at zero duration the value is simply never written. A
+reduced-motion branch that "keeps the readout and drops the motion" must write
+the value with `gsap.set` instead — a plain `gsap.to` at `duration: 0` is fine.
+Measured on the emissions chart's hover: the pill sat 308.59 px from the
+hovered column while its text and the bar dim both landed.
 
 **Every GSAP callback runs with its creating context active.** `_callback`
 (`gsap-core.js:981`) does `context && (_context = context)` before invoking
