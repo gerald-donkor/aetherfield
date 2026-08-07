@@ -43,6 +43,7 @@ skips the read will re-derive it by hand or silently break it.
 | `docs/motion-homepage.md` | GSAP on `/` — `Reveal`, the emissions chart and its hover readout, the journal mark, the hero split, the Capabilities section |
 | `docs/motion-site.md` | motion everywhere else — `/journal`, the card hovers, the footer's split blur-in, `/about`, `/careers`, the navbar drop-in, `/job-listing` |
 | `docs/site-affordances.md` | the pointer cursor on buttons |
+| `docs/backend.md` | the backend build record — the Neon resource, the connection split, `lib/db/`, the phase-one schema's column types and enums, the migrations, `.env.example` |
 | `docs/automation.md` | **read before measuring anything** — comp geometry, crop fitting, `magick` recipes, screenshotting, reading reference recordings, build diffing, GSAP source traps, port and worktree gotchas |
 
 # Invariants
@@ -187,12 +188,15 @@ Scripts that currently exist in `package.json`:
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
 - `npm run typecheck` — `tsc --noEmit`
+- `npm run db:generate` — Drizzle Kit: write a migration from `lib/db/schema.ts`
+- `npm run db:migrate` — apply pending migrations over the **direct** connection
+- `npm run db:studio` — Drizzle Studio against the same direct connection
 
 Report the exact command output; never claim a check passed without running it.
 
-> **Gaps to flag, not to invent.** There is no test, database, migration or
-> email-preview script. Build step 1 adds the database ones and step 3 the email
-> one, each updating this list **in the same change**; **never reference a script
+> **Gaps to flag, not to invent.** There is no test or email-preview script.
+> Build step 3 adds the email one, updating this list **in the same change**;
+> **never reference a script
 > name before it exists.** Because only Next.js auto-loads `.env.local` (§7.3),
 > any script reaching the database or a provider is written as
 > `dotenv -e .env.local -- <command>` from the day it is added.

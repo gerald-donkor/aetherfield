@@ -474,6 +474,28 @@ cp -al node_modules ../aetherfield-base/node_modules
 Run the two servers side by side (`3001` new, `3002` base) and screenshot both.
 Remove the worktree and `git worktree prune` when done.
 
+**A left-over `../aetherfield-base` poisons the comparison twice over, and both
+failures are silent.** Hit in prompt 37. `git worktree add` prints
+`fatal: '../aetherfield-base' already exists` and *stops* — but a following
+`&& npm run build` in the same chain still runs, so the "base" build is an
+older commit's. And `cp -al node_modules ../aetherfield-base/node_modules` with
+the destination **already present** copies *into* it
+(`…/node_modules/node_modules`), leaving the previous session's stale tree in
+place; the base build then differs in Next's own framework chunks — two
+219,239-byte chunks against 148,868 — which looks exactly like a bundle
+regression from the change under test. So, before trusting a base build:
+
+```
+git worktree list                      # confirm the path and the commit
+git -C ../aetherfield-base log --oneline -1
+rm -rf ../aetherfield-base/node_modules && cp -al node_modules ../aetherfield-base/node_modules
+```
+
+With a clean base at the right commit, an `app/`-free change is **byte-identical
+on all 16 prerendered pages with only `.next/BUILD_ID` normalised** — the chunk
+filenames match too, because Turbopack's names are deterministic for the same
+commit and the same `node_modules`. Anything less than that is a finding.
+
 **A client component reached from a shared barrel lands in every page's
 `<script>` list.** After adding one, always check the chunk graph, not just the
 markup:
