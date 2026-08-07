@@ -395,47 +395,96 @@ mistaken client import a **build** error rather than a leaked key at runtime.
 **Not `runtime = "edge"`.** Fluid Compute runs in the same regions at the same
 price with full Node.js, streaming and SSE included. Edge is a downgrade here.
 
-## 7.2 The provisioned providers
+## 7.2 The chosen providers
 
-Chosen by the procedure in 7.4, on 7 Aug 2026. **Not provisioned yet** — the
-decision is recorded; `vercel integration add` has not been run, and the project
-is not yet linked.
+Chosen by the procedure in 7.4, on 7 Aug 2026. **Nothing is provisioned yet** —
+these are decisions on record; `vercel integration add` has not been run and the
+project is not linked.
 
 | need | provider | package | resolved by |
 | --- | --- | --- | --- |
 | relational data | **Neon Postgres** | `@neondatabase/serverless` | `vercel:vercel-storage` — the preferred Marketplace path for SQL, and what the sunset `@vercel/postgres` became |
 | transactional email | **Resend** | `resend` | `vercel:marketplace` `discover --category messaging` — the **only** result |
-| authentication | **Clerk** | `@clerk/nextjs` v7 (Core 3) | `vercel:auth` — native Marketplace, auto-provisioned env vars, unified billing |
+| authentication | **Better Auth** v1.6 | `better-auth` | see below — chosen over Clerk on the user's explicit "best and free" criterion |
 | rate limiting | **Upstash Redis** | `@upstash/redis` + `@upstash/ratelimit` | `vercel:vercel-storage` — §8.2 requires a limiter on every public write path, and a Postgres counter is the wrong tool |
 
 `@vercel/postgres` and `@vercel/kv` **no longer exist** as first-party products.
 Do not import either; do not reintroduce them from training data.
 
-## 7.3 The traps these four carry
+### Why Better Auth and not Clerk
 
-Each cost someone a debugging session. All four are one line away from being hit.
+**This overrides the `vercel:auth` skill, which recommends Clerk.** That skill
+answers "what integrates best with Vercel"; the user asked "what is best and
+free", and the answers differ. Do not silently revert to Clerk on a later
+session because a skill recommends it.
 
-- **`middleware.ts` is `proxy.ts` in Next 16.** Clerk's own docs and every
-  tutorial say `middleware.ts`. This project is on 16.2, where the file is
-  renamed. `clerkMiddleware()` goes in **`proxy.ts`**, and the matcher must skip
-  the static marketing routes or every prerendered page pays for auth.
-- **Clerk Core 3's `auth()` is async** — `const { userId } = await auth()`.
-  `auth.protect()` is called directly and awaited, not read off `auth()`'s
-  return. `authMiddleware()` is removed. `npx @clerk/upgrade` codemods the rest.
-- **`<ClerkProvider>` goes inside `<body>`, not wrapping `<html>`**, wherever
-  Cache Components are in play. Core 3 no longer forces dynamic rendering, which
-  is the *only* reason §8.1's prerender guarantee survives adding auth — verify
-  it with the route table rather than assuming it.
+Better Auth is MIT, self-hosted, and has **no MAU meter at all** — sessions live
+in the Neon database this project is already provisioning, so auth adds zero
+infrastructure and zero cost. Two things decided it, and neither is price:
+
+1. **Clerk's free tier cannot remove Clerk branding** (Hobby: 50,000 MRU, but
+   MFA, passkeys, SSO and branding removal are Pro at $25/mo). This repo is
+   thirty-six prompts of comp-matched design engineering with a settled footer
+   and a fitted nav; a third party's badge on the sign-in page is a real
+   mismatch, and the fix is a subscription.
+2. **Phase two is multi-tenant.** Better Auth ships organizations, access
+   control and multi-session in core, free — exactly the §5 build-list item.
+
+The accepted cost is that **we own the sign-in, reset and verify screens**,
+built from the existing primitives in `app/_components/`. Treat that as design
+work under the front-matter rules, not as scaffolding.
+
+**Better Auth is a library, not a Marketplace integration** — 7.4's provisioning
+procedure does not apply to it. There is nothing to `add` and nothing to bill;
+generate `BETTER_AUTH_SECRET` locally.
+
+## 7.3 The traps these carry
+
+Each of these contradicts what a model writes from memory, and each is one line
+away from being hit.
+
+**Next.js 16**
+
+- **`middleware.ts` is `proxy.ts` in Next 16.** Every auth tutorial, Better
+  Auth's own docs included, says `middleware.ts`. On 16.2 that file is renamed,
+  and a `middleware.ts` here is a file the framework never loads — auth would
+  look configured and enforce nothing.
+- **`headers()` and `cookies()` are async.** Session reads are
+  `auth.api.getSession({ headers: await headers() })`.
+
+**Better Auth**
+
+- **`getSessionCookie()` performs no validation — anyone can forge that cookie.**
+  It exists for an *optimistic redirect* in `proxy.ts` and nothing more. The
+  real check belongs on every protected page and in every action, which is
+  §6.2's rule restated: hiding a route is presentation, never enforcement.
+- **Mounted as a catch-all Route Handler** at `app/api/auth/[...all]/route.ts`
+  via `toNextJsHandler(auth)`. This is the **one sanctioned exception** to
+  §6.2's "Route Handlers are for external callers only" — the auth client is the
+  caller, the handler is the library's own mount point, and no business logic of
+  ours goes in it.
+- **`BETTER_AUTH_SECRET` must be at least 32 characters.** `BETTER_AUTH_URL` is
+  the app's base URL. Rotation uses `BETTER_AUTH_SECRETS`, plural.
+- **`npx auth@latest migrate` is Kysely-only.** On any ORM adapter it is
+  `generate`, which writes schema or SQL for us to apply — it does not touch the
+  database. Do not expect `migrate` to work and do not skip applying the output.
+
+**Neon**
+
 - **Never wrap the database client in a `Proxy`.** The idiomatic-looking lazy
-  `Proxy` breaks any library that inspects the adapter object — the request
-  chain hangs with no error. Use a plain `getDb()` with a module-level `let`.
+  `Proxy` breaks any library that inspects the adapter object — and Better Auth
+  is exactly such a library. The request chain hangs with **no error**. Use a
+  plain `getDb()` over a module-level `let`.
 - **`neon()` throws at import time when `DATABASE_URL` is unset**, and Next
   evaluates top-level module code during `next build`. Initialise lazily or the
   first build without env vars fails.
 - **Nothing but Next.js auto-loads `.env.local`.** `drizzle-kit`, `tsx` and any
   seed or migration script need `dotenv -e .env.local --` in front of them.
-- **A CV is `access: 'private'` Blob**, read back through `get()` and a
-  short-lived signed URL — never `access: 'public'` (§8.3).
+
+**Blob**
+
+- **A CV is `access: 'private'`**, read back through `get()` and a short-lived
+  signed URL — never `access: 'public'` (§8.3).
 
 ## 7.4 The resolution procedure
 
@@ -502,6 +551,14 @@ of comp-fitting sit behind it. **ARTICLES and JOBS stay as typed constants in
   `NavDrop` and `FooterMotion` do — it takes the settled element over and adds
   no box. The bundle rule in the front matter applies unchanged: client leaves
   stay component-only.
+- **Auth adds no root provider.** Better Auth reads the session server-side and
+  needs nothing wrapped around `app/layout.tsx`, so the nine static routes have
+  no reason to go dynamic — which is a large part of why it survives §8.1 at all
+  (a provider around the root layout is the usual way auth quietly knocks a
+  whole site off its prerender). Nothing in phase one may introduce one, and
+  `proxy.ts`'s matcher must **skip the marketing routes** rather than match all
+  and exclude — the difference is whether a static page pays for auth per
+  request.
 - The verification is the existing one — `npm run build`, confirm the route
   table above, then diff the prerendered HTML per `docs/automation.md`, with the
   standing warning about `/`, `/journal` and `/careers` still in force.
