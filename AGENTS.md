@@ -346,13 +346,54 @@ this while a phase-one step is unbuilt.**
 ### Do not overbuild
 
 No second design system. No separate backend service or framework. No admin
-panel beyond step 7. No public API, no billing, no AI features, no
-marketing-automation platform, no analytics product. **No feature that is not a
-step above** — if it seems necessary, say so and ask rather than adding it.
+panel beyond step 7. No public API, no billing, no marketing-automation
+platform, no analytics product. **AI is bounded by §5.3, not banned.** **No
+feature that is not a step above** — if it seems necessary, say so and ask
+rather than adding it.
 
 **The sequence is a dependency graph, not a schedule.** It says what must exist
 before what, and nothing about dates. Every rule in this file applies on every
 step regardless of phase.
+
+## 5.3 AI — where it is sanctioned, and the line it never crosses
+
+**Phase one uses no AI at all.** Nothing in steps 1–7 benefits from it, and
+adding it to a form, a validation or an email is out of scope.
+
+Phase two has three genuine surfaces. They are **sanctioned, not scheduled** —
+each is a part of its step, not a step of its own:
+
+| step | surface | shape |
+| --- | --- | --- |
+| 9 | mapping arbitrary vendor CSV headers onto the schema | structured extraction |
+| 10 | matching a messy activity description to the right emission factor — *"Diesel #2, 500 gal, Fleet ops"* | embeddings + rerank, **not** generation |
+| 13 | ESG report narrative over already-computed figures | generation |
+
+### The hard rule
+
+**An LLM never produces a number that appears in a disclosure.** These figures
+go into regulatory filings, and a plausible invented number is the single worst
+failure this product can have.
+
+- **All arithmetic is deterministic**, in `lib/domain/`'s pure functions (§6.2).
+  A model may select a factor; it never multiplies by one.
+- A model's output is **a suggestion with a confidence and a provenance**, not a
+  committed value. Step 9's mappings and step 10's factor matches are reviewable,
+  and a low-confidence match is **surfaced, never silently accepted**.
+- Step 13's narrative is generated **from computed figures passed as context**,
+  and every figure in the prose must trace to one. A report is a reviewed draft;
+  nothing auto-publishes.
+- Never send a tenant's raw activity data to a third-party model without an
+  explicit recorded decision — it is a customer's commercial data (§8.3's
+  reasoning, extended to phase two).
+
+### Choosing a provider
+
+**Not now.** It is resolved at step 9 via §7.4, through the **`vercel:ai-sdk`**
+skill and AI Gateway — which is where model routing, fallback and cost tracking
+belong. Model IDs, prices and limits move fast enough that anything written here
+today would be wrong by then (§12, rule 7). **Do not install an AI SDK, name a
+model, or scaffold a prompt before step 9.**
 
 ---
 
