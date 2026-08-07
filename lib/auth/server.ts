@@ -27,6 +27,15 @@ function createAuth() {
       // Deliberately false until step 3 can send verification email.
       requireEmailVerification: false,
     },
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID as string,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+      },
+    },
+    account: {
+      encryptOAuthTokens: true,
+    },
     user: {
       additionalFields: {
         role: {

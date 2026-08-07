@@ -365,3 +365,93 @@ database rate limiting is active in the meantime.
   for it all returned zero.
 - `vercel env ls` confirmed `BETTER_AUTH_SECRET` and the Development
   `BETTER_AUTH_URL` by name. No value is quoted here.
+
+---
+
+## Step 6 extension — Google authentication on `/sign-up`
+
+Implemented by prompt 41 on 7 Aug 2026 at the user's direction. This extends
+the existing Better Auth work; it is not a new build step and adds no package,
+route, table or migration.
+
+### Provider and security configuration
+
+`lib/auth/server.ts` now configures Better Auth's built-in Google provider from
+the server-only `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` variables. The
+auth factory remains request-lazy, so the production build does not construct
+the provider or database pool while collecting routes. Google's default
+`email profile openid` identity scopes are the only ones requested.
+
+`account.encryptOAuthTokens: true` encrypts any access, ID or refresh tokens
+Better Auth stores, using the existing auth secret. The installed generated
+`account` schema already contains the provider identity and token columns, so
+no schema generation or Drizzle migration was required.
+
+Default verified-email account linking remains unchanged. Google was not added
+to `trustedProviders`, different-email linking was not enabled, and Google
+profile data is not configured to overwrite an existing local profile. The
+non-input nullable role still applies to social signup, so the browser cannot
+request `staff` or `admin`.
+
+### Signup client leaf
+
+`app/_components/auth/sign-up-form.tsx` adds a 52px full-width `Continue with
+Google` control and `OR CREATE WITH EMAIL` separator above the existing fields.
+The control uses the established white, ink, border, surface and accent tokens
+and has hover, focus-visible, pending and disabled treatments. No Google SDK,
+remote script, image, root provider or additional client boundary was added.
+
+One discriminated pending state prevents Google and email attempts racing.
+Google initiation calls `signIn.social()` with `/account` as the successful
+destination and `/sign-up` as the error destination. A callback failure is
+reduced to one generic live-status message; the machine-readable `error` and
+provider `error_description` parameters are removed with `history.replaceState`
+and never rendered. The existing status region receives focus. The route does
+not use `useSearchParams`, so `/sign-up` remains static.
+
+### Environment and callback state
+
+`.env.example` records names and the callback rule only; it contains no value.
+The real `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` exist in `.env.local` and
+Vercel Development. Vercel lists both as Development-only and non-sensitive;
+its extra Sensitive mode is unavailable for Development variables. Production
+and Preview deliberately do not have either variable because neither has an
+honest `BETTER_AUTH_URL` yet.
+
+The configured Development callback is exactly
+`http://localhost:3000/api/auth/callback/google`. A live Better Auth initiation
+returned 200 and generated that redirect URI, the three default identity
+scopes, PKCE, state and a client id. Loading the generated authorization URL
+reached Google's normal account surface with neither `redirect_uri_mismatch`
+nor `invalid_client`. No client id, secret, state, verifier or token was printed
+or recorded.
+
+### Verified, prompt 41
+
+- `npm run typecheck` exited 0 with `tsc --noEmit`; `npm run lint` exited 0
+  with `eslint`.
+- `npm run build` exited 0 on Next 16.2.12. `/sign-up` and `/sign-in` remain
+  ○ Static; `/account` and `/api/auth/[...all]` remain ƒ Dynamic; every
+  pre-existing marketing route retains its previous render mode.
+- The clean parent-commit prerender comparison stripped RSC flight scripts and
+  normalised generated chunk names. Seventeen HTML files — every marketing
+  route, `/sign-in`, `/design-system`, `_not-found` and `_global-error` — are
+  identical. Only `sign-up.html` changes, first at the inserted Google button.
+  The gitignored Tailwind and Drizzle documentation snapshots were temporarily
+  moved for the implementation build and restored before the result was
+  trusted.
+- Headless layout checks at 375px and 1280px measured the Google control at
+  52px high, form widths of 287px and 504px, no horizontal overflow, and focus
+  order Google, name, email, password, email submit. Both screenshots were
+  inspected; the label, separator and focus geometry are unclipped.
+- A synthetic OAuth error proved `/sign-up` removes its query, renders only the
+  generic message and focuses the live-status region. This tests application
+  handling, not a real denial at Google's consent screen.
+- Email/password regression returned 200 for signup, authenticated `/account`,
+  sign-out, sign-in and authenticated `/account` again. The synthetic user had
+  `role=none` and one credential account. It was deleted afterwards; its user,
+  account and session counts all returned zero.
+- A complete new-user Google login, returning-user login and verified-email
+  link were not exercised because no interactive Google test-account access
+  was available. No Google-backed user or OAuth token was created during these
+  checks; those three outcomes remain an operational browser check.
