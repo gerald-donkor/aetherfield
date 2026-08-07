@@ -387,7 +387,7 @@ mistaken client import a **build** error rather than a leaked key at runtime.
 - **Tailwind CSS 4** — config-less, `@theme` in `app/globals.css`.
 - **Zod** — one schema per input, shared between the client form and the Server
   Action so the rules exist once.
-- **Vercel Blob** — CV and document upload. Native to the platform, not a
+- **Vercel Blob** (`@vercel/blob`) — CV and document upload. Native to the platform, not a
   Marketplace integration, and private by default.
 - **Vercel BotID** — bot protection on public write paths.
 - **Vercel** — hosting. Fluid Compute (the default), Node.js runtime.
@@ -395,45 +395,80 @@ mistaken client import a **build** error rather than a leaked key at runtime.
 **Not `runtime = "edge"`.** Fluid Compute runs in the same regions at the same
 price with full Node.js, streaming and SSE included. Edge is a downgrade here.
 
-## 7.2 Unresolved — and the procedure that resolves them
+## 7.2 The provisioned providers
 
-**Three providers are deliberately not named yet.** Naming one from memory is
-the failure mode this section exists to prevent, and hardcoding a vendor SDK is
-forbidden (section 8).
+Chosen by the procedure in 7.4, on 7 Aug 2026. **Not provisioned yet** — the
+decision is recorded; `vercel integration add` has not been run, and the project
+is not yet linked.
 
-| need | resolved by | status |
-| --- | --- | --- |
-| database | the **`vercel:vercel-storage`** skill | **pending** |
-| transactional email | **`vercel:marketplace`**, category `messaging` | **pending** |
-| authentication | the **`vercel:auth`** skill | **pending** |
+| need | provider | package | resolved by |
+| --- | --- | --- | --- |
+| relational data | **Neon Postgres** | `@neondatabase/serverless` | `vercel:vercel-storage` — the preferred Marketplace path for SQL, and what the sunset `@vercel/postgres` became |
+| transactional email | **Resend** | `resend` | `vercel:marketplace` `discover --category messaging` — the **only** result |
+| authentication | **Clerk** | `@clerk/nextjs` v7 (Core 3) | `vercel:auth` — native Marketplace, auto-provisioned env vars, unified billing |
+| rate limiting | **Upstash Redis** | `@upstash/redis` + `@upstash/ratelimit` | `vercel:vercel-storage` — §8.2 requires a limiter on every public write path, and a Postgres counter is the wrong tool |
 
-The procedure, in order, and it is not optional:
+`@vercel/postgres` and `@vercel/kv` **no longer exist** as first-party products.
+Do not import either; do not reintroduce them from training data.
 
-1. The Vercel CLI must be installed — `npm i -g vercel` — and the project
-   linked. Without it, steps 2–4 cannot run.
-2. Load the skill named above for that need. Storage, auth and AI have
-   **dedicated skills** and do not go through the Marketplace catalog;
-   everything else does.
+## 7.3 The traps these four carry
+
+Each cost someone a debugging session. All four are one line away from being hit.
+
+- **`middleware.ts` is `proxy.ts` in Next 16.** Clerk's own docs and every
+  tutorial say `middleware.ts`. This project is on 16.2, where the file is
+  renamed. `clerkMiddleware()` goes in **`proxy.ts`**, and the matcher must skip
+  the static marketing routes or every prerendered page pays for auth.
+- **Clerk Core 3's `auth()` is async** — `const { userId } = await auth()`.
+  `auth.protect()` is called directly and awaited, not read off `auth()`'s
+  return. `authMiddleware()` is removed. `npx @clerk/upgrade` codemods the rest.
+- **`<ClerkProvider>` goes inside `<body>`, not wrapping `<html>`**, wherever
+  Cache Components are in play. Core 3 no longer forces dynamic rendering, which
+  is the *only* reason §8.1's prerender guarantee survives adding auth — verify
+  it with the route table rather than assuming it.
+- **Never wrap the database client in a `Proxy`.** The idiomatic-looking lazy
+  `Proxy` breaks any library that inspects the adapter object — the request
+  chain hangs with no error. Use a plain `getDb()` with a module-level `let`.
+- **`neon()` throws at import time when `DATABASE_URL` is unset**, and Next
+  evaluates top-level module code during `next build`. Initialise lazily or the
+  first build without env vars fails.
+- **Nothing but Next.js auto-loads `.env.local`.** `drizzle-kit`, `tsx` and any
+  seed or migration script need `dotenv -e .env.local --` in front of them.
+- **A CV is `access: 'private'` Blob**, read back through `get()` and a
+  short-lived signed URL — never `access: 'public'` (§8.3).
+
+## 7.4 The resolution procedure
+
+This is how the table in 7.2 was produced, and how any future provider is
+chosen. It is not optional, and it runs **before** any code is written.
+
+1. Vercel CLI installed (`npm i -g vercel`) and the project linked.
+2. Load the skill that owns the need. **Storage, authentication and AI have
+   dedicated skills** — `vercel:vercel-storage`, `vercel:auth`, `vercel:ai-sdk`
+   — and do **not** go through the Marketplace catalog. Everything else does.
 3. For a Marketplace need: `vercel integration categories`, then
-   `vercel integration discover --category <slug>`. Both are read-only and need
-   no auth. Take the top relevant result unless the user names another provider.
-4. Provision it for real — `vercel integration add <name> --yes --no-claim`,
-   then `vercel env pull --yes`. If the provider hands off to a browser or
-   dashboard step, **stop and ask the user to finish it**, then continue.
-5. Build against the real environment variables. Record the choice and the
-   reasoning in `docs/backend.md`, and replace that row above with the decision.
+   `vercel integration discover --category <slug>`. Both are read-only. Take the
+   top relevant result unless the user names another provider.
+4. Provision for real — `vercel integration add <name> --yes --no-claim`, then
+   `vercel env pull --yes`. Provisioning creates billable resources: **ask the
+   user before running it.** If the provider hands off to a browser or dashboard
+   step, stop, ask them to finish it, and continue after.
+5. Build against the real environment variables, and record the decision and its
+   reasoning in `docs/backend.md`.
 
 **A mock is not a resolution.** A `.env.example` with sample data behind it is
 not an installed integration, and scaffolding a stand-in "to wire up later" is
-throwaway work — the integration provides the backend, and it is not
+throwaway work — the integration provides the backend and it is not
 provider-agnostic. Provision first, then build.
 
-## 7.3 Do not use
+## 7.5 Do not use
 
 - a separate backend framework or service, or a separate API server
 - `runtime = "edge"` (see 7.1)
 - a hand-wired provider SDK installed with `npm install` instead of provisioned
   through the resolution procedure above
+- **`@vercel/postgres` or `@vercel/kv`** — both are sunset and no longer exist
+- **a `Proxy` wrapper around the database client** (7.3)
 - an ORM, query builder or raw SQL outside `lib/db/`
 - a client-side data-fetching library on primary read paths
 - local JSON or filesystem storage for application data
