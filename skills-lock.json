@@ -133,6 +133,12 @@
       "skillPath": "skills/resend/SKILL.md",
       "computedHash": "8935525a4d7fa21298616b7c6150148a7df3afcfffd7ea9dca6fdac155fe0ece"
     },
+    "routing-middleware": {
+      "source": "vercel/vercel-plugin",
+      "sourceType": "github",
+      "skillPath": "skills/routing-middleware/SKILL.md",
+      "computedHash": "e5bf439f3d1c9674accdfed0b6870cdd932ef72167749cf4ee8c217fc3b90a9a"
+    },
     "tailwind-4-docs": {
       "source": "Lombiq/Tailwind-Agent-Skills",
       "sourceType": "github",

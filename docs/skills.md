@@ -250,11 +250,9 @@ These are installed *and* partly wrong for this project. Same class as the
   overrides. Its trigger regex is `next-auth|@auth/core|NextAuth\(|getServerSession\(`,
   so it will not fire on Better Auth code — but it is a second source of
   pressure toward Clerk, and §7.2 says not to silently revert.
-- **`nextjs`'s `proxy.ts` guidance chains to `routing-middleware`, which is not
-  installed.** `proxy.ts` is build step 6 work (§7.3, §8.1). The chain
-  dead-ends; `nextjs`'s own `references/file-conventions.md` still covers the
-  rename, so it is degraded, not absent. Installing an eighth skill was outside
-  prompt 40's approved subset — **it is an open question for step 6.**
+- ~~`nextjs`'s `proxy.ts` guidance chains to `routing-middleware`, which is not
+  installed.~~ **Resolved** — `routing-middleware` was installed on the user's
+  say-so once step 6 actually shipped `proxy.ts`. See below.
 - **`nextjs`'s internal links are broken upstream** — the body links
   `./file-conventions.md` etc., but every file lives in `references/`. Vercel's
   bug, present in their `upstream/SKILL.md` too. Look in `references/`.
@@ -289,9 +287,45 @@ stronger source where a broad provider skill is thin or misleading.
 | `@vercel/blob` | **covered well enough for step 5.** `vercel-storage` documents server and client uploads, `put`, `del`, `list`, and `get`, while its unrelated Neon advice must be ignored. | Load `vercel-storage`, then verify against the installed package when step 5 adds it. |
 | BotID | **still uncovered.** `vercel-firewall` contains no BotID guidance; it covers WAF rules, IP blocking, Attack Mode, and the firewall CLI. Calling that BotID coverage was a factual error in prompt 39 and is corrected here. | At build step 2, use first-party live docs or the installed BotID package surface. Do not infer the application-layer SDK from `vercel-firewall`. |
 
-No extra skill was installed from this audit. The only candidate raised was
-`routing-middleware`, because `nextjs` chains to it for `proxy.ts`; that belongs
-to the step 6 decision rather than this approved seven-skill subset.
+The audit raised one candidate — `routing-middleware`, because `nextjs` chains
+to it for `proxy.ts`. It was deferred as a step 6 decision at the time, and
+installed once step 6 shipped `proxy.ts` for real.
+
+## The eighth Vercel skill — `routing-middleware`
+
+Installed after prompt 40, from the same `vercel/vercel-plugin` upstream and
+tracked in `skills-lock.json` like the other seven. 16K, a single `SKILL.md`.
+
+It closes the dead-end chain and carries three things the `nextjs` skill only
+gestures at:
+
+- **The rename and its reason.** `middleware.ts` → `proxy.ts` in Next 16, the
+  exported function renamed `middleware` → `proxy`, motivated partly by
+  CVE-2025-29927 (middleware auth bypass via the `x-middleware-subrequest`
+  header). `middleware.ts` is still accepted in 16 but deprecated and warned
+  about.
+- **The codemod**: `npx @next/codemod@latest middleware-to-proxy`.
+- **Next 16 proxy is Node.js runtime only**, unlike framework-agnostic Vercel
+  Routing Middleware, which also runs on Edge and Bun.
+
+### Read its "NOT for auth" line correctly
+
+The skill's comparison table describes Next 16 Proxy as *"Network-boundary proxy
+needing full Node APIs. NOT for auth."* **That is a warning against
+*enforcement* in the proxy, and this repository already obeys it.** `proxy.ts`
+does call `getSessionCookie`, but only to redirect optimistically, with a
+comment saying so; `/account` performs the authoritative database-backed check.
+That is exactly what §7.3's `getSessionCookie()` trap and §11.2 rule 1
+prescribe.
+
+So the shipped `proxy.ts` is correct as written. **Do not read "NOT for auth" as
+licence to delete a working optimistic redirect** — and do not read it as
+permission to move the real check into the proxy either.
+
+Its `config.matcher` is `["/account"]` — a positive match, which is what §8.1
+requires ("skip the marketing routes rather than match all and exclude"), and
+which the skill's own guidance agrees is preferred because unmatched paths skip
+invocation entirely.
 
 ## Prompt 40 verification
 
