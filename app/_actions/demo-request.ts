@@ -1,11 +1,12 @@
 "use server";
 
-import { ipAddress } from "@vercel/functions";
+import { ipAddress, waitUntil } from "@vercel/functions";
 import { checkBotId } from "botid/server";
 import { headers } from "next/headers";
 import * as z from "zod";
 
 import { insertLead } from "../../lib/db/lead-queries";
+import { sendDemoRequestEmails } from "../../lib/email/demo-request";
 import { leadSource } from "../../lib/db/schema";
 import { checkDemoRequestLimit } from "../../lib/rate-limit";
 import {
@@ -103,8 +104,9 @@ export async function submitDemoRequest(
   // the authorised half of this feature.
 
   // -- e. Write -----------------------------------------------------------
+  let leadId: string;
   try {
-    await insertLead({
+    leadId = await insertLead({
       name: parsed.data.name,
       email: parsed.data.email,
       company: parsed.data.company,
@@ -116,9 +118,30 @@ export async function submitDemoRequest(
   }
 
   // -- f. Email -----------------------------------------------------------
-  // Deliberately absent. The confirmation and the internal notification are
-  // build step 3, which provisions Resend; 10 rule 4 ("a failed email never
-  // fails the write") has nothing to apply to until it exists.
+  /* **A failed email never fails the write** (AGENTS.md 10 rule 4). The lead
+     is committed above; everything below this line is best-effort and cannot
+     reach the returned `SubmitResult`. `sendDemoRequestEmails` returns void,
+     throws nothing, and logs its own failures without an address.
+
+     **Handed to `waitUntil`, not awaited, and that is a judgement.** There is
+     no deployment to measure a send against (`docs/backend.md`), so nothing
+     here is fitted. The reasoning: the dialog swaps to its success state on
+     this result, and making a person wait on a third party for work that is
+     explicitly best-effort is backwards — the lead is already safe. Outside a
+     Vercel request context `waitUntil` is a no-op and the already-started
+     promise simply floats, which is why the sends are still observable
+     against `next dev` (verified in `@vercel/functions@3.8.0`,
+     `get-context.js`: `globalThis[Symbol.for("@vercel/request-context")]`). */
+  waitUntil(
+    sendDemoRequestEmails({
+      leadId,
+      name: parsed.data.name,
+      email: parsed.data.email,
+      company: parsed.data.company,
+      message: parsed.data.message ?? null,
+      source: parsed.data.source,
+    }),
+  );
 
   return { ok: true };
 }

@@ -11,6 +11,15 @@ import { lead, type NewLead } from "./schema";
  * `0000_empty_starjammers.sql`, and `npm run db:generate` producing anything is
  * a signal that the schema was changed, not that this module needs one.
  */
-export async function insertLead(values: NewLead): Promise<void> {
-  await getDb().insert(lead).values(values);
+/**
+ * Returns the new row's id. Step 3 needs it: `lead.id` is the entity half of
+ * the Resend idempotency key (`demo-request-confirmation/<id>`), so two
+ * genuine requests key differently and a retry of one cannot double-send.
+ */
+export async function insertLead(values: NewLead): Promise<string> {
+  const [row] = await getDb()
+    .insert(lead)
+    .values(values)
+    .returning({ id: lead.id });
+  return row.id;
 }

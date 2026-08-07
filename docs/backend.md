@@ -758,3 +758,312 @@ production build run from localhost cannot complete a real challenge. That its
 wiring is correct is established by the challenge rewrites being in
 `routes-manifest.json` and the protect list being in the shipped client chunk;
 that it actually *blocks a bot* is an operational check on a deployment.
+
+---
+
+## Step 3 — transactional email, and §10 stage f
+
+Implemented by prompt 43 on 7 Aug 2026. **This is the second load-bearing step
+(§5.2): step 2 set the pattern every later form copies, and this sets the
+pattern every later email copies.** Steps 4 and 5 import `lib/email/`'s send
+helper rather than calling `resend` directly.
+
+### Resend is NOT provisioned through the Marketplace, and that is a decision
+
+`vercel integration discover --category messaging` returns exactly one product
+— `Resend email`, slug `resend/resend-email` — as §7.2 recorded. Then
+`vercel integration add resend --help` reports:
+
+```
+  Metadata options for "resend":
+    domain (required)
+      Domain for sending emails through Resend. Note: you must own a domain to be able to send.
+    region (required)
+      Options: us-east-1, eu-west-1, sa-east-1, ap-northeast-1   Default: us-east-1
+  Available billing plans for "Resend email":
+    free   Free (0.00)   pro    Pro ($20.00/month)   scale  Scale ($90.00/month)
+```
+
+**`domain` is required at provisioning time and Aetherfield owns no domain** —
+the same no-deployment, no-assigned-domain finding prompt 38 recorded above.
+Prompt 43's plan had assumed the Marketplace resource could be created without
+one and the sandbox sender used until a domain landed; the CLI does not allow
+that. Inventing a domain was refused (§12 rule 9).
+
+The user's decision, 7 Aug 2026: **create the Resend account directly and add
+`RESEND_API_KEY` by hand**, rather than pause the step and leave steps 4, 5 and
+7 blocked. Region `us-east-1` was chosen for whenever the Marketplace route
+does open, matching the Neon resource's `iad1`.
+
+**This is a recorded deviation from §7.4 and §7.5, not an oversight.** It is the
+one provider in this project not provisioned through the resolution procedure,
+and the reason is that the procedure is unsatisfiable without a domain. **When a
+domain is acquired, the correct move is to provision through
+`vercel integration add resend --plan free -m domain=<domain> -m region=us-east-1`
+and drop the hand-added variable** — nothing in `lib/email/` changes, because
+the only thing that changes is where `RESEND_API_KEY` comes from.
+
+### The sending domain is an unclosed prerequisite for deploying
+
+`lib/email/config.ts` sends from `Aetherfield <onboarding@resend.dev>`, Resend's
+sandbox sender. **It delivers only to the Resend account's own address**; every
+other recipient is refused with a 403 (`authorization_error`), per the `resend`
+skill's mistakes table, entries 11 and 12.
+
+Before this can be deployed:
+
+1. a domain must be acquired and verified in Resend;
+2. **SPF, DKIM and DMARC must be published** for it — Gmail and Yahoo reject
+   unauthenticated bulk mail outright (`email-best-practices`,
+   `deliverability.md`);
+3. `FROM` in `lib/email/config.ts` becomes `Aetherfield <hello@<domain>>`. The
+   `from` domain must **exactly** match the verified one — verifying
+   `send.example.com` and sending from `user@example.com` is a 403.
+
+Until then the internal notification works end to end and the requester's
+confirmation does not reach a requester. **Step 4 needs one thing more**: the
+newsletter is marketing, not transactional, so it carries `List-Unsubscribe` and
+`List-Unsubscribe-Post` and a working one-click unsubscribe (§8.3 rule 3). The
+demo-request confirmation deliberately carries neither — see below.
+
+### The contract, in file order
+
+Step 2's table, extended. The stage letters are `AGENTS.md` §10's.
+
+| file | role | server-only |
+| --- | --- | --- |
+| `lib/validation/lead.ts` | the shared Zod schema, the `SubmitResult` type, the field-error record | **no — deliberately** |
+| `lib/rate-limit/index.ts` | the Upstash client and limiter, lazily constructed | yes |
+| `lib/db/lead-queries.ts` | `insertLead()` — the only caller of Drizzle for this table | yes |
+| `lib/email/config.ts` | `FROM`, `internalRecipient()`, `replyTo()` — the only place an address is decided | yes |
+| `lib/email/send.ts` | `sendEmail()` — the lazy Resend client, both rendered parts, the typed outcome | yes |
+| `lib/email/templates/*.tsx` | the two messages | **no — deliberately** |
+| `lib/email/demo-request.ts` | `sendDemoRequestEmails()` — stage f for this one flow | yes |
+| `app/_actions/demo-request.ts` | the action: stages a, b, c, e, f | yes (`"use server"`) |
+| `app/_components/lead/demo-request-dialog.tsx` | the client leaf | client |
+| `instrumentation-client.ts` | BotID's client half | client |
+
+**A later form changes seven of those ten.** The three it does not are
+`lib/validation/lead.ts`'s `SubmitResult`, `lib/email/config.ts` and
+`lib/email/send.ts` — import them, do not restate them. Step 4 adds
+`lib/email/templates/newsletter-*.tsx` and a `lib/email/newsletter.ts` beside
+`demo-request.ts`; it does not touch `send.ts`.
+
+### `templates/` has no `server-only`, and that is deliberate
+
+§8.4 puts `import "server-only"` on every `lib/` module that touches a secret.
+The templates touch none — they are pure presentation over props. Keeping them
+importable outside the `react-server` export condition is what lets them be
+rendered and inspected on their own: `server-only`'s `index.js` throws
+unconditionally under any other condition, so a template carrying it cannot be
+rendered by any tool that is not the Next.js server bundle. `config.ts`,
+`send.ts` and `demo-request.ts` all read a secret or reach the network, and all
+three carry it.
+
+### Two API facts, both verified against `node_modules/` and both contradicting a skill
+
+**The Resend SDK does not generate a plain-text part.** `resend@6.18.1`,
+`dist/index.mjs:231-233`, is `if (email.react) { email.html = await render(email.react); email.react = void 0; }`
+— it sets `html` and sends **no `text` at all**. The `react-email` skill states
+"The Resend Node SDK automatically handles both HTML and plain-text rendering";
+against the installed version it does not. `lib/email/send.ts` therefore renders
+**both** parts itself, with `render(el)` and `render(el, { plainText: true })`,
+and never passes `react`. A plain-text alternative is required by
+`email-best-practices`' accessibility checklist, so this is not a nicety.
+
+**The SDK returns `{ data, error }` and does not throw for API errors.** The
+`try` around the send in `send.ts` is for transport failures (DNS, a dropped
+socket), which do throw. Both paths are handled; neither escapes.
+
+### `waitUntil`, not `await` — and it is a judgement
+
+`app/_actions/demo-request.ts` hands `sendDemoRequestEmails(...)` to `waitUntil`
+from `@vercel/functions` rather than awaiting it.
+
+**Judged, not measured.** There is no deployment, so no send latency was
+measured and nothing here is fitted. The reasoning: the dialog swaps to its
+success state on the action's result, and making a person wait on a third party
+for work §10 rule 4 defines as best-effort is backwards — the lead is already
+committed by then.
+
+Verified behaviour, from `@vercel/functions@3.8.0`: `wait-until.js` is
+`getContext().waitUntil?.(promise)` and `get-context.js` is
+`globalThis[Symbol.for("@vercel/request-context")]?.get?.() ?? {}`. **Outside a
+Vercel request context the call is a no-op and the already-started promise
+simply floats**, which is why the sends are still observable against
+`next dev` — that is how the checks below were run. `sendDemoRequestEmails`
+therefore wraps its own body in `try`/`catch`, because an escaping rejection
+would be unhandled rather than caught by a caller.
+
+### Idempotency: used, keyed on `lead.id`
+
+`<event-type>/<entity-id>`, the format the `resend` skill documents:
+`demo-request-confirmation/<lead.id>` and `demo-request-notification/<lead.id>`.
+Keys expire after 24 hours, max 256 characters; the same key with the same
+payload returns the original response without resending, and with a *different*
+payload returns 409.
+
+**`insertLead()` was changed to return the new row's id** for this. `lead.id` is
+the right entity: two genuine requests are two rows and key differently, so both
+send, while a retry of one request cannot double-send. A hash of the address
+would have wrongly collapsed two real requests from the same person. There is no
+retry loop in phase one (§10 rule 4, and the "no retry queue" non-goal), so the
+key is insurance rather than load-bearing today.
+
+### The two templates
+
+Both are single-column, inline-styled, and **not a design system** (§7.5). The
+`react-email` `Tailwind` wrapper is deliberately unused: its classes have to be
+inlined at render time, which pulls the whole `tailwindcss` package into the
+server bundle, and two plain messages do not earn that. The four colour
+literals in `lib/email/templates/shared.tsx` are copied from `app/globals.css`'s
+`@theme` and are the only place in the repository they are restated.
+
+| template | to | subject |
+| --- | --- | --- |
+| `demo-request-confirmation.tsx` | the requester | `Your Aetherfield demo request` |
+| `demo-request-notification.tsx` | `LEAD_NOTIFICATION_EMAIL` | `Demo request — <company>` |
+
+The confirmation's second paragraph is the dialog's own success copy verbatim,
+so the screen and the inbox do not say two different things. **It carries no
+unsubscribe, and that is correct**: `email-best-practices`' `email-types.md`
+classifies a confirmation of a user-initiated action as transactional, and puts
+an unsubscribe on one in the "problematic hybrid" category. Step 4's newsletter
+is the marketing path.
+
+The notification carries the lead's name, work email, company, message **and
+`source`** — the whole reason `lead_source` exists (§9.1) — and sets `replyTo`
+to the requester's own address, so replying in the inbox reaches the person.
+
+**No domain is named in the copy.** Aetherfield has none, and a fabricated
+address in front of a real person is exactly §12's failure mode.
+
+Accessibility, verified from the rendered HTML rather than asserted:
+`<html dir="ltr" lang="en">`, a `<title>` carrying the preview text (not the
+brand name), `dir`/`lang` repeated on `<body>` because several clients strip
+them from `<html>`, `role="presentation"` on every layout table React Email
+emits, exactly one `<h1>`, no images and no links (so no `alt` and no link-text
+question), body text `#000000` on `#ffffff` and the muted `#6c6c6c` at 5.32:1 —
+both past WCAG AA's 4.5:1.
+
+### Environment and personal data
+
+`.env.example` adds two names: `RESEND_API_KEY` and `LEAD_NOTIFICATION_EMAIL`.
+Both server-only. **No `NEXT_PUBLIC_*` was added; phase one still has none.**
+`LEAD_NOTIFICATION_EMAIL` unset is a supported state — the notification is
+skipped with a log line naming no address, not crashed and not sent to a guessed
+fallback. §8.4's table is extended for it in the same change.
+
+**This step transmits personal data to a third party for the first time in this
+project's history.** On every successful demo request, the requester's name,
+work email, company and free-text message go to Resend over TLS. Resend retains
+them in its own logs under its own policy; **we control none of that retention
+and have configured nothing about it.** No Resend webhook, no delivery-event
+handler, no contacts or audiences — this project sends and never receives
+(`docs/skills.md` records `agent-email-inbox` as deliberately excluded).
+
+**Stores nothing new.** No column, no table, no send-audit table, no migration.
+
+The email is unreachable by an unvalidated request: it runs only after BotID,
+the rate limit, the schema and the insert have all passed, which is a direct
+consequence of §10's a-b-c-then-write ordering. **The existing five-per-hour-per-IP
+limiter therefore also caps the send rate at five per hour per IP.** That is the
+mail-amplifier control, and it is worth naming the risk plainly: the
+confirmation goes to an attacker-supplied address, so this endpoint is a
+potential relay. Five per hour per IP is judged sufficient for a marketing
+site's demo form and, like the limit itself, **is a judgement and not a
+measurement** — revisit it against real traffic rather than treating it as
+fitted.
+
+### Verified, prompt 43
+
+Every result below was produced by running the command, on 7 Aug 2026.
+
+- `npm run typecheck` exited 0 with no output; `npm run lint` exited 0 with no
+  output.
+- `npm run build` exited 0 on Next 16.2.12. **The route table is unchanged**:
+  `/`, `/about`, `/careers`, `/design-system`, `/journal`, `/sign-in`,
+  `/sign-up` ○ Static; the six articles and three job listings ●; `/account`
+  and `/api/auth/[...all]` ƒ, as they already were. **No route became dynamic.**
+- **Prerender impact is `none`, and it was verified rather than assumed.**
+  `git diff --name-only -- app/` returns exactly one path,
+  `app/_actions/demo-request.ts`. No component, no page and no client module
+  changed, so no HTML diff was required under prompt 43's own condition.
+- **`npm run build` with `.env.local` moved aside exited 0** with the same route
+  table, proving `lib/email/`'s lazy client holds the guarantee `getDb()` and
+  the limiter do.
+- **The templates render, and both parts exist.** Rendered standalone through
+  `react-email`'s `render()`. The confirmation's plain-text part, verbatim:
+
+  ```
+  Aetherfield
+
+  WE HAVE YOUR DEMO REQUEST
+
+  Ada Whitfield, thank you for the request.
+
+  Someone from the team will be in touch to arrange a walkthrough of how
+  Aetherfield fits your reporting. You can reply to this message directly if
+  there is anything you would like us to cover.
+
+  You are receiving this because you requested a demo on the Aetherfield
+  website. It is a one-off confirmation, not a subscription.
+  ```
+
+  The notification's plain-text part carries every field including
+  `Source / Homepage hero`.
+- **A failed send does not fail the write.** Forced with
+  `RESEND_API_KEY=re_invalid_key_for_check_4` against the dev server. The
+  action returned `1:{"ok":true}` over the wire; the row landed as
+  `47f40b0b-3aa1-497b-9f2e-fee71114bc0c` with the address stored lowercased and
+  `source = hero`; and both sends logged and nothing else:
+
+  ```
+  [email] send failed for lead 47f40b0b-…: demo-request-confirmation:validation_error
+  [email] send failed for lead 47f40b0b-…: demo-request-notification:validation_error
+  ```
+
+  No address, no subject, no body — the template name and Resend's error class.
+  The test row was deleted afterwards (`deleted 1`).
+- **`lib/email/` logs nothing personal**, but **the grep is not zero, and step
+  2's claim above is now stale.** Next 16.2.12's dev server traces Server Action
+  *arguments*, so the dev log contains:
+
+  ```
+  └─ ƒ submitDemoRequest({"company":"Check Four Ltd","email":"Prompt43.Check4@Example.COM", …}) in 13536ms app/_actions/demo-request.ts
+  ```
+
+  That is framework dev-only instrumentation, not application logging, and it
+  does not exist in a production build. §8.3 rule 2 binds our code, and our
+  code's only output is the two `[email]` lines above. **Do not repeat step 2's
+  "grepping the dev server log returned 0" as a check on Next 16** — it will not
+  be 0 for any Server Action that takes arguments.
+- The staged change was grepped for an API key and for a connection string
+  before committing: no match.
+- **A real send, end to end.** Against the dev server with a live
+  `RESEND_API_KEY` and `LEAD_NOTIFICATION_EMAIL` set. The action returned
+  `1:{"ok":true}`; the row landed as `f4c004bc-3c8b-482c-9977-9229eaf9c686`
+  with `source = cta_band`; and **the dev log contains zero `[email]` lines**,
+  which is the proof both sends were accepted — `sendEmail` emits a failure
+  line for a render failure, a Resend `error`, a missing `data.id` *and* a
+  transport throw, so silence is the only success path. The test row was
+  deleted afterwards and `lead` returned to **0 rows**.
+- **The key is scoped to sending, confirmed without echoing it.**
+  `GET https://api.resend.com/emails` returned
+  `{"statusCode":401,"name":"restricted_api_key","message":"This API key is
+  restricted to only send emails"}` — a valid key with sending-only permission,
+  which is the correct scope for this project (`emails.send` is the only call
+  `lib/email/` makes). It also means Resend's email list and logs endpoints are
+  not readable with this key, so **delivery was verified from the send path and
+  the recipient's inbox, not from Resend's API.**
+- **The requester's address had to be the Resend account address.** Both
+  messages were addressed to the account holder, because the sandbox sender
+  refuses everyone else — the domain gap above, demonstrated rather than
+  described. On a verified domain the confirmation goes to whoever filled the
+  form and nothing in the code changes.
+
+**Not verified, and why.** The Marketplace provisioning path was never
+exercised — it is unsatisfiable without a domain (above). Resend's delivery,
+bounce and complaint webhooks are out of scope (phase one sends and never
+receives). And, as at step 2, **BotID's real classification is still an
+operational check on a deployment**: it returns `HUMAN` in development.

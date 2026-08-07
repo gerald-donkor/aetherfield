@@ -195,10 +195,16 @@ Scripts that currently exist in `package.json`:
 
 Report the exact command output; never claim a check passed without running it.
 
-> **Gaps to flag, not to invent.** There is no test or email-preview script.
-> Build step 3 adds the email one, updating this list **in the same change**;
-> **never reference a script
-> name before it exists.** Because only Next.js auto-loads `.env.local` (§7.3),
+> **Gaps to flag, not to invent.** There is no test script, and **there is no
+> email-preview script — build step 3 did not add one.** This note used to
+> predict that it would; it is corrected here rather than left predicting
+> something that did not happen (§12 rule 8). `react-email`'s `email dev` CLI
+> wants a directory of default-exporting email components, and
+> `lib/email/templates/` holds named exports plus a shared shell that is not an
+> email; reshaping the templates to suit a preview server was not worth it for
+> two messages. They are rendered and inspected with `render()` directly — see
+> `docs/backend.md`, step 3. **Never reference a script name before it exists.**
+> Because only Next.js auto-loads `.env.local` (§7.3),
 > any script reaching the database or a provider is written as
 > `dotenv -e .env.local -- <command>` from the day it is added.
 
@@ -761,7 +767,8 @@ decision to make a value public:
 | --- | --- | --- |
 | `DATABASE_URL` | 1 | Neon, auto-provisioned |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | 2 | Upstash, auto-provisioned — **not** `UPSTASH_REDIS_REST_*`, which is what this table predicted and what `Redis.fromEnv()` looks for. The Marketplace integration sets the KV-prefixed names; corrected from `vercel env ls` at step 2 |
-| `RESEND_API_KEY` | 3 | Resend, auto-provisioned |
+| `RESEND_API_KEY` | 3 | Resend — **added by hand, not auto-provisioned.** The name matched this prediction, but the source did not: `vercel integration add resend` requires `-m domain=<a domain you own>` and Aetherfield owns none, so §7.4 is unsatisfiable for this provider until one exists. Recorded as a deviation in `docs/backend.md`, step 3, with what to do when a domain lands |
+| `LEAD_NOTIFICATION_EMAIL` | 3 | **ours, chosen here** — where a demo request's internal notification goes. Unset is supported: the notification is skipped, logging no address |
 | `BLOB_READ_WRITE_TOKEN` | 5 | Vercel Blob |
 | `BETTER_AUTH_SECRET` | 6 | **generated locally**, ≥ 32 chars (§7.3) |
 | `BETTER_AUTH_URL` | 6 | the app's base URL |
