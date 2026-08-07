@@ -15,9 +15,12 @@ const FOOTER_STAGGER = 0.12;
 const SPLIT_BLUR = 10;
 const WORDMARK_BLUR = 16;
 
-/* The wordmark overlaps the tail of the split run rather than queuing behind
-   it — end-to-end sequencing would push the footer's entrance past 3.5s. */
-const WORDMARK_OVERLAP = 0.5;
+/* The wordmark's lead-in. It used to be derived from the split run's own
+   length, which queued the footer's largest element behind twelve nav words and
+   landed it at 3.02s — the user rejected that ("takes too long to appear").
+   Three of the site's 0.08 steps, so the footer still composes itself before
+   its headline arrives, without the wait. A judgement, not a measurement. */
+const WORDMARK_DELAY = 0.24;
 
 type FooterMotionProps = {
   /** Taken over from the `<footer>` being replaced, so no box is added. */
@@ -113,15 +116,6 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
             },
           });
 
-          // The wordmark's start is the split run's own length, less the
-          // overlap. Counted off the text rather than off `self.words`, so the
-          // two tweens stay independent and `autoSplit` can re-split freely.
-          const wordCount = lines.reduce(
-            (n, el) => n + (el.textContent?.trim().split(/\s+/).length ?? 0),
-            0,
-          );
-          const splitRun = FOOTER_DUR + FOOTER_STAGGER * Math.max(wordCount - 1, 0);
-
           SplitText.create(lines, {
             type: "words",
             // The pieces sit inside `<a>` and `<p>`, so a `<div>` would be
@@ -177,7 +171,7 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
                   y: 0,
                   duration: FOOTER_DUR * 1.2,
                   ease: EASE,
-                  delay: Math.max(splitRun - WORDMARK_OVERLAP, 0),
+                  delay: WORDMARK_DELAY,
                   // Filter only. `opacity` may never be cleared — that hands
                   // the element straight back to the `globals.css` rule above
                   // and it vanishes.

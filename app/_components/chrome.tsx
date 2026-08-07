@@ -178,7 +178,7 @@ export function SiteFooter() {
           ))}
         </nav>
         <p data-footer-split="" className="font-serif text-p2">
-          © 2025 · All rights reserved
+          © 2026 · All rights reserved
         </p>
       </div>
 

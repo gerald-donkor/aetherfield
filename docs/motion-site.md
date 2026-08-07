@@ -102,8 +102,8 @@ component-only.
 - **The wordmark is one element and can never be split**: SplitText does not
   support SVG `<text>`, and its `textLength="1013"` from `x="-1.6"` is the
   measured thing that holds the ink flush to both gutters at any viewport. It
-  takes the same blur + fade + rise as a single target, starting at the split
-  run's length less a 0.5 s overlap.
+  takes the same blur + fade + rise as a single target, starting at a flat
+  `WORDMARK_DELAY = 0.24` — see "The wordmark leads, it does not queue" below.
 - `autoSplit: true` with the animation created inside and returned from
   `onSplit(self)`; `clearProps: "filter,display"` on the words, `"filter"` on
   the wordmark; **never `opacity` or `transform`**. The start state is
@@ -130,8 +130,68 @@ component-only.
   a tween created after the footer was entered simply plays at once. Same shape
   as the capabilities section's on-screen gate.
 
-Measured on `/journal` at 1280: the footer settles **3024 ms** end to end
-(authored 1.82 + 1.2 = 3.02 s), split word counts `1,1,1,1,2,6` = 12.
+Split word counts on `/journal` at 1280: `1,1,1,1,2,6` = 12.
+
+### The wordmark leads, it does not queue (prompt 36)
+
+The wordmark's `delay` used to be **derived from the split run's own length** —
+`FOOTER_DUR + FOOTER_STAGGER × (wordCount − 1)` = `1.0 + 0.12 × 11` = 2.32, less
+a 0.5 s overlap = **1.82**, settling at 1.82 + 1.2 = **3.02 s**, measured on
+`/journal` at 1280 as **3024 ms** end to end. The user rejected that pacing
+("the AETHERFIELD Text animation at the footer takes too long to appear"). It is
+now a flat constant:
+
+```ts
+const WORDMARK_DELAY = 0.24;   // three of the site's 0.08 steps. A judgement.
+```
+
+`WORDMARK_OVERLAP`, the `wordCount` reduce and `splitRun` are **deleted** —
+nothing else read them. Authored shape now: wordmark begins 0.24, settles
+**1.44 s**; nav words still begin at 0 and settle at 2.32 s. So the headline
+lands *first* and the small type keeps resolving under it, which is the intended
+reading.
+
+**Nothing about the pace changed** — `FOOTER_DUR`, `FOOTER_STAGGER`, `EASE`,
+`SPLIT_BLUR`, `WORDMARK_BLUR`, the `y` distances and the wordmark's `× 1.2` are
+all untouched. The standing "do not make the animation speed for that fast"
+instruction is about pace; only the queueing was at issue. Two alternatives were
+rejected in favour of this one: "wordmark still trails, at stagger 0.06", and
+"both land together at ~1.5 s". Do not relitigate the ordering.
+
+The four things that must not be undone here are already listed above — the
+tween stays a `fromTo` with `opacity: 1` authored on the end, `clearProps` stays
+`"filter"`, the tween stays **outside** `onSplit` and inside `gate(...)`, and no
+`contextSafe` is added.
+
+**Reference:** `public/design-ref/animation-ref/aetherfield-footer.webm`
+(1350×652, 26.488 s, 1004 frames, **VFR**). Like `career.webm` and `about.webm`
+it is **a recording of our own build, not a designer prototype** — read it as
+evidence of a defect, never as a motion target, and fit no timing to it. Frame
+onsets, indexed against the full `pts_time` list per `docs/automation.md` (a
+`-ss/-to` slice on a VFR file returns a different frame count and mis-times every
+onset):
+
+| landmark | frame | time |
+| --- | --- | --- |
+| footer nav words, first ink | f0308 | 6.382 s |
+| footer nav words, settled (plateau ≈ 3110) | f0374 | 7.810 s |
+| **wordmark, first ink** (148 → 24 413) | **f0384** | **8.004 s** |
+| wordmark, settled (plateau ≈ 120 100) | f0410 | 8.555 s |
+
+Ink counts were taken on two crops, both negated: the nav row `1250x36+50+72` at
+threshold 62 %, the wordmark band `1250x215+50+425` at 55 %. The wordmark started
+1.62 s after the footer's own words against an authored 1.82 — the 0.2 s of slack
+is the trigger having fired while the band was still off-screen, so the recording
+**corroborated the authored numbers**; nothing was broken, the pacing was simply
+wrong. Between f0340 and f0382 the wordmark band held a flat ink of 146–148 (a
+scrollbar speck) — **~0.9 s of empty yellow**, with a frame-to-frame `AE` of ~0
+across that window, so the page was not scrolling either. Recorded here so no
+later session re-extracts 1004 frames to re-derive it.
+
+The 1.44 s figure above is **authored, not re-measured** — `npm run lint`,
+`npm run typecheck` and `npm run build` all pass, and the build is unchanged at
+17 prerendered routes, but the browser timing pass in prompt 36's check list was
+not run against this commit.
 
 ## The bundle invariant, rewritten
 
