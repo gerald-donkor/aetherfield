@@ -207,6 +207,68 @@ export function ButtonLink({
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Fields                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The site's reusable text field: label, optional guidance, and an explicit
+ * error state. Forms own validation and pass the settled state into it.
+ */
+export function Field({
+  label,
+  hint,
+  error,
+  className = "",
+  id,
+  ...props
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  id: string;
+} & Omit<ComponentProps<"input">, "id">) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [props["aria-describedby"], hintId, errorId]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={className}>
+      <label
+        htmlFor={id}
+        className="block font-sans text-nav font-bold text-ink"
+      >
+        {label}
+      </label>
+      {hint ? (
+        <p id={hintId} className="mt-1.5 font-serif text-[16px] text-muted">
+          {hint}
+        </p>
+      ) : null}
+      <input
+        {...props}
+        id={id}
+        className={`mt-2 h-[52px] w-full border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-muted/70 focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface ${
+          error ? "border-ink" : "border-border"
+        }`}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+      />
+      {error ? (
+        <p
+          id={errorId}
+          className="mt-2 flex items-start gap-2 font-mono text-[12px] leading-[18px] text-ink"
+        >
+          <span aria-hidden className="mt-[7px] size-1 shrink-0 bg-ink" />
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** Link-style action: sans 16/700 with a trailing arrow that slides on hover. */
 export function LinkButton({
   className = "",

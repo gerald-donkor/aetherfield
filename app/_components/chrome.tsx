@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { FooterMotion } from "./motion/footer-reveal";
 import { NavDrop } from "./motion/nav-drop";
-import { Button, LinkButton, Wordmark } from "./primitives";
+import { Button, ButtonLink, LinkButton, Wordmark } from "./primitives";
 
 /* There is no /product route, so Product resolves to the home page — the
    product story is what the homepage tells. */
@@ -64,7 +64,7 @@ export function SiteNav() {
               {item.label}
             </Link>
           ))}
-          <LinkButton href="#">Get started</LinkButton>
+          <LinkButton href="/sign-in">Get started</LinkButton>
         </nav>
 
         {/* Mobile toggle: + rotates into × */}
@@ -111,7 +111,13 @@ export function SiteNav() {
                 {item.label}
               </Link>
             ))}
-            <Button className="mt-6 h-[52px] w-full">Get started</Button>
+            <ButtonLink
+              href="/sign-in"
+              onClick={() => setOpen(false)}
+              className="mt-6 h-[52px] w-full"
+            >
+              Get started
+            </ButtonLink>
           </nav>
         </div>
       ) : null}

@@ -168,3 +168,13 @@ so there is nothing to measure against the comps. Every page's prerendered HTML
 gains exactly two diffs (desktop and mobile `<a href="#">` → `<a href="/">`)
 with the same class strings.
 
+### Nav — Get started leads to account access
+
+Build step 6 changes the desktop and mobile `Get started` destinations to
+`/sign-in`. The desktop control changes only its `href`; the mobile control uses
+the existing `ButtonLink` equivalent and keeps the same sizing class string and
+panel-close callback. The fitted blur, tint, geometry and type are untouched.
+
+The homepage's `Explore the platform` uses the same destination. `Request a
+demo` remains inert for build step 2, and the footer's settled links remain
+unchanged.

@@ -10,6 +10,7 @@ import { CtaBand, SiteFooter, SiteNav } from "../_components/chrome";
 import {
   ArrowUpRight,
   Button,
+  Field,
   LinkButton,
   Meta,
   MetaPair,
@@ -225,6 +226,26 @@ export default function Page() {
         <Row note="Link — sans 16/700, arrow slides on hover">
           <LinkButton href="#">Get started</LinkButton>
         </Row>
+      </Section>
+
+      {/* ---- Fields ---- */}
+      <Section label="Components · Fields">
+        <div className="grid max-w-[800px] gap-8 md:grid-cols-2">
+          <Field
+            id="field-example"
+            label="Work email"
+            type="email"
+            placeholder="name@company.com"
+            hint="Use the address associated with your account."
+          />
+          <Field
+            id="field-error-example"
+            label="Work email"
+            type="email"
+            defaultValue="not-an-email"
+            error="Enter a valid email address."
+          />
+        </div>
       </Section>
 
       {/* ---- Cards ---- */}

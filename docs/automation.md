@@ -350,6 +350,31 @@ returning 500 for its CSS chunk and screenshots of an unstyled page. Re-check
 parent-commit comparison, and rebuild against the *current* parent if HEAD has
 moved.
 
+**A local docs snapshot can contaminate Tailwind's production CSS while a clean
+worktree does not have it.** The Tailwind and Drizzle skills initialise
+gitignored `references/docs/` trees. A build in the main workspace saw those
+files and emitted 411639 bytes across two CSS chunks; the detached parent
+worktree, correctly lacking ignored files, emitted one 61752-byte chunk. That
+is not an implementation diff and makes every prerendered page appear to gain
+an extra stylesheet.
+
+For a build comparison, temporarily move these four ignored paths to a `mktemp
+-d` directory, install an EXIT trap that restores every one, build, then confirm
+the directories exist again before trusting the output:
+
+```
+.agents/skills/tailwind-4-docs/references/docs/
+.agents/skills/tailwind-4-docs/references/docs-index.tsx
+.agents/skills/drizzle-docs/references/docs/
+.agents/skills/drizzle-docs/references/docs-index.md
+```
+
+Prompt 38's clean implementation build emitted one 64385-byte CSS chunk. Also:
+Turbopack rejects a `node_modules` symlink that points outside the worktree's
+filesystem root, and `/tmp` may be a different filesystem so `cp -al` fails
+with `Invalid cross-device link`; use a regular `cp -a` for that temporary
+worktree when either condition applies.
+
 **`page.accessibility.snapshot()` is gone from the cached `playwright-core`.**
 It throws `Cannot read properties of undefined`. Use
 `await page.locator("h1").ariaSnapshot()` instead — it returns the YAML form
@@ -541,4 +566,3 @@ Free ports: `ss -ltn | awk 'NR>1{print $4}' | grep -oE '[0-9]+$' | sort -un`.
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.
-

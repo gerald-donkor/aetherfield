@@ -232,3 +232,136 @@ No queries (they land with the step that needs them), no server actions, no
 route handlers, no forms, no auth tables, no phase-two entities, no seed data,
 and no Neon branching setup for preview deployments — worth raising when preview
 deploys start writing.
+
+---
+
+## Step 6 — Better Auth, sign-in and sign-up
+
+Implemented by prompt 38 on 7 Aug 2026, ahead of steps 2–5 at the user's
+direction. `better-auth` and `@better-auth/drizzle-adapter` are both 1.6.26.
+No Marketplace integration or second auth provider was provisioned.
+
+### Server configuration
+
+`lib/auth/server.ts` constructs Better Auth lazily over the existing pooled
+`getDb()` handle and `drizzleAdapter(..., { provider: "pg", schema })`. The
+complete runtime schema merges the phase-one application tables with the
+generated auth tables; no `Proxy` wraps the database client.
+
+Options set explicitly:
+
+- email/password enabled; Better Auth's verified 8–128 password limits remain
+  the defaults;
+- `requireEmailVerification: false`, deliberately, until step 3 can send the
+  verification message;
+- a nullable user `role`, `input: false`, so public signup cannot submit or
+  grant `staff` / `admin`;
+- rate limiting enabled in every environment with `storage: "database"`;
+- `plugins: [nextCookies()]`, last.
+
+The catch-all mount is `app/api/auth/[...all]/route.ts`. It uses
+`toNextJsHandler()` over a request-lazy function, so importing the route during
+`next build` does not construct a pool or require secrets. This is Better
+Auth's own handler only; it contains no application business logic.
+
+`getCurrentAccount()` resolves the session from `await headers()`. It then asks
+`lib/db/auth-queries.ts` to re-read the role from Postgres by user id on every
+protected request. The session payload and cookie never authorise a staff
+operation. A role value other than `staff` or `admin` is treated as no staff
+role.
+
+### Generated schema and migration
+
+`npx auth@latest generate --config lib/auth/cli.ts --output
+lib/db/auth-schema.ts --yes` generated the schema; no auth column or DDL was
+hand-authored. The CLI cannot evaluate a module carrying `server-only`, so the
+guards on the CLI entrypoint, auth module and its transitive DB client were
+removed only for the generator process and restored immediately afterwards.
+
+The generated tables are:
+
+| table | purpose |
+| --- | --- |
+| `user` | name, unique email, verification state, image, timestamps, nullable non-input `role` |
+| `session` | unique token, expiry, client metadata and cascading user reference |
+| `account` | credential/provider record, password hash and cascading user reference |
+| `verification` | expiring single-use verification values |
+| `rate_limit` | persistent limiter key, count and last-request timestamp |
+
+Drizzle Kit now reads both `lib/db/schema.ts` and
+`lib/db/auth-schema.ts`. It generated
+`lib/db/migrations/0001_first_rattler.sql`, which was applied over
+`DATABASE_URL_UNPOOLED`. Re-running the migration is a no-op.
+
+### Routes and enforcement
+
+- `/sign-in` and `/sign-up` are static Server Component screens whose forms are
+  client leaves. They use Better Auth's client API, lower-case email before
+  submission, show handled generic failures, announce status and move focus to
+  it. Signup produces a customer account with a null staff role.
+- `/account` is the smallest honest signed-in destination: name, email and a
+  sign-out control, with no dashboard or product data.
+- Root `proxy.ts` matches `/account` only. `getSessionCookie()` performs the
+  optimistic missing-cookie redirect; `/account` performs the authoritative
+  server-side session/database check and redirects forged or expired sessions.
+
+The actual Next 16.2 route table marks `/account` **dynamic**, not static:
+authoritative session resolution uses the request-time `headers()` API. This
+corrects prompt 38's incompatible expectation that all three new pages be
+static; making `/account` static would remove the required server-side
+enforcement. `/sign-in` and `/sign-up` are ○ Static, the auth handler and
+`/account` are ƒ Dynamic, and every pre-existing marketing route retained its
+previous ○ / ● marker.
+
+### UI and CTA wiring
+
+`Field` in `app/_components/primitives.tsx` is the shared label/input/hint/error
+primitive. It uses the existing ink, border, surface, accent, font and type
+tokens, exposes `aria-invalid` / `aria-describedby`, and is exhibited in
+`/design-system`. No component library, root provider or GSAP was added.
+
+The desktop and mobile nav `Get started` controls and the homepage's `Explore
+the platform` control now navigate to `/sign-in`; `Request a demo` is unchanged
+for step 2. The settled nav geometry, tint, blur and class strings are unchanged.
+
+### Secrets, personal data and remaining gaps
+
+`.env.example` adds names only: `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL`, both
+server-only. Vercel holds generated secrets for Production, Preview and
+Development. Development also holds `BETTER_AUTH_URL=http://localhost:3000`
+and `.env.local` was refreshed from it.
+
+There is no deployment or assigned production domain yet, verified with
+`vercel ls` and domain inspection. Production and Preview therefore do not yet
+have an honest `BETTER_AUTH_URL`; add their deployed origins before deploying
+auth rather than inventing one now. Rotation uses `BETTER_AUTH_SECRETS`
+(plural), recorded but not configured.
+
+Auth now stores a person's name, lower-cased email and password hash. Request
+bodies, email addresses, passwords and secrets are not logged. BotID remains
+the prompt-approved §8.2 gap until step 2 establishes it for public write paths;
+database rate limiting is active in the meantime.
+
+### Verified, prompt 38
+
+- `npm run typecheck` and `npm run lint` exited 0.
+- `npm run build` exited 0 with the route table described above. A second build
+  with `.env.local` moved aside also exited 0, proving auth and the pool remain
+  request-lazy. The first sandboxed env-less attempt failed only because
+  `next/font` could not reach Google; the approved network retry passed.
+- Parent-commit prerender comparison, after stripping RSC flight scripts and
+  normalising CSS chunk names: `_global-error` and `_not-found` are identical;
+  all marketing pages differ only by the approved desktop nav href; after that
+  href is normalised, `/about`, `/careers`, `/journal`, all six articles and all
+  three job listings are identical. `/` additionally swaps `Explore the
+  platform` from button to link; `/design-system` additionally exhibits
+  `Field`; `/sign-in` and `/sign-up` are new.
+- A real synthetic signup returned 200, created one user and one credential
+  account with `role=none`, and authenticated `/account` returned 200. Sign-out
+  returned 200 and `/account` then returned 307; sign-in returned 200 and
+  restored a 200. A forged session cookie reached the server page but was
+  rejected with a redirect, proving the page does not trust the proxy check.
+  The synthetic user was deleted afterwards; user, account and session counts
+  for it all returned zero.
+- `vercel env ls` confirmed `BETTER_AUTH_SECRET` and the Development
+  `BETTER_AUTH_URL` by name. No value is quoted here.

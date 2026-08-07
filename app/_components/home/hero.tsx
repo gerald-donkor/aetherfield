@@ -1,5 +1,5 @@
 import { Reveal } from "../motion/reveal";
-import { Button } from "../primitives";
+import { Button, ButtonLink } from "../primitives";
 import { Container } from "./container";
 import { HeroDashboard } from "./dashboard";
 import { HeroText } from "./hero-text";
@@ -44,7 +44,7 @@ export function Hero() {
             data-reveal-item
           >
             <Button>Request a demo</Button>
-            <Button>Explore the platform</Button>
+            <ButtonLink href="/sign-in">Explore the platform</ButtonLink>
           </div>
         </HeroText>
 

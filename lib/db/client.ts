@@ -4,7 +4,7 @@ import { attachDatabasePool } from "@vercel/functions";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-import * as schema from "./schema";
+import { databaseSchema } from "./database-schema";
 
 /**
  * The application's database handle.
@@ -28,7 +28,7 @@ import * as schema from "./schema";
  * HTTP transport exists to work around (AGENTS.md 7.2).
  */
 
-export type Db = NodePgDatabase<typeof schema>;
+export type Db = NodePgDatabase<typeof databaseSchema>;
 
 let db: Db | undefined;
 
@@ -48,6 +48,6 @@ export function getDb(): Db {
   // removed from the pool, and reuses connections across invocations.
   attachDatabasePool(pool);
 
-  db = drizzle(pool, { schema });
+  db = drizzle(pool, { schema: databaseSchema });
   return db;
 }

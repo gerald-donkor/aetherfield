@@ -322,11 +322,11 @@ auth foundations phase two runs on.
 | # | step | depends on | prerender impact |
 | --- | --- | --- | --- |
 | 1 | **Data layer and schema** — provision Neon, `lib/db/`, the phase-one tables (§9), `.env.example`, the migration workflow and its `package.json` scripts | — | none |
-| 2 | **Demo-request capture** — `/`'s hero, the nav's "Get started", the `CtaBand`. Provisions Upstash and establishes the **whole write-path pattern** (§10): client-leaf form, shared Zod schema, typed result, rate limit, BotID | 1 | `/`, `/journal`, `/about` gain a form leaf — **the only step in phase one that changes a prerendered page's markup** |
+| 2 | **Demo-request capture** — `/`'s hero "Request a demo" and the `CtaBand`. Provisions Upstash and establishes the **whole write-path pattern** (§10): client-leaf form, shared Zod schema, typed result, rate limit, BotID. `lead_source`'s `nav` value remains for a possible mobile-drawer demo CTA | 1 | `/`, `/journal`, `/about` gain a form leaf — **the only step in phase one that changes a prerendered page's markup** |
 | 3 | **Transactional email** — provision Resend, `lib/email/`, templates, the send helper. Demo requests get their confirmation and internal notification | 1, 2 | none |
 | 4 | **Newsletter signup, double opt-in** — `/journal`'s subscribe band, the confirm and unsubscribe routes | 3 — **double opt-in cannot exist before email** | `/journal` form leaf; two new routes |
 | 5 | **Blob upload and job applications** — `lib/storage/`, private CV upload, `/job-listing/[slug]` and `/careers`'s open-application card | 1, 3 | `/careers`, `/job-listing/[slug]` form leaves |
-| 6 | **Better Auth** — `lib/auth/`, the catch-all mount, `proxy.ts`, sign-in / reset / verify screens built from existing primitives, the roles in §11 | 1 | none, if 8.1 is obeyed — **verify, do not assume** |
+| 6 | **Better Auth** — `lib/auth/`, the catch-all mount, `proxy.ts`, sign-in and sign-up screens built from existing primitives, the roles in §11. Password reset and email verification land with step 3, which can send their email | 1 | none, if 8.1 is obeyed — **verify, do not assume** |
 | 7 | **The submissions view** — an authenticated route reading leads, subscribers and applications, with signed CV links | 6, and 2 / 4 / 5 for anything to show | new authenticated routes only |
 
 **Steps 2 and 3 are the load-bearing ones.** Step 2 sets the pattern every later
@@ -870,8 +870,9 @@ pre-empt it with a role that spans both.
    `getSessionCookie()` trap is exactly this mistake.
 2. **Authorisation is checked inside the action**, not in the component that
    renders the control. Hiding a button is presentation (§6.2).
-3. **No self-signup.** Staff accounts are created by an admin. There is no public
-   registration route in phase one, and adding one is not a step in §5.2.
+3. **Public self-signup creates customer accounts with no staff role.** A signup
+   can never grant itself `staff` or `admin`; those roles are admin-granted and
+   remain the only roles that can read the submissions view (step 7).
 4. **A CV is reachable only through a short-lived signed URL** minted per request
    for an authorised session (§8.3). Never a stored public URL.
 5. **The role lives in the database, never in a cookie or `localStorage`**
