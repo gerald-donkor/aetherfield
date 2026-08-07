@@ -1,6 +1,6 @@
 Status: Initialized
 Source: https://zod.dev/llms-full.txt
-Pages: 13
+Pages: 16
 Snapshot-Date: 2026-08-07
 License: Zod docs are MIT (https://github.com/colinhacks/zod)
 Committed: yes - the snapshot is small enough to track

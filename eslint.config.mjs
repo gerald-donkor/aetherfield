@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // License-gated, generated vendor docs; lint project-owned skill code only.
+    ".agents/skills/tailwind-4-docs/references/docs/**",
+    ".agents/skills/tailwind-4-docs/references/docs-index.tsx",
   ]),
 ]);
 

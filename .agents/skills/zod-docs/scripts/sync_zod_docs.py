@@ -23,7 +23,7 @@ DEFAULT_URL = "https://zod.dev/llms-full.txt"
 LICENSE_NOTE = "Zod docs are MIT (https://github.com/colinhacks/zod)"
 USER_AGENT = "aetherfield-skill-sync"
 
-FENCE_RE = re.compile(r"^\s*(```|~~~)")
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING_RE = re.compile(r"^# +(.+?)\s*$")
 
 
@@ -39,16 +39,35 @@ def slugify(title: str) -> str:
 
 
 def split_pages(text: str) -> list[tuple[str, str]]:
-    """Split on top-level headings, ignoring `#` inside fenced code blocks."""
+    """Split on top-level headings, ignoring `#` inside fenced code blocks.
+
+    Fence tracking follows CommonMark rather than flipping a boolean on every
+    ``` it sees: a fence **closes** only on the same character, at least as
+    long as the opener, and with nothing after it. A ```ts encountered while
+    already inside a fence is content, not a close.
+
+    That distinction is not pedantry. A plain toggle desynchronises for the rest
+    of the file the moment it meets one malformed fence, and both of these
+    vendor feeds contain some - which silently merged real pages into their
+    predecessors and invented others out of `#` shell comments.
+    """
     pages: list[tuple[str, str]] = []
     title: str | None = None
     body: list[str] = []
-    in_fence = False
+    fence: str | None = None
 
     for line in text.splitlines():
-        if FENCE_RE.match(line):
-            in_fence = not in_fence
-        if not in_fence:
+        match_fence = FENCE_RE.match(line)
+        if match_fence:
+            marker, info = match_fence.group(1), match_fence.group(2)
+            if fence is None:
+                # An opening backtick fence may not carry a backtick in its info string.
+                if not (marker[0] == "`" and "`" in info):
+                    fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
+                fence = None
+
+        if fence is None:
             match = HEADING_RE.match(line)
             if match:
                 if title is not None:

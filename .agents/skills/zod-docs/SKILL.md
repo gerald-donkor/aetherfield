@@ -21,7 +21,7 @@ vendor's own `llms-full.txt` feed, split one file per page.
 
 ## Quick start
 
-1. Find the topic in `references/docs-index.md` — 13 pages.
+1. Find the topic in `references/docs-index.md` — 16 pages.
 2. Load **only** that file from `references/docs/`.
 3. Read "This project's decisions" below before writing a schema; the shape of
    the result the action returns is fixed by §10 and is not a free choice.
@@ -31,7 +31,7 @@ their options); `07-formatting-errors.md` is what a Server Action needs.
 
 ## Refreshing
 
-The snapshot **is committed** — 13 pages, ~288 KB — so it works on a fresh
+The snapshot **is committed** — 16 pages, ~292 KB — so it works on a fresh
 clone with no setup. To refresh it:
 
 ```bash
@@ -41,6 +41,13 @@ python .agents/skills/zod-docs/scripts/sync_zod_docs.py
 Zod serves no per-page markdown (`https://zod.dev/api.md` returns 404), so
 splitting `llms-full.txt` is the only route. Do not "fix" the script to fetch
 individual pages.
+
+**Do not simplify the fence tracking back to a boolean toggle.** It follows
+CommonMark — a fence closes only on the same character, at least as long as the
+opener, with nothing after it — because a plain toggle treats a ```` ```ts ````
+seen inside a fence as a close and desynchronises for the rest of the file. That
+bug buried `Versioning` and `Zod Core` inside the migration guide and reported
+13 pages where there are 16.
 
 ## This project's decisions
 

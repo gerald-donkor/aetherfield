@@ -16,3 +16,6 @@ Each row is `file — page title`. Load only the file you need.
 - `docs/11-metadata-and-registries.md` — Metadata and registries
 - `docs/12-joining-clerk-as-an-oss-fellow-to-work-on-zod-4.md` — Joining Clerk as an OSS Fellow to work on Zod 4
 - `docs/13-migration-guide.md` — Migration guide
+- `docs/14-versioning.md` — Versioning
+- `docs/15-zod-core.md` — Zod Core
+- `docs/16-zod.md` — Zod

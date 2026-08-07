@@ -25,8 +25,14 @@ snapshot of the vendor's own `llms-full.txt` feed, split one file per page.
 2. If it is missing, or the `Snapshot-Date` is more than a month old, run the
    sync in "Initialization" before answering.
 3. Find the topic in `references/docs-index.md`.
-4. Load **only** that file from `references/docs/`. The snapshot is ~4 MB across
-   240 pages; never read it wholesale.
+4. Load **only** that file from `references/docs/`. The snapshot is ~4.5 MB
+   across 484 pages; never read it wholesale.
+
+**Titles repeat across dialects, and the index rows carry the canonical URL for
+exactly that reason.** `drizzle-kit generate` has six pages — Postgres, MySQL,
+CockroachDB, MS SQL, SingleStore, SQLite — all with the same H1. **This project
+is Postgres: take the `pg-` file.** Reading the title alone lands you on
+CockroachDB.
 5. Read "This project's decisions" below before writing code — several of them
    contradict what the general docs recommend.
 
@@ -40,12 +46,21 @@ Read through them; they are not part of the API.
 python .agents/skills/drizzle-docs/scripts/sync_drizzle_docs.py
 ```
 
-It downloads `https://orm.drizzle.team/llms-full.txt`, splits it on top-level
-headings (tracking code fences, so a `#` shell comment is not mistaken for a
-page break), and rewrites `references/docs/`, `references/docs-index.md` and
-`references/docs-source.txt`.
+It downloads `https://orm.drizzle.team/llms-full.txt`, splits it on the feed's
+own `Source: <url>` stamps, and rewrites `references/docs/`,
+`references/docs-index.md` and `references/docs-source.txt`.
 
-**The snapshot is not committed** — it is ~4 MB and regenerable. `references/docs/`
+**Do not change the split back to `#` headings.** That was the first attempt and
+it was wrong twice over: the feed contains a malformed orphan fence (a bare
+```` ``` ```` whose closer is a ```` ```ts ````) that desynchronises any fence
+tracker for the remaining ~119,000 lines, so headings produced 240 files that
+invented pages out of `#` shell comments and merged real ones away — one file
+held 81 pages, and `Drizzle <> Neon Postgres`, the single most relevant page to
+this stack, was missing entirely. The `Source:` stamps are fence-immune and
+carry each page's dialect. 484 is the true count; 442 is the number of `#`
+lines in the feed, which is not the same thing.
+
+**The snapshot is not committed** — it is ~4.5 MB and regenerable. `references/docs/`
 and `references/docs-index.md` are gitignored; the script and the source stanza
 are tracked. A fresh clone must run the sync once.
 

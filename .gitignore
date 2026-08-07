@@ -45,10 +45,20 @@ yarn-error.log*
 next-env.d.ts
 
 # agent skills
-# The Drizzle docs snapshot is ~4 MB across 240 pages and is regenerable by
+# The Drizzle docs snapshot is ~4.5 MB across 484 pages and is regenerable by
 # .agents/skills/drizzle-docs/scripts/sync_drizzle_docs.py, so it is not
 # tracked — the script and the source stanza next to it are. The Zod snapshot
-# is 13 pages / ~288 KB and IS committed, deliberately, so that skill needs no
+# is 16 pages / ~292 KB and IS committed, deliberately, so that skill needs no
 # setup on a fresh clone.
 /.agents/skills/drizzle-docs/references/docs/
 /.agents/skills/drizzle-docs/references/docs-index.md
+# The Tailwind docs snapshot is ~5 MB across 236 pages and is regenerable by
+# .agents/skills/tailwind-4-docs/scripts/sync_tailwind_docs.py, so it is not
+# tracked either — but for a second reason on top of size: tailwindcss.com is
+# source-available and explicitly NOT open-source, which is why that script
+# gates on --accept-docs-license and why the skill ships without the snapshot.
+# Committing it here would redistribute it. The script, docs-source.txt,
+# engineering-playbook.md and gotchas.md stay tracked; a fresh clone runs the
+# sync once.
+/.agents/skills/tailwind-4-docs/references/docs/
+/.agents/skills/tailwind-4-docs/references/docs-index.tsx
