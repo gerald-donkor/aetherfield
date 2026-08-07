@@ -93,6 +93,15 @@ separate from 0.7.
 **Content conventions.** Dates ship as **2026** even where a comp reads 2028.
 Straight apostrophes and quotes throughout, never curly. Article prose is
 transcribed from the desktop comp.
+
+**This file is capped.** It holds the index, these invariants, the workflow, the
+commands and the prompt-file contract — nothing else, and it does not grow with
+the build. A finished prompt adds at most one index row here; everything it
+measured goes in `docs/`. An invariant earns its place here only if a session
+could break it *without* opening the `docs/` file that owns it, and a new one
+replaces or subsumes an existing line rather than stacking on it. If this file
+passes ~250 lines, something in it belongs in `docs/`.
+
 # Content and asset conventions
 
 **Photography comes from `public/assets/images`.** Every image a page needs is
@@ -122,7 +131,7 @@ For every implementation request:
 5. Create a detailed prompt file in `prompts/` per the contract in section 4.
 6. Ask: `I prepared the implementation prompt at prompts/<file-name>.md. Is this good to execute?`
 7. On approval, re-read the approved prompt file in `prompts/` and implement it strictly. Implement only after user approval. Entering `y` or `Y` = `Approved. Execute.`  
-8. Run available checks (section 2). Then finally, record all that was implemented in the `docs/` file that owns the area — a new one, added to the index above, if the work does not belong to an existing one. Only invariants that hold site-wide, and the index row itself, go in this file.
+8. Run available checks (section 2). Then finally, record all that was implemented in the `docs/` file that owns the area — a new one, added to the index above, if the work does not belong to an existing one. **Never in this file**: the only things a finished prompt may add here are one index row, and a site-wide invariant that meets the cap rule above.
 9. Share exact steps to test or run the completed feature.
 10. Commit the resulting change to `main`, unprompted. Every executed prompt ends in a commit—never leave implemented work uncommitted. Do not push unless asked.
 
