@@ -12,15 +12,17 @@ The same rule binds the rest of the stack. **Tailwind CSS 4** is config-less —
 tokens live in `@theme` in `app/globals.css` and there is no
 `tailwind.config.js`. **Cache Components / `use cache`** is not the
 `unstable_cache` of training data; load `vercel:next-cache-components` before
-touching revalidation. The database, email and auth SDKs are **not chosen yet**
-(section 7) — read the installed package once one exists. If an API cannot be
-verified from `node_modules/`, a skill, or live docs, say so instead of guessing.
+touching revalidation. **Neon, Resend, Better Auth and Upstash are chosen
+(7.2) and each carries a trap that contradicts its own tutorials — read 7.3
+before writing a line against any of them.** If an API cannot be verified from
+`node_modules/`, a skill, or live docs, say so instead of guessing.
 
-**Sections 5–8 are the backend contract** — product and build list,
-architecture, stack, standing rules. Read them before writing any server code.
-Everything above them is the *site* contract and still applies in full: the
-backend is being added to a finished, measured, byte-stable marketing site, and
-nothing in sections 5–8 licenses breaking it.
+**Sections 5–11 are the backend contract** — product and the ordered build
+sequence, architecture, stack, standing rules, data model, the write-path flow,
+and roles. Read them before writing any server code. Everything above them is
+the *site* contract and still applies in full: the backend is being added to a
+finished, measured, byte-stable marketing site, and nothing below licenses
+breaking it.
 
 # Project notes — where the detail lives
 
@@ -110,19 +112,22 @@ transcribed from the desktop comp.
 
 **This file is capped, and the cap is on the build record — not on the
 contract.** It holds the index, these invariants, the workflow, the commands,
-the prompt-file contract, and sections 5–8 (product, architecture, stack,
-standing rules). It does **not** grow with the build: a finished prompt adds at
-most one index row here, and everything it measured or built goes in `docs/`. An
-invariant earns its place here only if a session could break it *without*
-opening the `docs/` file that owns it, and a new one replaces or subsumes an
-existing line rather than stacking on it.
+the prompt-file contract, and sections 5–11 (product and build sequence,
+architecture, stack, standing rules, data model, write-path flow, roles). It
+does **not** grow with the build: a finished prompt adds at most one index row
+here, and everything it measured or built goes in `docs/`. An invariant earns
+its place here only if a session could break it *without* opening the `docs/`
+file that owns it, and a new one replaces or subsumes an existing line rather
+than stacking on it.
 
-Sections 5–8 are the exception to the growth rule, because they are what a
+Sections 5–11 are the exception to the growth rule, because they are what a
 session needs *before* it opens any `docs/` file — but the same discipline
 applies inside them: they carry decisions and boundaries, never the record of
-what was built against those decisions. A schema, a measured latency, a
-migration, an endpoint's field list belongs in `docs/backend.md`. If the front
-matter above section 5 passes ~250 lines, something in it belongs in `docs/`.
+what was built against those decisions. **Column types, DDL, a measured latency,
+a migration's contents, an endpoint's full field list belong in
+`docs/backend.md`**, and a step in 5.2 is marked done by the repository and
+`git log`, never by editing this file. If the front matter above section 5
+passes ~250 lines, something in it belongs in `docs/`.
 
 # Content and asset conventions
 
@@ -166,7 +171,7 @@ Do not code before creating the prompt unless the user explicitly says to skip p
 Resolving what "next" means, in a session with no prior context:
 
 1. **The number** is the highest existing prompt number in `prompts/` plus one. Never renumber, never overwrite, never reuse a number (section 4).
-2. **The scope** is the next unbuilt item from section 1's build list, ordered by what unblocks the most downstream work. The spec's four-phase roadmap (section 7 of the spec) is the narrative for why that order exists; use it as context, not as a checklist to walk mechanically.
+2. **The scope** is the next unbuilt step in **section 5.2's build sequence**, which is already ordered by what unblocks the most downstream work and states each step's dependency. There is **no separate spec file in this repository** — section 5 is the whole product brief, and `ref/ref-agents.md` is a formatting reference from another project, not a source of scope. For site (non-backend) work the scope comes from the user's request and the `docs/` file that owns the area.
 3. **Establish what is already built from the repository**—the files on disk and `git log`—not from the existing prompt files. A committed prompt file is evidence that a prompt was written, never that it was executed. Writing a prompt for work that already exists is the main failure mode here.
 4. **Name the chosen scope and say why it is next in the first line of the reply**, before writing the file, so a wrong call is visible immediately.
 5. If two candidates are genuinely equally unblocking, write neither yet—name both, state the trade-off, and ask.
@@ -184,6 +189,13 @@ Scripts that currently exist in `package.json`:
 - `npm run typecheck` — `tsc --noEmit`
 
 Report the exact command output; never claim a check passed without running it.
+
+> **Gaps to flag, not to invent.** There is no test, database, migration or
+> email-preview script. Build step 1 adds the database ones and step 3 the email
+> one, each updating this list **in the same change**; **never reference a script
+> name before it exists.** Because only Next.js auto-loads `.env.local` (7.3),
+> any script reaching the database or a provider is written as
+> `dotenv -e .env.local -- <command>` from the day it is added.
 
 # 3. Automation
 
@@ -272,7 +284,7 @@ evidence-first — "clarity and confidence", "progress over perfection". Server
 copy, error messages and emails match it. Never campaigning, never
 startup-cheerful, never alarmist about climate.
 
-## What is already built
+## 5.1 What is already built
 
 A complete, static marketing site: seven routes, all prerendered, content
 hand-authored as typed constants in `app/_content/`, and thirty-six prompts of
@@ -282,39 +294,58 @@ actions. Every call to action is deliberately inert (`chrome.tsx` "Get started",
 `journal/page.tsx` "Sign up to newsletter", `job/sections.tsx` "Apply now",
 `home/hero.tsx` "Request a demo").
 
-## Build only
+## 5.2 The build sequence
 
-**Phase one — the marketing backend.** Makes the shipped site's dead CTAs real,
-and lays the database, auth and email foundations phase two runs on.
+**This is the order, and the dependency column is why.** One step is one prompt
+file unless it says otherwise. A step is "done" when its work is committed —
+resolved from the repository and `git log`, never from this list and never from
+`prompts/` (section 1). Do not tick anything here; the file records the plan,
+not the progress.
 
-- data layer and schema — leads, subscribers, applications
-- demo-request capture — the hero, the nav's "Get started", and the `CtaBand`
-- newsletter signup with double opt-in — `/journal`'s subscribe band
-- job applications with CV upload — `/job-listing/[slug]` and the
-  open-application card on `/careers`
-- transactional email — submitter confirmations and internal notifications
-- spam and abuse protection on every public write path
-- staff authentication and roles
-- an authenticated submissions view — leads, subscribers, applications
+### Phase one — the marketing backend
 
-**Phase two — the platform.** The authenticated product the hero mocks up.
+Makes the shipped site's four dead CTAs real, and lays the database, email and
+auth foundations phase two runs on.
 
-- organisations and multi-tenancy
-- activity-data ingestion — CSV import, then connectors
-- emission factors and the calculation engine — scopes 1, 2 and 3
-- targets, goal tracking and forecasting
-- the dashboard routes, behind auth
-- ESG report generation and export
-- scheduled recalculation and threshold alerts
+| # | step | depends on | prerender impact |
+| --- | --- | --- | --- |
+| 1 | **Data layer and schema** — provision Neon, `lib/db/`, the phase-one tables (§9), `.env.example`, the migration workflow and its `package.json` scripts | — | none |
+| 2 | **Demo-request capture** — `/`'s hero, the nav's "Get started", the `CtaBand`. Provisions Upstash and establishes the **whole write-path pattern** (§10): client-leaf form, shared Zod schema, typed result, rate limit, BotID | 1 | `/`, `/journal`, `/about` gain a form leaf — **the only step in phase one that changes a prerendered page's markup** |
+| 3 | **Transactional email** — provision Resend, `lib/email/`, templates, the send helper. Demo requests get their confirmation and internal notification | 1, 2 | none |
+| 4 | **Newsletter signup, double opt-in** — `/journal`'s subscribe band, the confirm and unsubscribe routes | 3 — **double opt-in cannot exist before email** | `/journal` form leaf; two new routes |
+| 5 | **Blob upload and job applications** — `lib/storage/`, private CV upload, `/job-listing/[slug]` and `/careers`'s open-application card | 1, 3 | `/careers`, `/job-listing/[slug]` form leaves |
+| 6 | **Better Auth** — `lib/auth/`, the catch-all mount, `proxy.ts`, sign-in / reset / verify screens built from existing primitives, the roles in §11 | 1 | none, if 8.1 is obeyed — **verify, do not assume** |
+| 7 | **The submissions view** — an authenticated route reading leads, subscribers and applications, with signed CV links | 6, and 2 / 4 / 5 for anything to show | new authenticated routes only |
 
-**Do not overbuild.** In particular: no second design system, no separate
-backend service or framework, no admin panel beyond the submissions view, no
-public API, no billing, no AI features, and no marketing-automation platform.
+**Steps 2 and 3 are the load-bearing ones.** Step 2 sets the pattern every later
+form copies, and step 3 sets the pattern every later email copies. Get them
+right slowly rather than getting to step 7 quickly.
 
-**Phases are narrative, not structure.** They explain why the list is ordered as
-it is and roughly when value lands. Every rule in this file applies on every
-task regardless of phase. Actual sequencing happens through the numbered files
-in `prompts/`, and "what is next" is resolved from the repository per section 1.
+### Phase two — the platform
+
+The authenticated product `home/dashboard.tsx` mocks up. **Do not start any of
+this while a phase-one step is unbuilt.**
+
+| # | step | depends on |
+| --- | --- | --- |
+| 8 | **Organisations and multi-tenancy** — Better Auth's organization plugin, membership, and the tenant scope every later query carries | 6 |
+| 9 | **Activity-data ingestion** — CSV import first, connectors later; staged rows, validation, and a visible import outcome | 8 |
+| 10 | **Emission factors and the calculation engine** — scopes 1, 2 and 3, as pure functions in `lib/domain/` (§6.2) | 9 |
+| 11 | **Targets and forecasting** — goal tracking, the "16% off your 2027 goal" reading | 10 |
+| 12 | **The dashboard routes** — behind auth, the four-verb loop made real | 10, 11 |
+| 13 | **ESG report generation and export** | 10, 11 |
+| 14 | **Scheduled recalculation and threshold alerts** | 10, 12 |
+
+### Do not overbuild
+
+No second design system. No separate backend service or framework. No admin
+panel beyond step 7. No public API, no billing, no AI features, no
+marketing-automation platform, no analytics product. **No feature that is not a
+step above** — if it seems necessary, say so and ask rather than adding it.
+
+**The sequence is a dependency graph, not a schedule.** It says what must exist
+before what, and nothing about dates. Every rule in this file applies on every
+step regardless of phase.
 
 ---
 
@@ -594,16 +625,156 @@ employers, CVs. It is the users' data and mishandling it is not recoverable.
 
 - Only `NEXT_PUBLIC_*` reaches browser code. Everything else is server-only, and
   every module reading one imports `server-only`.
-- The canonical list lives in `.env.example`, which is committed. **Real values
-  never are** — they come from `vercel env pull`.
+- The canonical list lives in `.env.example`, **created by build step 1** and
+  committed. **Real values never are** — they come from `vercel env pull`.
 - Never echo a secret's value. `vercel env ls` shows names only, and that is the
   only listing to quote.
+
+Expected by the end of phase one, by the step that introduces each. All are
+server-only — **phase one needs no `NEXT_PUBLIC_*` at all**, and adding one is a
+decision to make a value public:
+
+| variable | step | source |
+| --- | --- | --- |
+| `DATABASE_URL` | 1 | Neon, auto-provisioned |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | 2 | Upstash, auto-provisioned |
+| `RESEND_API_KEY` | 3 | Resend, auto-provisioned |
+| `BLOB_READ_WRITE_TOKEN` | 5 | Vercel Blob |
+| `BETTER_AUTH_SECRET` | 6 | **generated locally**, ≥ 32 chars (7.3) |
+| `BETTER_AUTH_URL` | 6 | the app's base URL |
+
+Do not invent a variable name before the step that provisions it — read the name
+the provider actually set with `vercel env ls`.
 
 ## 8.5 Recording the result
 
 Backend work is recorded in **`docs/backend.md`** — created by the first backend
 prompt and added to the index at the top of this file in that same change. The
-schema, every endpoint and its fields, the provider decisions and their
-reasoning, the environment variables and the measured behaviour all live there.
-**Never in this file** (see the cap rule in the front matter): sections 5–8 hold
-decisions and boundaries; `docs/backend.md` holds what was built against them.
+schema's column types, every endpoint and its fields, the environment variables
+as provisioned, and the measured behaviour all live there. **Never in this
+file** (see the cap rule in the front matter): sections 5–11 hold decisions and
+boundaries; `docs/backend.md` holds what was built against them.
+
+---
+
+# 9. Data model
+
+Entities and the rules that govern them. **Column types, indexes and the
+migrations themselves go in `docs/backend.md`**, not here.
+
+## 9.1 Phase-one entities
+
+- **`lead`** — a demo request. Name, work email, company, message, and the
+  **surface it came from** (hero / nav / CTA band), because three CTAs feed one
+  table and "which one converts" is unanswerable without it.
+- **`subscriber`** — a newsletter address and its **state**, not a boolean:
+  `pending` → `confirmed` → `unsubscribed`. Plus the confirmation token and the
+  timestamps for each transition (§8.3 requires double opt-in).
+- **`application`** — a job application. The **`job_slug`**, the applicant's
+  details, and the CV's private blob reference. Never the CV's bytes.
+- **Better Auth's own tables** — user, session, account, verification. These are
+  **generated by `npx auth@latest generate`**; do not hand-author them, and do
+  not add columns to them directly (7.3).
+
+## 9.2 Rules
+
+1. **`job_slug` is a reference, not a foreign key.** Jobs live in
+   `app/_content/jobs.ts` as typed constants (§8.1) and there is no `job` table.
+   Validate the slug against `JOBS` at write time; an application must survive
+   the role being closed and removed from that file.
+2. **Status is an enum, defined once** and imported everywhere. Never a string
+   union re-declared in UI code, and never a boolean where a third state is
+   already foreseeable.
+3. **Every table carries `created_at`.** Anything with a lifecycle carries the
+   timestamp of each transition, not just a current-state column.
+4. **Email addresses are stored lowercased and compared lowercased.** A
+   subscriber list that treats two casings as two people is a compliance problem,
+   not a display bug.
+5. **Soft-delete anything a person can ask to have removed**, so an erasure
+   request is one operation with an audit trail rather than a cascade.
+6. **Phase two is tenant-scoped from its first line.** Every phase-two table
+   carries an organisation reference and **every query filters on it** — there is
+   no "add multi-tenancy later" that is not a rewrite. Phase-one tables are
+   deliberately *not* tenant-scoped: leads and applications belong to Aetherfield,
+   not to a customer.
+7. Phase-two entities, when they arrive: `organization`, `membership`, `site`,
+   `activity_record`, `emission_factor`, `target`, `report`. Extend them; never
+   fork a parallel table for the same concept.
+
+---
+
+# 10. The write-path flow
+
+**Every public form follows this path.** Step 2 of the build sequence
+establishes it; every later flow copies it rather than inventing its own.
+
+```
+client leaf form  (§8.1 — takes children, adds no box)
+   │  validates with the shared Zod schema, for the user's benefit only
+   ▼
+Server Action     (§6.2 — the only mutation path for our own forms)
+   │  1. BotID check                    → reject
+   │  2. rate limit, keyed by IP        → reject, with retry timing
+   │  3. parse with the SAME Zod schema → typed field errors
+   │  4. authorise, if the path is not public
+   │  5. write via lib/db/              → the only DB caller
+   │  6. queue/send email via lib/email/
+   ▼
+typed result  { ok: true } | { ok: false, error, fieldErrors? }
+   │
+   ▼
+the leaf renders it: announced, focus managed, legible without colour (§8.2)
+```
+
+**The rules that make it a contract, not a diagram:**
+
+1. **Validation runs twice and the schema exists once.** The client copy is a
+   courtesy; the server copy is the check (§6.2).
+2. **The action returns a typed result. It never throws to the client** and never
+   returns a bare string. A thrown error is a bug, not a validation outcome.
+3. **Order matters.** BotID and the rate limit come *before* parsing, and parsing
+   comes before any write — otherwise the cheap rejections pay for the expensive
+   work.
+4. **A failed email never fails the write.** The lead is captured first; the
+   notification is best-effort and its failure is logged (without the address,
+   §8.3) rather than surfaced as a failed submission.
+5. **No redirect on success.** These forms sit inside settled, measured pages;
+   they swap to a success state in place. A navigation would discard the page's
+   scroll position and its motion state.
+6. **The same path applies to phase two's mutations**, with step 4 doing real
+   work (§11) instead of being skipped.
+
+---
+
+# 11. Roles and authorisation
+
+Introduced by build step 6; **nothing before it is authenticated**, and the
+three public forms in steps 2, 4 and 5 stay deliberately unauthenticated.
+
+## 11.1 The roles
+
+| role | can |
+| --- | --- |
+| **staff** | read the submissions view — leads, subscribers, applications — and download a CV through a signed link |
+| **admin** | everything staff can, plus managing staff accounts |
+
+Phase two adds tenant-side roles inside an organisation (**owner**, **member**),
+which are **orthogonal** to these two: an Aetherfield staff member is not
+thereby a member of any customer's organisation, and must never be able to read a
+tenant's data by virtue of being staff. Build step 8 makes that explicit; do not
+pre-empt it with a role that spans both.
+
+## 11.2 Rules
+
+1. **Every protected page and every action authorises server-side.** A `proxy.ts`
+   redirect is an optimistic convenience and is **not** enforcement — 7.3's
+   `getSessionCookie()` trap is exactly this mistake.
+2. **Authorisation is checked inside the action**, not in the component that
+   renders the control. Hiding a button is presentation (§6.2).
+3. **No self-signup.** Staff accounts are created by an admin. There is no public
+   registration route in phase one, and adding one is not a step in §5.2.
+4. **A CV is reachable only through a short-lived signed URL** minted per request
+   for an authorised session (§8.3). Never a stored public URL.
+5. **The role lives in the database, never in a cookie or `localStorage`**
+   (§7.5), and is re-read per request rather than trusted from the session
+   payload.
