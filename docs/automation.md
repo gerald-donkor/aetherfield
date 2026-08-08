@@ -563,6 +563,30 @@ Always confirm the served CSS chunk matches the build you just made:
 `curl -s localhost:PORT/careers | grep -o '/_next/static/chunks/[A-Za-z0-9_-]*\.css'`.
 Free ports: `ss -ltn | awk 'NR>1{print $4}' | grep -oE '[0-9]+$' | sort -un`.
 
+**An `AggregateError` of `ETIMEDOUT`s from `pg` is a happy-eyeballs budget, not
+a dead database — and one loop turns it into a number.** The error carries no
+timing and no address, so it reads as "Neon is down" when the truth is "the
+connect was 20 ms too slow". The count of inner errors equals the count of
+addresses the host resolves to (`getent ahosts <host>` — the pooled Neon host
+gives six, three A and three AAAA). Time the connects directly:
+
+```bash
+node -e 'const net=require("net");
+console.log("budget",net.getDefaultAutoSelectFamilyAttemptTimeout(),"ms");
+const host="<the -pooler host>";
+(async()=>{for(let i=0;i<4;i++){await new Promise(r=>{const t=Date.now();
+  const s=net.connect({host,port:5432},()=>{console.log("ok",Date.now()-t,"ms",s.remoteAddress);s.destroy();r();});
+  s.on("error",e=>{console.log("err",Date.now()-t,e.code);r();});});}})();'
+```
+
+If the successful connects land near the printed budget, that is the fault. A
+before/after A-B is the proof: the same loop wrapped in a `pg` `Pool`, run once
+at the default budget and once after `net.setDefaultAutoSelectFamilyAttemptTimeout(n)`.
+**Require a *fresh* `Pool` per iteration** — a warm pool reuses its socket and
+never reconnects, so a reused pool shows six passes and proves nothing. Run the
+script through `./node_modules/.bin/dotenv -e .env.local --`, not `npx dotenv`,
+and require `pg` by absolute path when the script lives in the scratchpad.
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

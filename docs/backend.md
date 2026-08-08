@@ -1409,3 +1409,106 @@ were driven by a synthetic query string, not by Google actually refusing an
 unknown account at the callback. No interactive Google test-account access was
 available, and no Google-backed user or OAuth token was created during any of
 these checks.
+
+---
+
+## Step 1 correction — the connect timeout that presented as broken sign-in, prompt 46
+
+`POST /api/auth/sign-in/social` returned 500 in local development, with the
+failing query being Better Auth's own rate-limit read:
+
+```
+Failed query: select "id", "key", "count", "last_request" from "rate_limit" ...
+[cause]: AggregateError: code: 'ETIMEDOUT', [errors]: [ Error x6 ]
+```
+
+It looked like an auth bug and was not one. **Every database query from the dev
+server was failing intermittently**; sign-in is simply the first surface that
+touches the database on every request, because `rateLimit.storage: "database"`
+(`lib/auth/server.ts`) reads `rate_limit` before anything else runs.
+
+### The cause, measured
+
+| measurement | value | how |
+| --- | --- | --- |
+| addresses the pooled Neon host resolves to | **6** — 3x A, 3x AAAA | `getent ahosts …-pooler.c-10.us-east-1.aws.neon.tech` |
+| Node's default happy-eyeballs attempt budget | **500 ms** | `net.getDefaultAutoSelectFamilyAttemptTimeout()`, node v26.5.1 |
+| real TCP connect RTT to the Neon proxy | **319 ms / 410 ms** on the attempts that won | `net.connect` timing loop, 4 runs |
+| the attempts that lost, in the same loop | **1513 ms / 1516 ms**, `ETIMEDOUT` | same loop |
+
+`net.autoSelectFamily` is on by default and races every resolved address,
+allowing each one 500 ms. The genuine RTT from this network to `us-east-1` sits
+at 320-410 ms — inside the budget, but only just — so jitter pushes an attempt
+over, and when all six go over Node collapses them into a single
+`AggregateError` of six `ETIMEDOUT`s. **The six inner errors are the six
+addresses**, which is what identifies the failure. The ~1.5 s wall time of the
+second 500 in the reported terminal output (`1735ms`) matches the 1513/1516 ms
+measured failures.
+
+Nothing was wrong with Neon, the credentials, the pooled URL, Drizzle, or the
+Better Auth configuration.
+
+### The fix
+
+`lib/db/client.ts` only, inside `getDb()`, and it is now constraint 4 in that
+file's comment block:
+
+- `net.setDefaultAutoSelectFamilyAttemptTimeout(2500)`, guarded by a
+  `typeof === "function"` check so a runtime without the setter cannot throw at
+  pool construction. **2500 ms is a judgement on the measurements above**, not a
+  measurement: about six times the slowest winning attempt, leaving room for a
+  developer further from `us-east-1`. It is a ceiling, not a wait, so it costs
+  nothing when a connect is healthy. It is a process-wide default and therefore
+  applies to every outbound socket the server opens — acceptable because the
+  module is server-only and a sub-500 ms connect budget is wrong for anything
+  cross-region.
+- `connectionTimeoutMillis: 10_000` on the `Pool`, previously unset and
+  therefore off. **Also a judgement**, sitting above the cold connect measured
+  at **3215 ms** (scale-to-zero wake plus one `select 1`), and chosen as the
+  point past which a request is better off failing visibly than hanging.
+
+No schema, migration, environment variable or route change. `attachDatabasePool`
+and the lazy no-`Proxy` shape of `getDb()` are untouched.
+
+### Two things deliberately not done
+
+- **The `pg-connection-string` SSL warning in the same terminal output is
+  unrelated and was left alone.** It is a deprecation notice that `prefer`,
+  `require` and `verify-ca` will adopt libpq semantics in `pg` v9, not a
+  failure. Changing `sslmode` on the Neon URL to silence it weakens or pins a
+  security-relevant default and deserves its own decision.
+- **Better Auth's `rateLimit.storage: "database"` was left as it is.** Moving it
+  to `"secondary-storage"` over the already-provisioned Upstash Redis would take
+  a database round trip off the front of every auth request and make auth
+  resilient to exactly this class of database fault. It is a real improvement
+  and an open follow-up — but it is a change to a shipped step 6 decision, and
+  it would not have fixed the bug, which reproduced on every query.
+
+### Verified, prompt 46
+
+- `npm run typecheck` exited 0 (`tsc --noEmit`); `npm run lint` exited 0
+  (`eslint`).
+- `npm run build` exited 0 on Next 16.2.12. **The route table is unchanged**:
+  `/`, `/about`, `/careers`, `/journal`, `/design-system`, `/sign-in`,
+  `/sign-up` and `_not-found` all `○ Static`; the six articles and three job
+  listings `● SSG`; `/account` and `/api/auth/[...all]` `ƒ`. Nothing became
+  dynamic, as expected for a server-only module.
+- **A-B against the default budget, six fresh pools each** (a fresh `Pool` per
+  iteration, because a warm pool reuses its socket and never reconnects):
+  at the **500 ms** default, **5 ok / 1 failed** — and the failure was the exact
+  signature, `ETIMEDOUT` at 1526 ms. At **2500 ms**, **6 ok / 0 failed**, connects
+  landing between 2271 and 3682 ms. Small sample, stated as such: it reproduces
+  the reported failure and shows it absent, it does not prove a rate.
+- **Live**, against a production server started on a spare port from this build,
+  the user's own dev server left running and untouched: three consecutive
+  `POST /api/auth/sign-in/social` returned **HTTP 200 in 4.6 s, 1.1 s and 1.0 s**,
+  each with an `accounts.google.com/o/oauth2/v2/auth` URL. **No `ETIMEDOUT` and
+  no error of any kind in the server log** — the only output was the unrelated
+  SSL deprecation warning. No client id, secret, state or verifier was recorded.
+
+**Not verified.** Whether the same `ETIMEDOUT` can reach `drizzle-kit` on
+`db:generate` / `db:migrate`, which run in their own short-lived processes over
+the unpooled URL and are not covered by this fix. It was not observed; it was
+also not provoked. And nothing here says anything about production on Vercel,
+where the function and the database sit in the same region and the 500 ms budget
+was never tight.
