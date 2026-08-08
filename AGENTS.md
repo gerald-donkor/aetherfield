@@ -153,7 +153,7 @@ exists.
 For every implementation request:
 
 1. Read `AGENTS.md` and follow its instructions as the highest priority project guidance. `AGENTS.md` is the source of truth for implementation decisions. User requests may override these rules only when the user explicitly requests a deviation, explains why, and the relevant rule is intentionally changed.
-2. Read the skills explicitly mentioned by the user.
+2. **Load every skill the work needs — always, at every stage.** Not only the ones the user names. Before writing the prompt file *and* again before implementing it, look over the available-skills listing and invoke each skill that owns a surface the task touches: the framework (`nextjs`, `next-cache-components`), the styling (`tailwind-4-docs`), the ORM and its migrations (`drizzle-docs`), validation (`zod-docs`), the chosen providers (`neon-postgres`, `resend`, `react-email`, `email-best-practices`, `upstash-ratelimit-js`, `upstash-redis-js`, `better-auth-best-practices`, `better-auth-security-best-practices`, `email-and-password-best-practices`, `organization-best-practices`), the platform (`vercel:marketplace`, `vercel:vercel-storage`, `vercel:env-vars`, `vercel:vercel-functions`, `vercel:vercel-firewall`), motion (`gsap-*`), and design work (`frontend-design:frontend-design`, `figma:*`). `docs/skills.md` records what is installed and what was deliberately excluded. **A skill is the verified source §12 rule 2 demands** — writing an API from memory when a skill for it is one call away is the failure this rule exists to prevent. If no skill covers the surface, say so explicitly rather than proceeding silently.
 2b. Read the `docs/` file that covers what the request touches, per the index above — plus `docs/automation.md` if any measurement, screenshot or build comparison is involved. The build record lives there, not here; working from this file alone means working without the measurements.
 3. Inspect only the code, files, and dependencies relevant to the request. Do not inspect, modify, or reason about unrelated parts of the repository unless they directly affect the approved implementation.
 4. Ask a focused question only if the task has meaningful ambiguity. Do not ask questions when reasonable assumptions can be made without affecting the implementation outcome.
@@ -253,6 +253,11 @@ a `/clear`, an approving `y` is answered by re-reading the file and nothing
 else. A skill that was loaded while writing the prompt is not loaded when the
 prompt runs, so an unlisted skill is a skill the implementation will silently
 work without. Naming them in the file is what makes the run reproducible.
+
+**And listing is not loading.** The section is a manifest, not a substitute:
+step 7 re-reads the file and **invokes every skill named in it** before writing
+code, exactly as step 2 requires. A prompt whose `SKILLS USED` section was
+written but never acted on is the same failure as one that omitted it.
 
 **Backend prompts carry three extra headings** (section 8 explains each):
 
@@ -684,7 +689,10 @@ provider-agnostic. Provision first, then build.
 - a second design system, or a component library that is not the existing
   primitives in `app/_components/`
 - GSAP for anything in the backend UI — `motion/` is the shared surface and its
-  discipline (front matter) is unchanged
+  discipline (front matter) is unchanged. **One granted exception: the demo
+  dialog's close-button hover**, authorised by the user on 7 Aug 2026 after
+  being shown this rule and offered a CSS-only alternative. See
+  `docs/backend.md`, step 2, for what it does and which numbers are judged
 - `localStorage` or a cookie for anything an authorisation decision reads
 
 ---

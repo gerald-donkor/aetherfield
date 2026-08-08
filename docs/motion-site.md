@@ -1348,3 +1348,15 @@ are normalised, with no class-string substitution needed. Chunk count goes
 - No geometry change, and the 20 px `--text-p1` / `--text-p2` floor stands.
 - No change to `DUR`, `EASE`, `Reveal`'s `stagger: 0.08` or its 36/24 default.
 
+
+---
+
+## Motion that lives outside this file
+
+**The demo dialog's close button magnifies, spins and plays a short tone on
+hover** (`app/_components/lead/demo-request-dialog.tsx`, on `/` and
+`/design-system`). It is backend UI and its record — the numbers, which of them
+are judged, the audio's shape, the blurred `::backdrop`, and the §7.5 deviation
+that authorises GSAP there at all — is in **`docs/backend.md`, step 2**. This
+line exists so a session reading the motion record does not conclude the site
+has no dialog motion.

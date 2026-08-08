@@ -598,7 +598,9 @@ page carries one empty element.
 
 **Native `<dialog>` + `showModal()`** supplies the focus trap, the inert
 background, the top layer and Escape from the platform; none of them is
-hand-rolled and there is no GSAP (§7.5). Focus moves to the heading on open
+hand-rolled. The dialog's own open and close carry no animation and still do
+not — the one piece of GSAP in the file arrived later, in prompt 45, and is
+recorded below. Focus moves to the heading on open
 rather than the first input, so the dialog is announced before the person is
 dropped in a text box, and `onClose` returns focus to the trigger by every route
 out — button, Escape and backdrop click alike. A click landing on the `<dialog>`
@@ -611,6 +613,96 @@ bullet and a border, no colour alone.
 
 **Success swaps the body in place**, no redirect (§10 rule 5): the page keeps
 its scroll position and its motion state.
+
+### The close button's hover, and the blurred backdrop — prompt 45
+
+A design pass over the leaf, requested by the user against a running dev server
+on 7 Aug 2026. It touches no stage of the write path: no action, schema, query,
+email or environment variable changed.
+
+**GSAP here is an explicit deviation from §7.5**, which bars GSAP from backend
+UI. The user was shown the conflict, offered a CSS-only alternative that keeps
+§7.5 intact, and chose GSAP — the override §1 rule 1 provides for. The §7.5
+bullet in `AGENTS.md` was amended in place to record the grant and point here.
+
+**The deviation costs no bundle, and this was checked rather than assumed.**
+`chrome.tsx` already pulls `NavDrop` and `FooterMotion`, so GSAP was in every
+affected route's chunks before this change. Measured on the pre-change build by
+grepping each route's referenced chunks: `/` 2 chunks containing `gsap`,
+`/journal` 2, `/about` 2, `/design-system` 1. After the change the per-route
+chunk **counts are unchanged on all 18 prerendered pages**.
+
+**The animation.** On pointer enter and on focus alike the `✕` scales to
+**1.35** and rotates **90 degrees** over **0.22 s**; pointer leave and blur
+reverse it. Every number is a **judgement, not a measurement** — there is no
+recording of this interaction to fit against. 90 degrees is chosen because the
+glyph is a `✕`, which lands back on itself and never rests crooked. `EASE` is
+imported from `motion/register.ts`; the duration is a **local** `HOVER_DUR`,
+on the `FOOTER_DUR` precedent, because `DUR`'s 0.5 is the page-reveal
+vocabulary and is sluggish under a cursor.
+
+- `useGSAP` takes `{ dependencies: [open], revertOnUpdate: true, scope }` —
+  the button mounts *after* the hook first runs, because the dialog body
+  renders only while `open` is true, and the body no-ops on a null ref.
+- `gsap.matchMedia()` with **both** conditions named. Under `reduce` no tween is
+  created at all and the ref stays null, so hovering does nothing — not a
+  zero-duration tween. Verified: the button's computed `transform` is `none`
+  through hover, leave, focus and blur under `prefers-reduced-motion: reduce`.
+- No `contextSafe`, which is banned outright; the handlers are React props and
+  the tween is created inside the context, so `mm.revert()` owns it.
+- **One paused `fromTo` played and reversed, not two `gsap.quickTo` setters.**
+  The setter pair was written first, as the prompt specified, and **measured
+  wrong**: `scale` is a shorthand over `scaleX`/`scaleY`, and a `quickTo` on it
+  alongside a second `quickTo` on `rotation` left the button at
+  `matrix(0, 1, -1, 0, 0, 0)` on hover — the rotation landed and the magnify was
+  silently dropped. The paused tween measures `matrix(0, 1.35, -1.35, 0, 0, 0)`
+  hovered and `matrix(1, 0, 0, 1, 0, 0)` at rest, which is the specified
+  outcome. `quickTo` exists for a stream of new target values per frame; a hover
+  has two states.
+- A pointer leaving a **focused** button does not settle it, so the pointer
+  cannot undo the keyboard's state.
+
+**The whine.** A WebAudio tone on pointer enter **only** — never on focus, so a
+keyboard user tabbing through is not blasted, and never on mount. Shape, all
+judged: a **triangle** oscillator sweeping **420 → 1080 Hz** over **0.18 s**,
+gain from **0.05** ramped exponentially to a 0.0001 floor (WebAudio rejects 0 as
+an exponential target). Quiet, brief, mechanical — a servo spinning up, not a
+notification chime, because the site's register is measured and operational.
+It is gated on the same reduced-motion check as the tween: no tween, no tone.
+One lazily created `AudioContext` in a ref, closed on unmount; the running
+oscillator is tracked and stopped before another starts, so re-entering does not
+stack. `resume()` is defensive only — the dialog is reachable only by a click,
+so audio is already unlocked. No input device is opened and no permission is
+requested.
+
+Verified in a real browser against the production build: focus alone created
+**0** oscillators; five rapid hover cycles created **5** oscillators with **5**
+`stop()` calls; closing and reopening the dialog left the hover working, which
+exercises `revertOnUpdate`; no page errors.
+
+**The backdrop.** `backdrop:bg-ink/40` became
+`backdrop:bg-ink/25 backdrop:backdrop-blur-md`. Both values are **judgements** —
+the reference screenshot shows the state *before* the blur and only marks where
+it belongs — and the tint drops because the blur now does the separation work;
+keeping 40 % over a blur makes the page unreadable rather than deferred.
+`backdrop-blur-md` is 12px, read from the Tailwind v4 docs snapshot
+(`backdrop-filter-blur.mdx`), and confirmed as computed
+`backdrop-filter: blur(12px)` / `background-color: oklab(0 0 0 / 0.25)` in the
+browser. **No `::backdrop` transition**: animating one needs `@starting-style`
+and `transition-behavior: allow-discrete`, and the dialog has no open/close
+transition to hang it on. That is a separate change with its own measurement.
+
+**Prerender impact, measured — two routes, not four.** The prompt predicted `/`,
+`/journal`, `/about` and `/design-system`. The build says **`/` and
+`/design-system` only**: `CtaBand`'s `demo` prop is opt-in and `/journal`'s band
+is the newsletter's while `/about`'s reads "View open roles", so neither renders
+a dialog at all. Method: build the working tree twice, before and after, strip
+the RSC flight scripts, normalise `BUILD_ID` and generated chunk names. Result —
+**16 of 18 pages markup-identical**, and the remaining two differ **only** by
+the `<dialog>` class string (twice on `/`, once on `/design-system`); zero real
+differences. The route table came back identical to the pre-change build. The
+close button's own markup is absent from every prerendered page: it lives inside
+the `open ? … : null` branch.
 
 ### `Field` gained a textarea, and it was extended rather than forked
 
