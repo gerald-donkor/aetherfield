@@ -6,6 +6,7 @@ import { useState } from "react";
 import { DemoRequestDialog } from "./lead/demo-request-dialog";
 import { FooterMotion } from "./motion/footer-reveal";
 import { NavDrop } from "./motion/nav-drop";
+import { NewsletterSubscribeDialog } from "./newsletter/subscribe-dialog";
 import { Button, ButtonLink, LinkButton, Wordmark } from "./primitives";
 
 /* There is no /product route, so Product resolves to the home page — the
@@ -135,6 +136,7 @@ export function CtaBand({
   action = "Request a demo",
   tone = "surface",
   demo = false,
+  newsletter = false,
 }: {
   headline: string;
   action?: string;
@@ -149,6 +151,14 @@ export function CtaBand({
      "View open roles". Defaulting to false is what keeps their prerendered
      HTML byte-identical without either page needing an edit. */
   demo?: boolean;
+  /* Whether this band's button opens the newsletter dialog (build step 4).
+     **Opt-in and explicit, exactly as `demo` is**, and for the same reason:
+     inferring it from `action` would make the wiring a property of a copy
+     string. Only /journal passes it, and defaulting to false is what keeps
+     every other caller's prerendered HTML byte-identical without an edit.
+     The two are mutually exclusive by construction below — a band is one CTA
+     or the other, never both. */
+  newsletter?: boolean;
 }) {
   return (
     <section
@@ -165,6 +175,12 @@ export function CtaBand({
         <DemoRequestDialog source="cta_band" className="mt-[38px]">
           {action}
         </DemoRequestDialog>
+      ) : newsletter ? (
+        // The same contract: the leaf renders the button itself and takes the
+        // class string over, so the band's geometry is untouched.
+        <NewsletterSubscribeDialog className="mt-[38px]">
+          {action}
+        </NewsletterSubscribeDialog>
       ) : (
         <Button className="mt-[38px]">{action}</Button>
       )}

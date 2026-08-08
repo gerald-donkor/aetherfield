@@ -8,7 +8,7 @@ import * as z from "zod";
 import { insertLead } from "../../lib/db/lead-queries";
 import { sendDemoRequestEmails } from "../../lib/email/demo-request";
 import { leadSource } from "../../lib/db/schema";
-import { checkDemoRequestLimit } from "../../lib/rate-limit";
+import { checkDemoRequestLimit, formatRetry } from "../../lib/rate-limit";
 import {
   demoRequestFieldsSchema,
   type SubmitResult,
@@ -144,13 +144,4 @@ export async function submitDemoRequest(
   );
 
   return { ok: true };
-}
-
-/** Retry timing in the site's measured register — "4 minutes", not "241s". */
-function formatRetry(seconds: number): string {
-  if (seconds < 60) return `${seconds} seconds`;
-  const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  const hours = Math.ceil(minutes / 60);
-  return `${hours} hour${hours === 1 ? "" : "s"}`;
 }

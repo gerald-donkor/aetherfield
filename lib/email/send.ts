@@ -63,6 +63,19 @@ export type SendEmail = {
       notification overrides it with the lead's own address, so a reply from
       the team reaches the person rather than the team. */
   replyTo?: string;
+  /**
+   * Custom RFC headers. Added at step 4 for exactly one purpose:
+   * `List-Unsubscribe` and `List-Unsubscribe-Post`, which Gmail, Yahoo and
+   * Microsoft require of bulk senders (`email-best-practices`'s
+   * `compliance.md`). Only the newsletter's marketing message sets it; a
+   * transactional confirmation carrying an unsubscribe is the hybrid the same
+   * skill warns against.
+   *
+   * **Verified against the installed SDK, not recalled** — resend 6.18.1
+   * declares `headers?: Record<string, string>` on `CreateEmailBaseOptions`
+   * (`node_modules/resend/dist/index.d.mts:553`).
+   */
+  headers?: Record<string, string>;
 };
 
 export async function sendEmail(email: SendEmail): Promise<SendOutcome> {
@@ -96,6 +109,7 @@ export async function sendEmail(email: SendEmail): Promise<SendOutcome> {
         html,
         text,
         ...(replyAddress ? { replyTo: replyAddress } : {}),
+        ...(email.headers ? { headers: email.headers } : {}),
       },
       { idempotencyKey: email.idempotencyKey },
     );

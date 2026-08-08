@@ -1,5 +1,7 @@
 import * as z from "zod";
 
+import type { SubmitResult as Result } from "./result";
+
 /**
  * The demo request's field rules — the one input contract, shared verbatim by
  * the client leaf and the Server Action (AGENTS.md 6.2, 10 rule 1).
@@ -74,18 +76,12 @@ export const NO_FIELD_ERRORS: DemoRequestFieldErrors = {
 };
 
 /**
- * The typed result every public write path in phase one returns (AGENTS.md 10
- * rule 2). Steps 4 and 5 import this shape rather than inventing their own.
+ * The demo request's typed result (AGENTS.md 10 rule 2).
  *
- * It is declared here, next to the schema, because the action is a
- * `"use server"` module and a client component may not import a type from one
- * without the type surviving into the request graph.
+ * **The shape itself moved to `./result` at step 4** — the newsletter needs the
+ * same vocabulary keyed by a different field set, and the point of this folder
+ * is that the vocabulary exists once. This alias keeps the name every step-2
+ * import already uses, and resolves to exactly what was written here before:
+ * `Partial<Record<DemoRequestField, string>>` is `Partial<DemoRequestFieldErrors>`.
  */
-export type SubmitResult =
-  | { ok: true }
-  | {
-      ok: false;
-      /** Always safe to render. Never an exception string. */
-      error: string;
-      fieldErrors?: Partial<DemoRequestFieldErrors>;
-    };
+export type SubmitResult = Result<DemoRequestField>;

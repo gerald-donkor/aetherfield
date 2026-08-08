@@ -25,5 +25,12 @@ initBotId({
     { path: "/", method: "POST" },
     // The same band, exhibited in the design system.
     { path: "/design-system", method: "POST" },
+    // Build step 4 — the newsletter. The subscribe dialog is on /journal's
+    // band, and the confirm and unsubscribe pages each invoke a token action.
+    // These are page paths for the same reason the two above are: a Server
+    // Action POSTs to the page it was invoked from.
+    { path: "/journal", method: "POST" },
+    { path: "/newsletter/confirm", method: "POST" },
+    { path: "/newsletter/unsubscribe", method: "POST" },
   ],
 });

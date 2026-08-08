@@ -75,6 +75,17 @@ export const lead = pgTable(
  * *is* uniqueness on the lowercased value, and re-subscribing after an
  * unsubscribe moves this row back to `pending` rather than forking a second
  * identity for the same person.
+ *
+ * **The upsert this table is shaped for** (step 4, `subscriber-queries.ts`),
+ * with `deleted_at is not null` treated as "no row" throughout:
+ *
+ * - no row → insert `pending`, both tokens fresh;
+ * - `pending` → rotate the confirmation token, re-stamp
+ *   `confirmation_token_sent_at`, send again;
+ * - `unsubscribed` → back to `pending` with a fresh confirmation token;
+ * - `confirmed` → no token, no state change, no email. The action still
+ *   reports success, because telling a stranger that an address is already on
+ *   the list leaks membership of it.
  */
 export const subscriber = pgTable(
   "subscriber",
@@ -84,6 +95,28 @@ export const subscriber = pgTable(
     status: subscriberStatus("status").notNull().default("pending"),
     /** Opaque, single-use, and rotated on each confirmation send. */
     confirmationToken: text("confirmation_token").notNull(),
+    /**
+     * When the current confirmation token was issued — **the only column
+     * expiry is read from.**
+     *
+     * `created_at` cannot date it: a resend rotates the token without creating
+     * a row, so after one resend `created_at` describes an address and this
+     * column describes the link in the person's inbox. Nullable because a row
+     * that has been confirmed has no live token to date.
+     */
+    confirmationTokenSentAt: timestamp("confirmation_token_sent_at", {
+      withTimezone: true,
+    }),
+    /**
+     * A second, **stable** token, and it must never be the confirmation one.
+     *
+     * The confirmation token is single-use and rotated on every resend, so an
+     * unsubscribe link built from it would break the moment it rotated — and
+     * an unsubscribe link lives in an inbox for years. It would also put a
+     * confirmation capability in a marketing footer, where anyone forwarding
+     * the message hands it on.
+     */
+    unsubscribeToken: text("unsubscribe_token").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -95,6 +128,7 @@ export const subscriber = pgTable(
     check("subscriber_email_lowercase", sql`${t.email} = lower(${t.email})`),
     uniqueIndex("subscriber_email_key").on(t.email),
     uniqueIndex("subscriber_confirmation_token_key").on(t.confirmationToken),
+    uniqueIndex("subscriber_unsubscribe_token_key").on(t.unsubscribeToken),
   ],
 );
 

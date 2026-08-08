@@ -941,6 +941,20 @@ Step 2's table, extended. The stage letters are `AGENTS.md` §10's.
 `lib/email/templates/newsletter-*.tsx` and a `lib/email/newsletter.ts` beside
 `demo-request.ts`; it does not touch `send.ts`.
 
+> **Corrected by prompt 47, in the change that falsified it** (§12 rule 8).
+> Step 4 touched all three of those, and the prediction was wrong in a
+> different way each time. `send.ts` gained an optional `headers` passthrough,
+> because marketing mail needs `List-Unsubscribe` and a transactional
+> confirmation does not — the paragraph above could not have known that,
+> because step 3 sent no marketing. `config.ts` gained `appBaseUrl()`, because
+> an email carrying a link needs an absolute origin and step 3's two messages
+> carried none. And `SubmitResult` moved out of `lib/validation/lead.ts` to
+> `lib/validation/result.ts`, because the newsletter needs the same shape keyed
+> by a different field set — the name and the meaning at the old import path are
+> unchanged, so "import it, do not restate it" held even as the file did not.
+> The rule the sentence was really making is intact; only its file list was
+> stale. See step 4 below.
+
 ### `templates/` has no `server-only`, and that is deliberate
 
 §8.4 puts `import "server-only"` on every `lib/` module that touches a secret.
@@ -1512,3 +1526,663 @@ the unpooled URL and are not covered by this fix. It was not observed; it was
 also not provoked. And nothing here says anything about production on Vercel,
 where the function and the database sit in the same region and the 500 ms budget
 was never tight.
+
+---
+
+## Step 4 — newsletter signup, double opt-in
+
+Implemented by prompt 47 on 8 Aug 2026. **This step invents nothing.** Step 2 set
+the write path and step 3 set the email pattern, and §5.2 says in terms that
+steps 4 and 5 copy them; every deviation below is named where it happens, and
+there are five — a second limiter that runs *after* the parse, an already-confirmed
+address that reports success, a confirmation send keyed on a token rather than a
+row id, a Route Handler that fails **open**, and a `Shell` prop widened rather
+than duplicated. Anything not named here matches
+`app/_actions/demo-request.ts` and `lib/email/demo-request.ts`.
+
+### The contract, in file order
+
+Step 3's table, extended. The stage letters are `AGENTS.md` §10's.
+
+| file | role | server-only |
+| --- | --- | --- |
+| `lib/validation/result.ts` | **new** — `SubmitResult<TField>`, the one result vocabulary, moved out of `lead.ts` | **no — deliberately** |
+| `lib/validation/lead.ts` | changed — `SubmitResult` is now an alias of `Result<DemoRequestField>` | **no — deliberately** |
+| `lib/validation/newsletter.ts` | **new** — the address schema, the field-error record, `NewsletterTokenState`, `NewsletterTokenResult` | **no — deliberately** |
+| `lib/db/schema.ts` | changed — two columns and a unique index on `subscriber` | yes |
+| `lib/db/migrations/0002_fuzzy_felicia_hardy.sql` | **new** — generated, never hand-written | — |
+| `lib/db/subscriber-queries.ts` | **new** — `upsertSubscriber`, `confirmSubscriberByToken`, `unsubscribeByToken`, the token generator, the TTL | yes |
+| `lib/rate-limit/index.ts` | changed — four new limiters, and `formatRetry` moved here | yes |
+| `lib/email/config.ts` | changed — `appBaseUrl()` | yes |
+| `lib/email/send.ts` | changed — an optional `headers` passthrough | yes |
+| `lib/email/templates/shared.tsx` | changed — `footerText` widened to `ReactNode` | **no — deliberately** |
+| `lib/email/templates/newsletter-confirmation.tsx` | **new** — the double opt-in request | **no — deliberately** |
+| `lib/email/templates/newsletter-welcome.tsx` | **new** — the first marketing email in this repository | **no — deliberately** |
+| `lib/email/newsletter.ts` | **new** — stage f for this flow, two calls, both returning void and throwing nothing | yes |
+| `app/_actions/newsletter.ts` | **new** — `subscribeToNewsletter` (a, b, c, b-again, e, f), `confirmSubscription`, `unsubscribe` | yes (`"use server"`) |
+| `app/_actions/demo-request.ts` | changed — imports `formatRetry` instead of declaring it | yes |
+| `app/_components/newsletter/subscribe-dialog.tsx` | **new** — the client leaf on `/journal`'s band | client |
+| `app/_components/newsletter/token-action.tsx` | **new** — the one button both token pages render | client |
+| `app/newsletter/confirm/page.tsx` | **new** — reads `?token=`, on `AuthShell` | server |
+| `app/newsletter/unsubscribe/page.tsx` | **new** — the same shape | server |
+| `app/api/newsletter/unsubscribe/route.ts` | **new** — the one-click `List-Unsubscribe` endpoint | server |
+| `app/_components/chrome.tsx` | changed — `CtaBand` gains `newsletter?: boolean` | server |
+| `app/journal/page.tsx` | changed — passes it. **The only settled page this step edits** | server |
+| `instrumentation-client.ts` | changed — three page paths added to BotID's protect list | client |
+
+**The three files step 3 said a later form would not touch were two.**
+`lib/email/config.ts` and `lib/email/send.ts` were both changed after all —
+`config.ts` because an email now carries a link and something has to decide what
+it resolves against, `send.ts` because marketing mail carries headers
+transactional mail does not. Step 3's line "it does not touch `send.ts`" is
+therefore **stale, and is corrected here rather than left standing** (§12
+rule 8). What did hold is the *shape*: neither change is a fork, both are
+additive, and `FROM`, `replyTo()` and the rendering of both parts are untouched.
+
+### The schema — two columns, and why each exists
+
+`subscriber` already existed from step 1 with `status`, `confirmation_token`,
+`created_at`, `confirmed_at`, `unsubscribed_at` and `deleted_at`. It was short
+two things and both are additive.
+
+**`confirmation_token_sent_at`** (`timestamp with time zone`, nullable) — the
+column expiry is read from, and the only one. `created_at` cannot date a
+confirmation link, because a resend rotates the token *without* creating a row:
+after one resend `created_at` describes an address and this column describes the
+link sitting in the person's inbox. Nullable because a confirmed row has no live
+token to date.
+
+**`unsubscribe_token`** (`text`, `NOT NULL`, unique) — **a second, stable token,
+and it must never be the confirmation one.** See the next heading.
+
+The generated migration, quoted verbatim from
+`lib/db/migrations/0002_fuzzy_felicia_hardy.sql`:
+
+```sql
+ALTER TABLE "subscriber" ADD COLUMN "confirmation_token_sent_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "subscriber" ADD COLUMN "unsubscribe_token" text NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "subscriber_unsubscribe_token_key" ON "subscriber" USING btree ("unsubscribe_token");
+```
+
+**`ADD COLUMN ... text NOT NULL` with no default is only safe on an empty
+table**, and that was checked rather than assumed: `subscriber` was queried and
+returned **0 rows** before the migration was generated — nothing has ever
+written it, in any environment. Had it not been empty the correct move was to
+stop and report rather than guess a backfill, per the prompt and §12 rule 9.
+The unique index is generated by Drizzle Kit from `uniqueIndex(...)` in
+`schema.ts`, exactly as `subscriber_confirmation_token_key` was; no
+`ALTER TABLE` was hand-run (§7.2).
+
+No other column. No `source`, no `ip`, no `user_agent` — §8.3 rule 1 is "collect
+only what the flow needs", and a newsletter needs an address.
+
+### Two tokens, not one
+
+An unsubscribe link built from the confirmation token would be broken by design.
+The confirmation token is **single-use and rotated on every resend**, so the
+unsubscribe link in a message already delivered would stop working the moment
+the person asked for another confirmation. Worse, it would put a *confirmation
+capability* in a marketing footer — a link that lives in an inbox for years and
+gets forwarded.
+
+So `unsubscribe_token` is issued once, at insert, and
+`upsertSubscriber` deliberately does **not** rotate it: rotating would break the
+link in every message already sent to that person. Both tokens are 32 bytes from
+`randomBytes`, base64url, verified against `node:crypto` — synchronous, throws
+rather than returning weak bytes on an unseeded pool, `"base64url"` a supported
+`BufferEncoding`. Never a uuid derived from the row and never a hash of the
+address: possession of the confirmation token is the entire proof that a person
+controls the inbox, so anything derivable from public data defeats the mechanism.
+
+### The upsert — four cases in one statement
+
+`upsertSubscriber(email)` in `lib/db/subscriber-queries.ts` covers, with
+`deleted_at is not null` treated as "no row" throughout:
+
+| existing row | result |
+| --- | --- |
+| none | insert `pending`, both tokens fresh, `confirmation_token_sent_at` stamped |
+| `pending` | rotate the confirmation token, re-stamp the sent-at, send again |
+| `unsubscribed` | back to `pending` with a fresh confirmation token — re-subscribing is not a second identity |
+| `confirmed` | **no token, no state change, no email** — and the action still reports success |
+
+**`onConflictDoUpdate`, not a read followed by a write.** Two simultaneous
+submissions of the same address would both find no row and both insert, and the
+unique index would reject one of them with an error the person did nothing to
+deserve. Postgres settles it in one statement instead.
+
+**`setWhere` is what encodes "confirmed means leave it alone":**
+
+```ts
+setWhere: or(
+  ne(subscriber.status, "confirmed"),
+  isNotNull(subscriber.deletedAt),
+),
+```
+
+Unqualified column references on this side of `ON CONFLICT` resolve to the
+**target** table, so this reads the existing row and not the proposed one. When
+it is false the update is skipped, `returning()` yields nothing, and the caller
+gets `{ state: "already-confirmed" }`. **That is the only reason it can yield
+nothing**, which is what makes an empty `returning()` a reliable signal rather
+than an ambiguity — the insert either lands, or the update lands, or the guard
+suppressed it. The soft-deleted arm keeps an erased address able to start a fresh
+lifecycle.
+
+The transition timestamps are cleared on the way back to `pending`: a
+`confirmed_at` left sitting on a pending row would read as "this address is
+confirmed" to step 7's submissions view and to any later query that trusts it.
+`created_at` is untouched, so the audit trail of when the address first arrived
+survives.
+
+`confirmSubscriberByToken` is **single-use by construction** — the status is part
+of the `WHERE`, so a replayed link updates nothing rather than restamping
+`confirmed_at` and sending a second welcome — and expiry is `gt(sentAt, cutoff)`
+against `confirmation_token_sent_at`, never `created_at`. When the conditional
+update matches nothing, one follow-up read classifies *why* (`already-confirmed`
+/ `unsubscribed` / `expired` / `unknown`). **That read is not an oracle**: it
+answers only to someone already holding a 32-byte token, and it never sees or
+returns an address.
+
+`unsubscribeByToken` is idempotent — unsubscribing twice is a success, because a
+provider may retry and a person may click the link in two different issues — and
+it never reveals whether the token belonged to a confirmed or a merely pending
+row. A soft-deleted row reports `already-unsubscribed`: the person is gone, they
+are certainly not receiving mail, and telling them their token is unknown would
+be both alarming and false.
+
+### The limiters — five of them, and every number is a judgement
+
+`lib/rate-limit/index.ts` now holds five. **Nothing here was measured against
+traffic**, because neither of the two forms it protects has ever shipped and
+there is no traffic to fit against. The front matter's measured-or-judged rule
+applies to every row: these are judgements with recorded reasoning, and they are
+to be revisited against real traffic rather than treated as fitted.
+
+| limiter | prefix | limit | window | key |
+| --- | --- | --- | --- | --- |
+| demo request (step 2, unchanged) | `demo-request` | 5 | 1 h | IP |
+| newsletter signup | `newsletter-ip` | 5 | 1 h | IP |
+| confirmation send, burst | `newsletter-address-burst` | 1 | 60 s | sha256(address) |
+| confirmation send, hourly | `newsletter-address` | 3 | 1 h | sha256(address) |
+| confirm / unsubscribe actions | `newsletter-token` | 20 | 1 h | IP |
+| one-click endpoint | `newsletter-one-click` | 10 | 1 h | sha256(token) |
+
+The reasoning, per limiter:
+
+- **Signup, 5/h per IP** — the same shape and the same judgement as the demo
+  request's. Subscribing is a once-ever act for a person, so five in an hour from
+  one address block is far above honest use and far below what makes the table
+  worth spamming. Sliding rather than fixed, so an hour boundary is not a free
+  refill for a client that times its burst.
+- **The per-address pair is the limit that actually matters.** An IP limit bounds
+  how often one client submits; it does nothing about *whose* inbox those five
+  submissions point at, so without this one a subscribe form is a small mail
+  cannon aimed at five strangers. The numbers — 3/hour per address, resend after
+  60 seconds — come from `email-best-practices`'s `email-capture.md`. **That is a
+  published recommendation, not a measurement of this site**, and it is recorded
+  as the judgement it is. The two windows are checked burst-first so a rejected
+  double-click does not consume one of the three hourly sends.
+- **Token actions, 20/h per IP** — deliberately looser. They write no new row,
+  send no mail to a third party, and act on a 32-byte token that guessing does not
+  reach. The limit exists so a broken client cannot hammer the database, not
+  because the path is dangerous.
+- **One-click, 10/h per token.**
+
+**The address key is a sha256, and the reason is §8.3 rule 2.** That rule keeps
+personal data out of every store that is not the table which owns it, and Redis
+is such a store: an unhashed key would put every submitted address in Upstash's
+console, readable by anyone with dashboard access and retained for the window's
+lifetime. sha256 over the already-lowercased address gives a stable key with none
+of that. It is why the per-address check runs **after** the parse rather than at
+stage b — it needs the canonical lowercased address the schema produces. Still
+before the write, so a limited address costs nothing but a parse.
+
+**The one-click endpoint is keyed by the token rather than the IP, and this is
+deliberate.** Gmail's and Yahoo's infrastructure POST on behalf of many different
+people from a small pool of addresses, so an IP key would throttle a mail
+provider honouring real unsubscribes. A token key bounds abuse of any one
+subscriber's link, which is the thing that can actually be abused.
+
+**And that endpoint fails OPEN, where the demo action fails closed.** The
+reasoning is inverted because the risk is: refusing to honour an unsubscribe
+because Redis is unreachable is a compliance failure, while letting an
+idempotent, non-destructive write through unmetered for the duration of an
+outage is not. Every other path in this step keeps step 2's closed stance — an
+unlimited public write path is worse than a form that is briefly unavailable
+(§8.2 rule 4).
+
+`formatRetry` moved from `app/_actions/demo-request.ts` into
+`lib/rate-limit/index.ts` unchanged, because two actions now need the identical
+sentence and `app/_actions/*.ts` are `"use server"` modules whose every runtime
+export must be an async function. It now sits next to the limiter that produces
+the number it formats.
+
+### The enumeration decision — success for an address already on the list
+
+`subscribeToNewsletter` returns the **same** `{ ok: true }` for a new address, a
+pending one and an already-confirmed one. The upsert sends no second email in the
+third case; the browser cannot tell the three apart.
+
+**This is a deliberate deviation from the `email-best-practices` skill**, whose
+`email-capture.md` offers "You're already subscribed! [Manage preferences]" as
+the copy for this case. That copy is written for a signed-in preference centre,
+where the person has already proved who they are. On an anonymous public form it
+is a **membership oracle**: anyone could type an address and learn whether it is
+on Aetherfield's list. The cost is that a genuinely subscribed person
+re-subscribing gets no second email — which is the correct behaviour anyway.
+
+The same reasoning runs through the token paths. The one-click endpoint returns
+`200` for an unknown token, and `unsubscribeByToken` never distinguishes a
+confirmed row from a pending one.
+
+### Confirmation is a button, not a GET
+
+Both `/newsletter/confirm` and `/newsletter/unsubscribe` render a page with one
+button. **The transition does not happen on render**, and either of two reasons
+alone would settle it:
+
+1. §6.2 puts every mutation in a Server Action. A page that confirms while
+   rendering is a GET that writes.
+2. **Corporate mail scanners follow links in email** before a person ever sees
+   them. A GET that confirms lets a scanner opt someone in; a GET that
+   unsubscribes lets one silently opt them out.
+
+**The cost is one extra click, and confirming on render is the more common
+industry choice** — it is stated plainly here rather than buried, because a later
+session reading this should know the trade was made knowingly and is one line to
+change.
+
+Both pages are built on `AuthShell` rather than a new shell (§7.5 forbids a
+second design system): the page needs exactly what `/sign-in` needs, and
+`AuthShell`'s props are plain strings, so nothing about it is auth-specific but
+its folder. Both are `noindex` — a page whose entire content is a capability in
+its query string has no business in a search index. Both read `searchParams`
+asynchronously (Next 16) and take the first value if `?token=` repeats, letting
+the lookup decide whether it is anything.
+
+**Every outcome gets its own copy** rather than one "something went wrong"
+(§8.2 rules 4 and 5): `confirmed`, `already-confirmed`, `expired`,
+`unsubscribed`, `already-unsubscribed`, `unknown`, and `missing` — the last
+produced by the page, not the action, when the URL carried no token at all. The
+copy is keyed by state in `token-action.tsx`, so the action returns a state and
+never a sentence and the site's copy stays on the site's side of the boundary.
+The announcement is a focused `role="status"`, and the page has no colour state
+at all, so it is legible without colour by construction. Any classified state
+spends the button and swaps it for a route back to `/journal`; only an `ok: false`
+error leaves the button, because a rate limit or an unreachable database is the
+one thing worth clicking again.
+
+`NewsletterTokenResult`'s `ok` is about the **request**, not the outcome: "your
+link expired" is a successfully handled request reporting an unhappy state, while
+`ok: false` is reserved for a rejection the person can retry.
+
+### Idempotency keys — the confirmation deviates from step 3's format
+
+Step 3 established `<event-type>/<entity-id>` keyed on the row id. **The
+confirmation send breaks that, and the welcome send keeps it.**
+
+`newsletter-confirmation/${confirmationToken}` — keyed on the **token**. A resend
+rotates the confirmation token without creating a row, so a key built from
+`subscriber.id` would be identical across the first send and every resend, and
+Resend's idempotency window is 24 hours: the second message would be swallowed
+and the person would wait forever for a link that was never sent. The token
+changes on exactly the occasions a new message must go out, which makes it the
+correct entity here. It still suppresses a genuine retry of one send — same
+token, same payload — which is the whole point of the key. 43 base64url
+characters, far inside the documented 256-character limit.
+
+`newsletter-welcome/${subscriberId}` — back to the step-3 format. Confirmation is
+single-use, so a second welcome inside 24 hours can only be a retry or a
+resubscribe-and-reconfirm cycle, and suppressing it is right in both cases.
+
+### `Shell`'s `footerText` widened to `ReactNode`
+
+`lib/email/templates/shared.tsx` changed one type: `footerText: string` became
+`footerText: ReactNode`. The welcome message is marketing, so its footer has to
+carry a visible unsubscribe `<Link>` **inside the sentence**, which a string
+cannot express.
+
+**Widening beat adding a second prop.** A `string` is still a `ReactNode`, so
+both step-3 templates are untouched and there remains exactly one footer in the
+vocabulary — a `footerNode` alongside `footerText` would have created two ways to
+say the same thing and a rule about which wins.
+
+### `send.ts` gained a `headers` passthrough
+
+One optional field on `SendEmail`, spread into the send only when present:
+
+```ts
+...(email.headers ? { headers: email.headers } : {}),
+```
+
+**Verified against the installed SDK rather than recalled** (§12 rule 2): resend
+**6.18.1** declares `headers?: Record<string, string>` on
+`CreateEmailBaseOptions`, at `node_modules/resend/dist/index.d.mts:553`, with the
+doc comment "Custom headers to add to the email." Nothing else about `send.ts`
+changed — both parts are still rendered here, `react` is still never passed, and
+a failure still logs a template name and an error class and never an address.
+
+It exists for exactly one purpose. The welcome email sets:
+
+```
+List-Unsubscribe: <https://…/api/newsletter/unsubscribe?token=…>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+Gmail, Yahoo and Microsoft require the pair of bulk senders
+(`email-best-practices`, `compliance.md`). `List-Unsubscribe` names the **API
+endpoint** rather than the page, because `List-Unsubscribe-Post` promises the
+receiver it may POST to it; the visible link in the footer is the page, for a
+human.
+
+**The confirmation email carries neither**, and that is correct: there is nothing
+to unsubscribe *from* yet — the address is `pending`, no marketing has been sent,
+and an opt-out link on a message asking for opt-in is incoherent. It is also the
+"problematic hybrid" `email-types.md` warns against, which the demo-request
+confirmation's own docblock already argued.
+
+### Environment and personal data
+
+**No new environment variable, and specifically no `NEXT_PUBLIC_*`.** Phase one
+still has none, and `.env.example` is unchanged by this step. §8.4's table needs
+no row.
+
+The absolute URLs in both emails resolve against **`BETTER_AUTH_URL`**, read by a
+new `appBaseUrl()` in `lib/email/config.ts`, which strips trailing slashes and
+**throws when unset**, in `getResend()`'s register. **Reusing it beat inventing
+`APP_URL`** (§8.4: do not invent a variable name): it is already the
+application's base URL, already in `.env.example`, and already required in every
+environment that runs auth, so a second variable naming the same value is one
+more thing to set and one more way for two parts of the app to disagree about
+where they live. The throw is caught by `lib/email/newsletter.ts`, which is
+best-effort by construction, so it can never fail a write — an email carrying
+`undefined/newsletter/confirm` would be worse than one never sent, because the
+send would be reported as a success and the person would be stuck.
+
+**Stored:** one lowercased address per subscriber, its status, two tokens and the
+lifecycle timestamps — exactly `subscriber`'s columns, and nothing else.
+
+**In Redis:** an IP, a sha256 of an address, and a sha256 of a token. **Never an
+address and never a live token.**
+
+**Logged:** nothing personal, on any path, in any catch. `lib/email/newsletter.ts`
+emits `[email] send failed for subscriber <uuid>: <template>:<class>` and
+`[email] <template> threw for subscriber <uuid>` — a uuid, a template name and
+the provider's error class. `app/_actions/newsletter.ts` contains no `console`
+call at all. `app/api/newsletter/unsubscribe/route.ts` deliberately logs nothing
+even on a swallowed failure: the token is a live capability and the row it points
+at is a person.
+
+**Personal data continues to reach a third party.** Every confirmation and every
+welcome sends the subscriber's address to Resend over TLS, under Resend's own
+retention policy, which we control and have configured nothing about — the same
+position step 3 recorded. No Resend webhook, no delivery-event handler, no
+contacts or audiences.
+
+### Retention is stated, not enforced
+
+The intent is that a subscriber row lives as long as the subscription and is
+soft-deleted on request, through `subscriber.deletedAt`, which exists for exactly
+that and is honoured on every read in `subscriber-queries.ts`. **No scheduled
+deletion, no retention window and no erasure endpoint is implemented**; an
+erasure request today is a manual `UPDATE`. Step 7 is where a real control would
+land. This is recorded plainly rather than implying a mechanism exists.
+
+### Two open gaps, and both are blockers rather than bugs
+
+**1. The sending domain, unchanged from step 3.** `lib/email/config.ts` still
+sends from `Aetherfield <onboarding@resend.dev>`, Resend's sandbox sender, which
+**delivers only to the Resend account's own address**; every other recipient is
+refused with a 403. So today a confirmation link cannot reach a stranger's inbox,
+and the double opt-in cannot complete for anyone but the account holder. The
+close-out is step 3's, unchanged: acquire and verify a domain, publish SPF, DKIM
+and DMARC, and change `FROM`.
+
+**2. There is no physical postal address in the welcome email, and CAN-SPAM
+requires one.** Aetherfield has none. **This is a blocker for sending marketing
+mail in production** — it is not a styling gap and it is not closed by the domain
+landing. **No placeholder was put in the template**, because a fabricated address
+in front of a real person is exactly §12's failure mode, and a placeholder that
+looks real is worse than an omission that is visible. `newsletter-welcome.tsx`'s
+own docblock records the same thing at the point of use.
+
+Both are recorded here rather than invented around (§12 rules 7 and 9). Until
+they are closed the flow is complete in code and undeliverable in production.
+
+### What step 4 deliberately did not do
+
+- **No preference centre and no send infrastructure.** Nothing here sends an
+  actual issue of the journal. The list is captured, confirmed and
+  unsubscribable, which is the whole of §5.2's step-4 row.
+- **No webhook handling** — bounces, complaints and suppression are real
+  requirements for a sender at volume, and they are a later decision with their
+  own endpoint and its own verification.
+- **No `/design-system` exhibit** for the subscribe band. Step 2 put the dialog in
+  the exhibit because the dialog was the new thing; this leaf is a copy, and
+  adding it would change a second settled page's HTML for no gain.
+- **No GSAP.** The demo dialog's close-button magnify-spin-and-tone is an
+  explicit, user-granted exception to §7.5 (7 Aug 2026, after the rule was shown
+  and a CSS-only alternative offered). A grant for one surface is not a licence to
+  spread GSAP into the next piece of backend UI, so this dialog's close button is
+  the same markup with the same `transition-colors` and no tween. If the
+  affordance is wanted here too, that is a decision, not an assumption.
+- **No email-preview script.** The templates are inspected with `render()`
+  directly, per §2's corrected note. Both carry `PreviewProps` for whenever one
+  exists.
+- **No change to the demo-request flow** beyond the two extractions it genuinely
+  shares — `formatRetry` and `SubmitResult`. Both are moves, not rewrites.
+
+
+### A third new route, where §5.2 predicted two
+
+§5.2's step-4 row reads "`/journal` form leaf; two new routes". This step shipped
+**three**: `/newsletter/confirm`, `/newsletter/unsubscribe` and
+`/api/newsletter/unsubscribe`. The third is the one-click `List-Unsubscribe`
+endpoint, and the plan could not have named it because the requirement comes from
+`compliance.md` rather than from the product — Gmail, Yahoo and Microsoft require
+the header pair of bulk senders, and `List-Unsubscribe-Post` is a promise that
+something will accept a `POST`.
+
+It is a **sanctioned** Route Handler and not a §6.2 breach: 6.2 reserves handlers
+for callers that are not this application, and the caller here is a mail
+provider's infrastructure acting on a header we published. No business logic is
+in it — it reads a token, calls the query layer, and answers `200`.
+
+§5.2 is a *plan*, and a plan is not amended by what was built against it; the
+deviation is recorded here, which is where the build record lives (§8.5).
+
+### The leaf lands in every page's bundle, not just `/journal`
+
+`CtaBand` lives in `chrome.tsx`, and every route imports that module for
+`SiteNav` and `SiteFooter`. So importing `NewsletterSubscribeDialog` at its top
+puts the dialog, the newsletter Zod schema and the action reference into the
+**shared** client chunk on all eighteen prerendered pages, not only the one page
+that renders the band.
+
+This is step 2's precedent exactly — `DemoRequestDialog` is imported the same way
+and has been since prompt 42 — and it does not breach the front matter's bundle
+rule, which governs `home/` imports. It is recorded because it is a real cost
+that the prerender diff makes visible and that no route table would: five
+content-hashed JS chunks are renamed site-wide, with **script counts unchanged on
+every page**, which is the signature of chunk *content* changing rather than a
+page gaining one.
+
+The alternative — hoisting the leaf out of `chrome.tsx` and passing it into
+`CtaBand` from `/journal` — would confine it to one route and is the thing to do
+if a third dialog ever arrives. Two is not yet worth restructuring a settled
+shared component for.
+
+### Two accessibility defects, found by rendering rather than by reading
+
+Both were in code written this step, and both were invisible in the source:
+
+1. **The confirmation's fallback link failed WCAG AA.** `<Link>` with no `style`
+   emits react-email's default `#067df7`, which measures **3.97:1** on white at
+   13px normal text — under the 4.5:1 floor, and the 3:1 large-text exemption
+   does not apply. The surrounding paragraph was the compliant `#6c6c6c`; only
+   the anchor inside it was not. Now ink at 21:1 with an underline.
+2. **The welcome's unsubscribe link had no distinguishing cue at all.** It
+   rendered `color:#6c6c6c;text-decoration-line:none` inside footer prose that is
+   *also* `#6c6c6c` — same colour, no underline, no weight change. That is worse
+   than a WCAG 1.4.1 colour-only failure, which at least leaves a colour to
+   notice, and it mattered here because this is the opt-out a bulk-mail recipient
+   must be able to find.
+
+Both links now set `textDecorationLine` **and** `textDecoration`. The longhand is
+not redundant: `Link`'s own default is `text-decoration-line:none`, so the
+shorthand alone emitted `text-decoration-line:none;text-decoration:underline` —
+correct by cascade order, but Outlook's Word engine is not to be trusted to
+resolve shorthand against longhand, and an accessibility cue is not the place to
+bet on it.
+
+A third finding was a **stale comment, not a defect**: the template claimed
+`box-border` protected the `Button`'s padding. The rendered HTML contains no
+`box-sizing` at all — react-email v6's `Button` uses `mso-padding-alt` plus split
+`padding-*` and `max-width:100%`. The protection is real, the explanation was
+wrong, and the docblock now says what the renderer actually does. The skill's
+`box-border` advice is for its Tailwind mode; these templates are inline styles.
+
+### Tokens travel in query strings, and that is a property to know about
+
+A capability in a URL is inherent to any emailed link — there is nowhere else to
+put it — but it means the confirmation and unsubscribe tokens appear in anything
+that records request URLs. Against `next dev` this is visible immediately: the
+framework's own tracing prints both the full URL and the **serialized Server
+Action arguments**, so the address and the tokens appear in the dev log even
+though the application logs neither.
+
+That is Next's tracing and not this code — `grep -rn "console\."` across
+`app/_actions/newsletter.ts`, both leaves, both pages, the route handler,
+`lib/db/subscriber-queries.ts` and `lib/rate-limit/` returns nothing, and the only
+`console` calls in the flow are `lib/email/newsletter.ts`'s two warning lines,
+which carry a template name, an error class and a row uuid.
+
+**Not verified: whether the same tracing is emitted under `next start` or on
+Vercel.** It should be checked before a deployment, and a platform access log will
+carry the token in the URL regardless of the answer. The mitigations already in
+place are that the confirmation token is single-use and expires in 48 hours, and
+that the unsubscribe token grants nothing but unsubscribing.
+
+### Verified, prompt 47
+
+Every result below was produced by running the command, on 8 Aug 2026. Work was
+parallelised across four agents; each result is quoted from the run that produced
+it.
+
+- `npm run lint` exited 0 with no output. `npm run typecheck` exited 0 with no
+  output. Both were re-run after the accessibility fixes and exited 0 again.
+- `npm run db:generate` produced **exactly one** migration,
+  `0002_fuzzy_felicia_hardy.sql`, quoted in full above. A second run afterwards
+  reported `No schema changes, nothing to migrate`.
+- **`subscriber` was confirmed empty before the `NOT NULL` column was added** —
+  `select count(*) from subscriber` returned `0`, which is what makes
+  `unsubscribe_token text NOT NULL` safe without a backfill.
+- **The first `npm run db:migrate` silently did not apply.** Its output ended
+  mid-spinner and was *reported as applied*; the journal in fact still held only
+  ids 1 and 2. The failure surfaced only when the end-to-end run hit
+  `column "confirmation_token_sent_at" of relation "subscriber" does not exist`
+  (`42703`) on the first real subscribe. A second `db:migrate` succeeded. Final
+  state, read back from the database: `MIGRATIONS: 1,2,3`; `COLUMNS:
+  id,email,status,confirmation_token,created_at,confirmed_at,unsubscribed_at,deleted_at,confirmation_token_sent_at,unsubscribe_token`;
+  `INDEXES: subscriber_confirmation_token_key, subscriber_email_key,
+  subscriber_pkey, subscriber_unsubscribe_token_key`.
+
+  **The lesson is not "run it twice".** The write path's `catch` around
+  `upsertSubscriber` returns the generic failure and logs nothing (by design,
+  §8.3 rule 2), so a missing migration presents as a generic error toast and
+  *nothing at all* in the log. Anyone resuming this work should assume the
+  database may be unmigrated and check the journal rather than the spinner.
+- `npm run build` exited 0 on Next 16.2.12. **The nine static and nine SSG routes
+  kept their render modes**, and exactly three routes were added, all dynamic:
+  `ƒ /api/newsletter/unsubscribe`, `ƒ /newsletter/confirm`,
+  `ƒ /newsletter/unsubscribe`.
+- **Prerender diff** against a clean `../aetherfield-base` worktree at parent
+  commit `5c76823`, with the four gitignored doc snapshots moved aside on both
+  sides (both builds emitted **one** 67k CSS chunk, confirming no contamination).
+  **17 of 18 pages are byte-identical** after normalising the build id, the CSS
+  chunk name (`[A-Za-z0-9_-]+`, not hex), the JS chunk names *positionally*, and
+  stripping the RSC flight payload: `/`, `/about`, `/careers`, `/design-system`,
+  `/sign-in`, `/sign-up`, `_not-found`, `_global-error`, all six articles, all
+  three job listings. Stylesheet and script counts are unchanged on every page.
+- **`/journal` is the single expected difference**, and the whole of it is one
+  inserted empty element:
+
+  ```
+   Sign up to newsletter</button>
+  +<dialog aria-labelledby="newsletter-subscribe-heading" class="m-auto w-[min(560px,calc(100vw-32px))] bg-white p-0 text-ink backdrop:bg-ink/25 backdrop:backdrop-blur-md">
+  +</dialog>
+   </section>
+  ```
+
+  `Sign up to newsletter</button>` appears as **unchanged context**, and the
+  button's class string was asserted byte-identical by string equality rather
+  than eyeballed — §8.1's requirement, checked rather than assumed.
+- **A real subscription ran end to end** against `npm run dev`, driven through a
+  real headless Chromium against the real Neon database, not stubbed.
+  `Prompt47.Check@Example.COM` was stored as `prompt47.check@example.com` —
+  **lowercasing verified end to end**, not just in the schema — with `status =
+  pending`, both tokens present and different, and `confirmation_token_sent_at`
+  set. The dialog swapped to its success state **in place**: URL before and after
+  both `/journal`, navigation list unchanged.
+- **Confirmation works and is single-use.** Confirming set `status = confirmed`
+  and `confirmed_at = 2026-08-08T22:35:55.609Z`. **Replaying the same link did not
+  re-confirm** — the already-confirmed copy was shown and `confirmed_at` was
+  byte-identical afterwards.
+- **Every enumerated outcome renders its own copy.** An unknown token, a missing
+  token (no action button rendered at all), already-confirmed, unsubscribed and
+  already-unsubscribed were each exercised and each produced its own sentence
+  rather than "something went wrong".
+- **Unsubscribe works and is idempotent.** The visible page set `status =
+  unsubscribed`, `unsubscribed_at = 2026-08-08T22:38:07.477Z`. The one-click
+  endpoint returned `HTTP/1.1 200 OK` with an empty body for a live token, for a
+  replay of it, **and for a garbage token** — so it is not an oracle. `GET`
+  returned `307` to
+  `http://localhost:3001/newsletter/unsubscribe?token=…`.
+- **Re-subscribing behaves as the schema's docblock specifies.** `status` returned
+  to `pending`, the confirmation token **changed**, the unsubscribe token **did
+  not**, `confirmed_at` and `unsubscribed_at` were both cleared, and `id` and
+  `created_at` were preserved.
+- **Nothing personal reaches application logs.** The only `console` output in the
+  flow was three `[email] send failed for subscriber
+  0508aced-…: newsletter-confirmation:validation_error` lines — template name,
+  error class, row uuid, no address and no token. The address and tokens *do*
+  appear in the dev log via Next's own tracing; see the section above, which
+  records what was and was not verified about that.
+- **All four email templates were rendered** with `render()` to HTML and to plain
+  text (there is no preview script, per §2). Each has one `<h1>`, a `<title>`,
+  `lang`/`dir` on `<html>`, every layout table `role="presentation"`, no image and
+  so no `alt` question, and no "click here". The confirmation contains **zero**
+  occurrences of "unsub" — correct, because the address is only `pending`.
+  Contrast measured on white: `#000000` 21.0:1, `#6c6c6c` 5.25:1.
+- **The two step-3 templates render byte-for-byte identical** to their `HEAD`
+  versions after `footerText` widened to `ReactNode` — HTML and plain text both,
+  footers still bare text in the existing `<p>`, no wrapper element introduced
+  and zero `<a>` tags. The widening is type-only, and it was proven rather than
+  assumed.
+- **The `List-Unsubscribe` split is as designed**: the header points at
+  `/api/newsletter/unsubscribe` (the machine endpoint, angle-bracket wrapped,
+  token `encodeURIComponent`-escaped) while the visible footer link points at
+  `/newsletter/unsubscribe` (the human page with a button).
+- **The test row was deleted afterwards** and `subscriber` returned to 0 rows,
+  confirmed by count.
+
+**Not verified, and why.**
+
+- **No email was delivered to an inbox, and none is claimed.** Every send was
+  refused by Resend with `validation_error`, which is consistent with the sandbox
+  `onboarding@resend.dev` sender delivering only to the Resend account's own
+  address. What *is* verified is that the send is attempted, that its failure is
+  caught, that it does not fail the write — the row was created and confirmed
+  regardless — and that it logs nothing personal. Actual deliverability waits on
+  the sending domain.
+- **BotID's real classification was never exercised**, unchanged from step 2: it
+  returns `HUMAN` in development, and a production build run from localhost
+  cannot complete a real challenge. That the three new paths are wired is
+  established by their presence in `instrumentation-client.ts`; that it blocks a
+  bot is an operational check on a deployment.
+- **The rate limiters were not driven to rejection.** The numbers are judgements
+  with no traffic behind them (see above), and exercising the 3-per-hour address
+  limit against a real Upstash instance would have consumed the window for the
+  rest of the run without testing anything the demo-request limiter did not
+  already establish at prompt 42.

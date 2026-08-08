@@ -48,3 +48,29 @@ export function internalRecipient(): string | undefined {
 export function replyTo(): string | undefined {
   return internalRecipient();
 }
+
+/**
+ * The base a link in an email resolves against, without a trailing slash.
+ *
+ * **`BETTER_AUTH_URL`, and no new variable** (AGENTS.md 8.4: do not invent a
+ * name). It is already the application's base URL, already in `.env.example`,
+ * and already required in every environment that runs auth — a second variable
+ * naming the same value is one more thing to set and one more way for two parts
+ * of the app to disagree about where they live. Server-only, like everything
+ * else here; phase one still has no `NEXT_PUBLIC_*` at all.
+ *
+ * **Throws when unset**, in `getResend()`'s register. An email carrying
+ * `undefined/newsletter/confirm` is worse than an email that was never sent:
+ * the send would be reported as a success and the person would be stuck. The
+ * throw is caught by `lib/email/newsletter.ts`, which is best-effort by
+ * construction (AGENTS.md 10 rule 4), so it can never fail a write.
+ */
+export function appBaseUrl(): string {
+  const value = process.env.BETTER_AUTH_URL?.trim();
+  if (!value) {
+    throw new Error(
+      "BETTER_AUTH_URL is not set. Pull it with `vercel env pull .env.local`.",
+    );
+  }
+  return value.replace(/\/+$/, "");
+}

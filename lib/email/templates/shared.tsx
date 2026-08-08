@@ -131,7 +131,12 @@ export function Shell({
   /** Doubles as the `<title>`, so it says what the message is, not who sent
       it — the `email-best-practices` accessibility rule. */
   preview: string;
-  footerText: string;
+  /** A `ReactNode` rather than a `string` since step 4: the newsletter's
+      welcome message is marketing, so its footer has to carry a visible
+      unsubscribe `<Link>` inside the sentence. Widening the existing prop beats
+      adding a second one — a `string` is still a `ReactNode`, so both step-3
+      templates are untouched and there is only ever one footer. */
+  footerText: ReactNode;
   children: ReactNode;
 }) {
   return (

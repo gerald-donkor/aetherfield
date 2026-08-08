@@ -30,6 +30,9 @@ export default function Page() {
           <CtaBand
             headline="Subscribe to Aetherfield Journal"
             action="Sign up to newsletter"
+            /* Build step 4. The prop is opt-in, so this is the only settled page
+               the step edits and every other band is untouched. */
+            newsletter
           />
         </Reveal>
       </main>
