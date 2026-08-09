@@ -2444,3 +2444,58 @@ returns nothing.
 **there is no scheduled deletion and no erasure endpoint**, and none is implied.
 Step 7 is where a real control would land. CVs live in private blob storage
 indefinitely until someone removes them.
+
+### Prompt 50 — branded application success state
+
+Prompt 50 changes only `ApplyDialog`'s successful composition. The existing
+`Seal` is rendered between the heading block and the live status at **160px on
+mobile and 184px from `sm` upward**. The status becomes a centred accent mono
+line; the unchanged thank-you copy is centred at a 440px maximum measure. The
+full-width Close button, title, role caption, status string, copy and both close
+controls are unchanged.
+
+Those sizes and the **28/32px** heading-to-seal, **16px** seal-to-status,
+**20px** status-to-copy and **32px** copy-to-button gaps are **design
+judgements**, not comp measurements. The supplied screenshot was a before-state
+visual brief and contained no target geometry.
+
+The form, pending and error branches retain their previous structure and class
+strings. The native dialog, `showModal()`, live-region focus effect, Escape and
+backdrop close paths, and trigger focus return are untouched. A real browser
+pass verified that focus lands on the heading when opened and on the status
+after success; Tab reaches the top Close and full-width Close controls; Enter,
+Escape, backdrop click and both explicit controls close the dialog; every close
+path returns focus to the trigger.
+
+One real synthetic application produced the successful state. Its row and
+private blob were both removed afterwards (`rowsRemoved: 1`, `blobsRemoved: 1`);
+no address, filename, pathname or CV content was printed. The production server
+correctly failed closed before submission because local production mode cannot
+supply Vercel BotID's request context. The actual write therefore ran against
+`next dev`, where the installed BotID SDK documents and supplies its development
+`HUMAN` classification; the visual result uses the same application code and
+Tailwind output. This is a local verification limitation, not a production
+security bypass.
+
+At 375px, `deviceScaleFactor: 1`, the open success dialog measured
+**337×481.40625px** and the seal **160×81.40625px**. At 1280px it measured
+**560×455.625px** and the seal **184×93.625px**. Both renders kept both close
+controls visible, the role and body wrapped without collision, the seal stayed
+inside the dialog, and `document.documentElement.scrollWidth - innerWidth` was
+**0**. Screenshots inspected were
+`/tmp/aetherfield-p50-success-375.png` and
+`/tmp/aetherfield-p50-success-1280.png`.
+
+**Prerender impact is verified as none.** The production route table remains
+`○ /careers` and `● /job-listing/[slug]` with all three job paths. In each of
+`.next/server/app/careers.html` and the three generated listing HTML files, the
+closed `<dialog>` has `inner-bytes=0`; the success-only seal and copy therefore
+do not enter prerendered markup. The client chunk changes on those four routes,
+as expected from importing `Seal` into their existing client leaf.
+
+Checks after implementation: `npm run lint` exit 0 (`eslint`),
+`npm run typecheck` exit 0 (`tsc --noEmit`), and `npm run build` exit 0 with
+Next.js 16.2.12. The build compiled in 7.4s, generated 22 static pages, retained
+`/careers` as Static and the three `/job-listing/[slug]` pages as SSG, and
+reported only the existing `serverActions` experimental warning. There is no
+test script, so no test run is claimed.

@@ -20,7 +20,7 @@ import {
   NO_FIELD_ERRORS,
   type ApplicationFieldErrors,
 } from "../../../lib/validation/application";
-import { Button, Field, FileField, TextareaField } from "../primitives";
+import { Button, Field, FileField, Seal, TextareaField } from "../primitives";
 
 /**
  * The apply dialog — build step 5's client leaf, and a copy of
@@ -306,12 +306,20 @@ export function ApplyDialog({
               </button>
             </div>
 
+            {done ? (
+              <Seal className="mx-auto mt-7 h-auto w-[160px] sm:mt-8 sm:w-[184px]" />
+            ) : null}
+
             <div
               ref={statusRef}
               role="status"
               aria-live="polite"
               tabIndex={-1}
-              className={`mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
+              className={`font-mono text-[12px] leading-[18px] outline-none ${
+                done
+                  ? "mt-4 text-center text-accent"
+                  : "mt-6 border-l-2 border-ink pl-4"
+              } ${
                 message ? "block" : "hidden"
               }`}
             >
@@ -322,7 +330,7 @@ export function ApplyDialog({
               // Success swaps the body in place — no redirect, so the page keeps
               // its scroll position and its motion state (AGENTS.md 10 rule 5).
               <>
-                <p className="mt-6 font-serif text-[18px] leading-[26px] text-muted">
+                <p className="mx-auto mt-5 max-w-[440px] text-center font-serif text-[18px] leading-[26px] text-muted">
                   {SUCCESS_BODY}
                 </p>
                 <Button className="mt-8 w-full" onClick={closeDialog}>
