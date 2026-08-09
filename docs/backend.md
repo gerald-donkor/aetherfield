@@ -2186,3 +2186,235 @@ it.
   limit against a real Upstash instance would have consumed the window for the
   rest of the run without testing anything the demo-request limiter did not
   already establish at prompt 42.
+
+## Step 5 — blob upload and job applications
+
+Implemented by prompt 48 on 9 Aug 2026. **This step invents nothing either.**
+Step 2 set the write path, step 3 set the email pattern, and step 4 already
+copied both; every deviation below is named where it happens. Anything not named
+here matches `app/_actions/demo-request.ts` and `lib/email/demo-request.ts`.
+
+### Provisioning — Blob, and the two things the prompt predicted wrongly
+
+`vercel env ls` on 9 Aug 2026 listed no `BLOB_READ_WRITE_TOKEN`, so the store did
+not exist and the step was blocked at its first line (§7.4 rule 5, §12 rule 9).
+The user authorised the command before it ran.
+
+Vercel Blob is **first-party, not a Marketplace integration**, so §7.4's
+`vercel integration add` procedure does not apply. The command, read from
+`vercel blob --help` rather than guessed:
+
+```
+vercel blob create-store aetherfield-cv --access private --region iad1 \
+  --environment production --environment preview --environment development
+```
+
+> Success! Blob store created: aetherfield-cv (store_Livjh6tZg2Me3b5D) in iad1
+> Access: private.
+
+**Two corrections to what prompts/48 predicted**, both from reading `--help`
+first (§12 rule 6):
+
+- the subcommand is **`create-store`**, not `store add`;
+- **`--access` is a store-level flag and is *required* at creation.** The prompt
+  treated private access as purely a per-`put()` option. It is both: the store is
+  private, and `put()` still takes a required `access`.
+
+`env pull` ran automatically as part of the command and added
+`BLOB_READ_WRITE_TOKEN` to `.env.local`. The name matches §8.4's prediction and
+was still **read back from `vercel env ls`**, not assumed.
+
+### The installed `@vercel/blob` surface, read not recalled
+
+`@vercel/blob@2.7.0`, from `node_modules/@vercel/blob/dist/index.d.ts`:
+
+- `put(pathname, body, options) => Promise<PutBlobResult>`; `PutBody` includes
+  `File`, so the action hands the `File` straight through.
+- **`access` is required** and typed `BlobAccessType = 'public' | 'private'`.
+  Private access is a first-class value in this version — the
+  `vercel:vercel-storage` skill still calls it a public beta, which is what §12
+  rule 2 exists to catch.
+- **`addRandomSuffix` and `allowOverwrite` both default to `false`** here. Older
+  docs and memory say `true` for the former; the shared `CommonCreateBlobOptions`
+  that `put` uses says false.
+- `del(urlOrPathname, options?)`.
+
+### The contract, in file order
+
+| file | role | server-only |
+| --- | --- | --- |
+| `lib/validation/application.ts` | **new** — the shared schema, the four-slot field-error record, `ApplicationSubmitResult`, and the `CV_*` constants | **no — deliberately** |
+| `lib/storage/cv.ts` | **new** — `putCv`, `deleteCv`, `sanitiseFilename`. The write only | yes |
+| `lib/db/application-queries.ts` | **new** — `insertApplication`, the only Drizzle caller for this table | yes |
+| `lib/email/application.ts` | **new** — the two sends, and `APPLICATION_NOTIFICATION_EMAIL` | yes |
+| `lib/email/templates/application-confirmation.tsx` | **new** — to the applicant | **no — deliberately** |
+| `lib/email/templates/application-notification.tsx` | **new** — internal | **no — deliberately** |
+| `lib/rate-limit/index.ts` | changed — one new limiter | yes |
+| `app/_actions/application.ts` | **new** — the action, stages a-f | yes (`"use server"`) |
+| `app/_components/application/apply-dialog.tsx` | **new** — the client leaf | client |
+| `app/_components/primitives.tsx` | changed — `FileField` added; `Field` and `TextareaField` untouched | — |
+| `app/_components/cards.tsx` | changed — `JobCard` gains `actionSlot` | — |
+| `app/_components/careers/sections.tsx`, `app/_components/job/sections.tsx` | changed — the two trigger sites | — |
+| `instrumentation-client.ts`, `next.config.ts`, `.env.example` | changed | — |
+
+**No migration.** `application` shipped with step 1's
+`0000_empty_starjammers.sql`; `npm run db:generate` producing anything here would
+have meant the schema had been changed, which it was not.
+
+### The upload path — a Server Action, and the rejected alternative
+
+The file travels in the Server Action's `FormData`, which is why
+`submitApplication` takes `FormData` rather than the plain object step 2's action
+takes. **`@vercel/blob/client`'s `upload()` was rejected on purpose**: it needs a
+Route Handler that hands a *write capability* to an unauthenticated browser on a
+public marketing page, and §6.2 reserves Route Handlers for callers that are not
+this application.
+
+The cost is Next's Server Action body cap. From the installed docs
+(`node_modules/next/dist/docs/.../serverActions.md`): "the maximum size of the
+request body sent to a Server Action is 1MB", configurable with "the number of
+bytes or any string format supported by bytes". `experimental.serverActions.bodySizeLimit`
+is set to **`"6mb"`** against a 5 MB file cap — headroom for the multipart
+boundaries and part headers, and **a judgement, not a measurement**. The Zod cap
+is what a person ever sees; the body limit only has to sit above it so the
+framework never throws before the action runs.
+
+### The blob pathname
+
+`cv/<crypto.randomUUID()>.pdf`, and **it carries no personal data** — never the
+applicant's name, never their own filename, never a sequential id, so a store
+listing is not itself a list of who applied. The applicant's filename is stored
+separately on `application.cv_filename`, sanitised, for display in step 7.
+`putCv` returns the store's own `blob.pathname` rather than the string it
+composed, so the two can never diverge silently.
+
+### Judgements, said to be judgements
+
+Nothing here is fitted; there is no traffic and no comp.
+
+- **5 MB** and **`application/pdf` only**. `.doc`/`.docx` were not added.
+- **Five applications per IP per hour**, matching the demo-request limiter: a
+  person may genuinely apply to two roles in a sitting.
+- **No per-address limiter.** The newsletter's exists because a confirmation
+  email is a capability sent to a stranger's inbox; nothing on this path is.
+- **`"6mb"`** for the body limit, above.
+- The `FileField`'s box: `py-1.5` + a 38px button + 2px borders = `Field`'s
+  `h-[52px]`, so a form mixing them keeps one rhythm. **Derived, not measured
+  against a render.**
+
+### The file is checked four times, and the declared type is not trusted
+
+Server-side, cheapest gate first: present and non-empty → within `CV_MAX_BYTES`
+→ `type === "application/pdf"` → **the leading bytes are `%PDF-`**, read with
+`await cv.slice(0, 5).arrayBuffer()`. The browser-declared `type` is written from
+the file's extension and is attacker-controlled (§8.2 rule 3), so it is never the
+last word. The leaf runs the first three as a courtesy — a faster no, not a
+check.
+
+### Verified against a running dev server
+
+Neon was cold for the first submission; every timing below says which.
+
+- **A valid PDF submitted from `/careers`'s open-application card** wrote exactly
+  one row and one blob. `POST /careers 200 in 11.0s` — **cold**, including the
+  Neon scale-to-zero start, the blob put and the Resend attempt. The next server
+  submission was `1223ms` warm.
+- **The address was lowercased and trimmed end to end** (§9.2 rule 4): submitted
+  as `"  ADA.Whitfield@Example.COM  "`, stored as `ada.whitfield@example.com`.
+- **`cv_pathname` was `cv/6171df87-…-….pdf`** and contained no part of the name;
+  `cv_filename` held `valid-cv.pdf`; an empty textarea stored `null`, not `""`.
+- **The CV is genuinely private, and this was reported rather than assumed.**
+  `head()` returned it on `https://livjh6tzg2me3b5d.private.blob.vercel-storage.com/…`,
+  and an **anonymous `fetch` of that URL returned `403`**. `deleteCv` then removed
+  it and `list({prefix:"cv/"})` returned to 0.
+- **Every rejection rendered a visible, announced field error**: missing file
+  ("Attach your CV as a PDF."), a `.pdf` whose bytes are not a PDF and a
+  `text/plain` file (both "Your CV must be a PDF."), an over-cap 5.4 MB PDF
+  ("That file is over 5 MB. Attach a smaller PDF."), and a malformed address
+  ("Enter a valid email address.").
+- **The disguised PDF reached the server and was caught by the `%PDF-` check** —
+  confirmed by the request log, since the client's type check passes it.
+- **The rate limiter was driven to rejection**, which step 4 declined to do. The
+  sixth server-reaching submission inside the hour returned "That's a few too
+  many requests. Try again in 7 minutes." — `formatRetry` in the site's register.
+- **No orphaned blobs.** After five rejected submissions the store still held
+  only the one blob from the successful write: the rejections all land at stage c,
+  before the put.
+- **The selected file is announced** — an `sr-only` `role="status"` region read
+  "Selected: valid-cv.pdf, 1 KB".
+- **Success swaps in place** to "Application received" with no redirect.
+
+### Not verified, and why
+
+- **No email reached an inbox, and none is claimed.** The confirmation send was
+  attempted and refused by Resend with `validation_error`, consistent with the
+  sandbox `onboarding@resend.dev` sender delivering only to the account holder —
+  **the step-3 blocker, unchanged and still open.** What is verified is that the
+  send is attempted, that its failure is caught, that **it does not fail the
+  write** (the row and blob were both committed and the person saw success), and
+  that our log line names only a template, an error class and a row uuid:
+  `[email] send failed for application <uuid>: application-confirmation:validation_error`.
+  Note the **Resend SDK prints its own `[Resend API Error]` block**, which we do
+  not control; it quoted no address in this case.
+- **The internal notification was skipped**, `APPLICATION_NOTIFICATION_EMAIL`
+  being unset — the supported state, logged as
+  `application-notification:no-recipient-configured` with no address.
+- **BotID's real classification was never exercised**, unchanged from steps 2
+  and 4: it returns `HUMAN` in development. That `/careers` and `/job-listing/*`
+  are wired is established by `instrumentation-client.ts` and by the matcher read
+  from the installed package; that it blocks a bot is an operational check on a
+  deployment.
+- **Focus return on dialog close is UNVERIFIED, in either direction.** The
+  attempt to measure it was invalidated by the automation environment: a bare,
+  freshly-created `<dialog>` in that context fires **no `close` event at all**,
+  so neither this leaf nor the shipped demo-request dialog could be observed
+  running their `onClose`. The code path is present and identical to step 2's.
+  **Do not read this as either a pass or a defect** — it needs a real browser
+  session or a test that does not depend on the `close` event.
+- **The `FileField`'s rendered box was not measured** against a screenshot; see
+  the judgement above.
+
+### Prerender impact — measured against a base build of `ff03de8`
+
+Built in a sibling worktree per `docs/automation.md`, with `node_modules`
+hard-linked and **the gitignored `.agents/skills/*/references/` snapshots copied
+in** — without them Tailwind scans a different file set and every page falsely
+appears to gain a stylesheet.
+
+The route table is **unchanged**: the same 8 `○ Static`, `/article/[slug]` and
+`/job-listing/[slug]` still `● SSG`, and **no route went dynamic**.
+
+Chunk *names* moved on every page, because `next.config.ts` and
+`instrumentation-client.ts` both changed; the helper therefore maps each chunk to
+its index in order of first appearance and compares that. With the RSC flight
+scripts stripped:
+
+- **14 of 18 pages byte-identical**, including **`/design-system`** (it renders
+  `JobCard` with no `href` and no `actionSlot`, so the inert-button branch is
+  untouched), `/`, `/journal`, `/about`, all six articles, `/sign-in`, `/sign-up`.
+- **4 pages differ, and they are exactly the two routes §5.2's step-5 row
+  authorises**: `/careers` (+180 bytes) and the three `/job-listing/[slug]`
+  pages (+175 to +179). **The entire difference on each is one empty
+  `<dialog aria-labelledby="apply-<slug>-heading" …></dialog>`** — the closed
+  leaf. The `#apply` region's `<button>` markup is byte-identical, so no measured
+  geometry moved.
+- On the full HTML the job listings read as ~85 bytes *smaller*; that is the
+  flight payload re-segmenting as the button became a client leaf, which is the
+  effect `docs/automation.md` warns is not a real diff.
+- **Script chunk count per page is unchanged on all 18 pages** — the leaf never
+  reached the shared chunk. That is the bundle rule holding, and it is why both
+  trigger sites import the leaf directly instead of through `chrome.tsx`.
+
+### Checks
+
+`npm run lint` exit 0, `npm run typecheck` exit 0, `npm run build` succeeded with
+the route table above. `grep -rn "console\." ` across the action, the leaf,
+`lib/storage/`, `lib/db/application-queries.ts` and `lib/validation/application.ts`
+returns nothing.
+
+### Retention — stated, not enforced
+
+`application.deleted_at` exists and the query module is written to honour it, but
+**there is no scheduled deletion and no erasure endpoint**, and none is implied.
+Step 7 is where a real control would land. CVs live in private blob storage
+indefinitely until someone removes them.

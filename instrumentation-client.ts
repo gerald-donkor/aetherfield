@@ -32,5 +32,19 @@ initBotId({
     { path: "/journal", method: "POST" },
     { path: "/newsletter/confirm", method: "POST" },
     { path: "/newsletter/unsubscribe", method: "POST" },
+    // Build step 5 — job applications. The apply dialog is on /careers'
+    // open-application card and on every /job-listing/[slug].
+    { path: "/careers", method: "POST" },
+    /* **A glob, and it is verified rather than assumed.** `initBotId` compiles
+       each `path` with
+       `new RegExp("^" + path.replace(/[.?+^$[\]\\(){}|-]/g, "\\$&").split("*").join(".*") + "$")`
+       — read from the installed package, `botid/dist/client/core/index.mjs`.
+       Two consequences follow from that one line. A literal
+       `/job-listing/[slug]` is regex-escaped, so it can only ever match a
+       pathname containing those brackets and would never match a real request.
+       `/job-listing/*` compiles to `^/job-listing/.*$` and matches all three
+       listings — and it keeps matching when a fourth role is added to
+       `app/_content/jobs.ts`, which a list of literal slugs would not. */
+    { path: "/job-listing/*", method: "POST" },
   ],
 });

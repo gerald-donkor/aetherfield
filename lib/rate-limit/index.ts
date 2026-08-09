@@ -77,6 +77,27 @@ const NEWSLETTER_TOKEN_WINDOW = "1 h" as const;
 const NEWSLETTER_ONE_CLICK_LIMIT = 10;
 const NEWSLETTER_ONE_CLICK_WINDOW = "1 h" as const;
 
+/**
+ * Job applications, per IP. **Five per hour is a judgement, not a
+ * measurement** — the apply form has never shipped, so there is no traffic to
+ * fit against, and this number is to be revisited against real traffic rather
+ * than treated as fitted.
+ *
+ * It matches the demo request's limiter deliberately: a person may genuinely
+ * apply to two roles in one sitting, and three roles plus a mistyped retry is
+ * still honest use, while five uploads an hour is nowhere near worth abusing an
+ * endpoint that writes a blob per request.
+ *
+ * **There is deliberately no per-address limiter here**, and the asymmetry with
+ * the newsletter is the point: the newsletter's exists because a confirmation
+ * email is a *capability* sent to a stranger's inbox, so an unlimited form is a
+ * mail cannon pointed at anyone. Nothing on this path is — the applicant's
+ * confirmation goes to the address that just submitted a CV, and the internal
+ * notification goes to Aetherfield's own inbox.
+ */
+const APPLICATION_LIMIT = 5;
+const APPLICATION_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -208,6 +229,20 @@ export async function checkNewsletterOneClickLimit(
     NEWSLETTER_ONE_CLICK_LIMIT,
     NEWSLETTER_ONE_CLICK_WINDOW,
     createHash("sha256").update(token).digest("hex"),
+  );
+}
+
+/** Job applications, keyed by IP. Stage b of AGENTS.md 10, and the only
+    limiter on that path — see the constant's docblock for why there is no
+    per-address one. */
+export async function checkApplicationLimit(
+  identifier: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "application",
+    APPLICATION_LIMIT,
+    APPLICATION_WINDOW,
+    identifier,
   );
 }
 

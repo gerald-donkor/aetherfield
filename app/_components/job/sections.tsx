@@ -1,6 +1,10 @@
 import Link from "next/link";
+/* Imported directly, not through `chrome.tsx` — see the note in
+   `careers/sections.tsx`: the shared chrome would put this leaf in the chunk
+   all eighteen pages load, and only two routes need it. */
+import { ApplyDialog } from "../application/apply-dialog";
 import { Reveal } from "../motion/reveal";
-import { Button, ButtonLink, Seal } from "../primitives";
+import { ButtonLink, Seal } from "../primitives";
 import type { Job, JobBody } from "../../_content/jobs";
 
 /* -------------------------------------------------------------------------- */
@@ -176,10 +180,14 @@ export function JobListing({ job, body }: { job: Job; body: JobBody }) {
         <h2 className="display-job-h2 mx-auto max-w-[560px] font-sans font-bold text-balance">
           {body.cta}
         </h2>
-        {/* Inert, like the /careers open-application card's Apply now: no comp
-            gives a destination. Wire both to a real URL or mailto when one
-            exists. */}
-        <Button className="mt-7">Apply now</Button>
+        {/* Build step 5's trigger. The leaf renders this button itself and
+            takes `className` over, so the `mt-7` and the default `primary`
+            sizing are unchanged and no box enters the card. The `Apply now`
+            above stays a plain `#apply` anchor: it works with JavaScript off
+            and it already leads here. */}
+        <ApplyDialog jobSlug={job.slug} role={job.role} className="mt-7">
+          Apply now
+        </ApplyDialog>
       </div>
     </Card>
   );

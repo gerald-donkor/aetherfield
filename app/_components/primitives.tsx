@@ -363,6 +363,98 @@ export function TextareaField({
   );
 }
 
+/**
+ * `Field` for a file, added by build step 5 for the apply dialog's CV. Same
+ * label / hint / error chrome and the same `CONTROL_BASE`, for the reason
+ * `TextareaField` shares them: the alternative is a second field vocabulary.
+ *
+ * **The native `<input type="file">` is kept and styled, not replaced.** The
+ * usual pattern — hide the input, put the look on a `<label>` — moves focus onto
+ * an element the eye cannot find and rebuilds the picker's keyboard behaviour by
+ * hand. Tailwind v4's `file:` variant reaches `::file-selector-button` directly,
+ * so the real control keeps every platform behaviour and still wears the site's
+ * compact-button look: ink fill, white mono label, square corners, and the same
+ * `hover:text-muted` `BUTTON_BASE` uses. No `Bullet` — the 4px mark belongs to
+ * the page's highest-intent action, and a pseudo-element cannot hold a child
+ * anyway.
+ *
+ * **The 52px box is derived, not eyeballed:** 6px of padding, the 38px `compact`
+ * button, 6px, plus the 1px borders — exactly `Field`'s `h-[52px]`, so a form
+ * that mixes the two keeps one rhythm. `flex items-center` centres the button
+ * and the filename inside that box; where a browser declines to lay out the
+ * file input's shadow children as flex items, the same padding still produces
+ * the same height on a normal line box, so the fallback is the same geometry
+ * rather than a broken one.
+ *
+ * **The chosen file is announced through a `role="status"` line, and the browser
+ * shows the name itself.** A bare file input gives no reliable change
+ * announcement, and a *visible* second copy of the name would print it twice
+ * within 20px on a page whose whole register is restraint. So the visible
+ * confirmation is the input's own filename text — which inherits
+ * `CONTROL_BASE`'s `font-sans text-[16px] text-ink` and is therefore already set
+ * in the site's type — and the announcement is a screen-reader-only live region
+ * that adds the size the native text omits.
+ *
+ * Stateless, like every other primitive here: `primitives.tsx` has no
+ * `"use client"` and is imported by server components, so the form owns the
+ * selected file and passes the settled state in.
+ */
+export function FileField({
+  label,
+  hint,
+  error,
+  className = "",
+  id,
+  fileName,
+  fileSize,
+  ...props
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  id: string;
+  /** The chosen file's name, or nothing chosen. Announced, not re-rendered. */
+  fileName?: string;
+  /** Already formatted for reading — "412 KB". The primitive does no unit
+      arithmetic; the form that holds the `File` does. */
+  fileSize?: string;
+} & Omit<ComponentProps<"input">, "id" | "type">) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const statusId = `${id}-status`;
+  const describedBy = [props["aria-describedby"], hintId, statusId, errorId]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <FieldFrame
+      label={label}
+      hint={hint}
+      error={error}
+      className={className}
+      id={id}
+      hintId={hintId}
+      errorId={errorId}
+    >
+      <input
+        {...props}
+        type="file"
+        id={id}
+        className={`mt-2 flex items-center overflow-hidden py-1.5 ${CONTROL_BASE} ${
+          error ? "border-ink" : "border-border"
+        } file:mr-4 file:h-[38px] file:cursor-pointer file:border-0 file:bg-ink file:px-3 file:font-mono file:text-button file:font-medium file:text-white file:transition-colors hover:file:text-muted disabled:file:cursor-not-allowed`}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+      />
+      <div id={statusId} role="status" aria-live="polite" className="sr-only">
+        {fileName
+          ? `Selected: ${fileName}${fileSize ? `, ${fileSize}` : ""}`
+          : "No file selected."}
+      </div>
+    </FieldFrame>
+  );
+}
+
 /** Link-style action: sans 16/700 with a trailing arrow that slides on hover. */
 export function LinkButton({
   className = "",

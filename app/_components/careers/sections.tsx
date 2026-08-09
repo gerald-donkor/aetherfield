@@ -1,3 +1,8 @@
+/* Imported here and not from `chrome.tsx`. Step 4 recorded that reaching a
+   dialog leaf through the shared chrome puts it in the chunk every one of the
+   eighteen pages loads (`docs/backend.md:1995`); `/careers` is one of the two
+   routes that actually needs it, so it imports it itself. */
+import { ApplyDialog } from "../application/apply-dialog";
 import { JobCard } from "../cards";
 import { CareersMastheadText } from "../motion/careers-masthead-text";
 import { Reveal } from "../motion/reveal";
@@ -76,6 +81,29 @@ export function JobList() {
               WRITTEN_JOB_SLUGS.includes(job.slug)
                 ? `/job-listing/${job.slug}`
                 : undefined
+            }
+            /* Build step 5. Only the open-application card gets a trigger: the
+               other three are links to their listing, where the apply dialog
+               sits at the foot of the page, and `href` wins in `JobCard`
+               regardless. The dialog is passed *in* so `cards.tsx` stays a
+               server module and `/design-system`'s `JobCard` — no `href`, no
+               slot — renders the same inert button it always has.
+
+               `size` and `className` reproduce the button being replaced
+               exactly, so the card's box is untouched: the dashed frame, the
+               marching dashes, the `space-y-4` and the `delay={0.16}` /
+               `y={72}` above are all fitted numbers this must not move. */
+            actionSlot={
+              job.slug === "open-application" ? (
+                <ApplyDialog
+                  jobSlug={job.slug}
+                  role={job.role}
+                  size="compact"
+                  className="mt-6 shrink-0 sm:mt-0"
+                >
+                  {job.action}
+                </ApplyDialog>
+              ) : undefined
             }
             open={job.open}
           />

@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { Article } from "../_content/articles";
 import {
   ArrowUpRight,
@@ -158,6 +159,7 @@ export function JobCard({
   body,
   action = "View role",
   href,
+  actionSlot,
   open = false,
 }: {
   role: string;
@@ -168,6 +170,14 @@ export function JobCard({
   /** Destination for the action. Without one it stays the inert button the
       styleguide and the open-application card render. */
   href?: string;
+  /** The action, supplied by the caller instead of drawn here — build step 5's
+      apply dialog on `/careers`. **Passed in rather than imported**: the leaf is
+      a client component, and importing it here would make every page that shows
+      a `JobCard` — the styleguide included — pull it into the bundle, and
+      `cards.tsx` itself into a client module. `href` still wins where present,
+      and with neither the card renders the same inert `<Button>` it always has,
+      so `/design-system`'s HTML is unchanged. */
+  actionSlot?: ReactNode;
   /** Dashed outline over the page instead of a white fill — the open
       application card at the foot of `/careers`. */
   open?: boolean;
@@ -214,9 +224,11 @@ export function JobCard({
             {action}
           </ButtonLink>
         ) : (
-          <Button size="compact" className="mt-6 shrink-0 sm:mt-0">
-            {action}
-          </Button>
+          (actionSlot ?? (
+            <Button size="compact" className="mt-6 shrink-0 sm:mt-0">
+              {action}
+            </Button>
+          ))
         )}
       </div>
     </article>
