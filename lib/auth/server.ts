@@ -5,6 +5,7 @@ import { waitUntil } from "@vercel/functions";
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { getStaffRole } from "../db/auth-queries";
 import { getDb } from "../db/client";
@@ -109,4 +110,16 @@ export async function getCurrentAccount() {
     user: session.user,
     role: await getStaffRole(session.user.id),
   };
+}
+
+export async function requireSubmissionsAccount(callbackURL: string) {
+  const account = await getCurrentAccount();
+  if (!account) {
+    const query = new URLSearchParams({ callbackURL });
+    redirect(`/sign-in?${query.toString()}`);
+  }
+  if (account.role !== "staff" && account.role !== "admin") {
+    redirect("/account");
+  }
+  return account;
 }

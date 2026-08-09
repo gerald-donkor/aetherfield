@@ -1,9 +1,10 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull, ne, or } from "drizzle-orm";
 
 import { user } from "./auth-schema";
 import { getDb } from "./client";
+import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
 
 export type StaffRole = "staff" | "admin";
 
@@ -23,4 +24,68 @@ export async function getStaffRole(
   return record?.role === "staff" || record?.role === "admin"
     ? record.role
     : null;
+}
+
+export type ListedAccount = {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  role: string | null;
+  createdAt: Date;
+};
+
+export async function listVerifiedAccounts(
+  page: number,
+): Promise<ListedAccount[]> {
+  return getDb()
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      emailVerified: user.emailVerified,
+      role: user.role,
+      createdAt: user.createdAt,
+    })
+    .from(user)
+    .where(eq(user.emailVerified, true))
+    .orderBy(desc(user.createdAt), desc(user.id))
+    .limit(SUBMISSIONS_PAGE_SIZE)
+    .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
+}
+
+export async function countVerifiedAccounts(): Promise<number> {
+  const [row] = await getDb()
+    .select({ count: count() })
+    .from(user)
+    .where(eq(user.emailVerified, true));
+  return row.count;
+}
+
+/**
+ * Grants or revokes staff only. The WHERE is the authority for every guard:
+ * no self-change, no admin/unknown-role target, and no unverified target.
+ */
+export async function setStaffRole({
+  actorId,
+  targetId,
+  role,
+}: {
+  actorId: string;
+  targetId: string;
+  role: "staff" | null;
+}): Promise<boolean> {
+  const [row] = await getDb()
+    .update(user)
+    .set({ role })
+    .where(
+      and(
+        eq(user.id, targetId),
+        ne(user.id, actorId),
+        eq(user.emailVerified, true),
+        or(isNull(user.role), eq(user.role, "staff")),
+      ),
+    )
+    .returning({ id: user.id });
+  return Boolean(row);
 }

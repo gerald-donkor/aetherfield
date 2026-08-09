@@ -1,7 +1,21 @@
 import "server-only";
 
+import { and, count, desc, eq, isNull } from "drizzle-orm";
+
 import { getDb } from "./client";
 import { lead, type NewLead } from "./schema";
+
+export const SUBMISSIONS_PAGE_SIZE = 20;
+
+export type ListedLead = {
+  id: string;
+  name: string;
+  email: string;
+  company: string;
+  message: string | null;
+  source: "hero" | "nav" | "cta_band";
+  createdAt: Date;
+};
 
 /**
  * The lead write path. Mirrors `auth-queries.ts`: nothing outside `lib/db/`
@@ -22,4 +36,40 @@ export async function insertLead(values: NewLead): Promise<string> {
     .values(values)
     .returning({ id: lead.id });
   return row.id;
+}
+
+export async function listLeads(page: number): Promise<ListedLead[]> {
+  return getDb()
+    .select({
+      id: lead.id,
+      name: lead.name,
+      email: lead.email,
+      company: lead.company,
+      message: lead.message,
+      source: lead.source,
+      createdAt: lead.createdAt,
+    })
+    .from(lead)
+    .where(isNull(lead.deletedAt))
+    .orderBy(desc(lead.createdAt), desc(lead.id))
+    .limit(SUBMISSIONS_PAGE_SIZE)
+    .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
+}
+
+export async function countLeads(): Promise<number> {
+  const [row] = await getDb()
+    .select({ count: count() })
+    .from(lead)
+    .where(isNull(lead.deletedAt));
+  return row.count;
+}
+
+/** Returns false for an unknown or already removed row. */
+export async function softDeleteLead(id: string): Promise<boolean> {
+  const [row] = await getDb()
+    .update(lead)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(lead.id, id), isNull(lead.deletedAt)))
+    .returning({ id: lead.id });
+  return Boolean(row);
 }

@@ -897,7 +897,7 @@ three public forms in steps 2, 4 and 5 stay deliberately unauthenticated.
 | role | can |
 | --- | --- |
 | **staff** | read the submissions view — leads, subscribers, applications — and download a CV through a signed link |
-| **admin** | everything staff can, plus managing staff accounts |
+| **admin** | everything staff can, plus managing staff accounts and removing leads, subscribers and applications from the active submissions workspace |
 
 Phase two adds tenant-side roles inside an organisation (**owner**, **member**),
 which are **orthogonal** to these two: an Aetherfield staff member is not

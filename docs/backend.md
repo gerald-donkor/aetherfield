@@ -2676,3 +2676,183 @@ same `history.replaceState(window.history.state, ...)` pattern already shipped
 for Google callback cleanup, and production HTML contains no query credential,
 but the visible-address transition remains a browser check after prompt 51 is
 committed. `npm run test:e2e` was not run for the same reason.
+
+## Step 7 — authenticated submissions
+
+Implemented by prompt 53 on 9 Aug 2026. This closes phase one with one
+request-time staff workspace, one on-demand private-CV handoff, minimum staff
+role management and the manual removal controls deferred by steps 2, 4 and 5.
+It adds no schema, migration, provider, environment variable, public write path,
+email or phase-two tenant concept.
+
+### Authorisation and routing
+
+`requireSubmissionsAccount()` sits on the existing `getCurrentAccount()` path.
+Better Auth resolves the session, then `getStaffRole()` re-reads the role from
+Postgres for every protected request. The order before any submission read is:
+
+| state | `/submissions` and CV route | admin action |
+| --- | --- | --- |
+| no session | sign-in redirect with the exact submissions callback | handled denial |
+| verified account, role null | `/account` redirect | handled denial |
+| `staff` | live submissions and one CV read allowed | handled denial |
+| `admin` | all staff reads plus Staff view | guarded mutation allowed |
+
+`proxy.ts` now matches exactly `/account` and `/submissions/:path*`. It preserves
+the path and query in `callbackURL`, but still checks only cookie presence; a
+forged cookie passed proxy and was then rejected by the database-backed page
+check. Because `loading.tsx` can begin streaming before that authoritative
+redirect resolves, the forged-cookie response is a 200 containing Next's
+`NEXT_REDIRECT`/meta-refresh control flow rather than proxy's initial 307. It
+contains no protected content.
+
+The routes are:
+
+| route | render | purpose |
+| --- | --- | --- |
+| `/submissions?view=<view>&page=<n>` | `ƒ Dynamic` | exactly one fresh paginated dataset |
+| `/submissions/applications/[id]/cv` | `ƒ Dynamic` | authorise, validate, find one live row, mint and redirect |
+| `/account` | `ƒ Dynamic`, unchanged | conditional staff/admin discovery link |
+
+`loading.tsx`, the narrow client `error.tsx` and local `not-found.tsx` retain the
+same page geometry and use safe fixed copy. No experimental auth interrupt or
+global fallback was enabled.
+
+### Query contract and pagination
+
+The existing owning modules were extended; no second module touches the same
+table. Every list filters `deleted_at is null`, orders
+`created_at desc, id desc`, selects only rendered columns and executes
+`limit 20 / offset ((page - 1) * 20)` in Postgres. The row and filtered count
+start together with `Promise.all()` only after authorisation and parsing.
+Twenty rows is a product judgement: it bounds a personal-data response and
+keeps the operational page readable while these tables remain small. A request
+past the final count redirects to the final valid page.
+
+The selected fields are exact:
+
+- lead — id, name, email, company, message, source, created time;
+- subscriber — id, email, status, confirmation-send, created, confirmed and
+  unsubscribed times; neither token is selected;
+- application — id, job slug, name, email, message, original sanitised filename
+  and created time; `cv_pathname` is not selected;
+- Staff view — verified user id, name, email, verified state, role and created
+  time.
+
+The workspace uses server-rendered definition-list records: stacked and
+wrapping on mobile, aligned as a denser grid at `lg`. Addresses, filenames,
+companies and messages use `wrap-anywhere`; the page does not introduce a
+horizontal scroller. Only action ids plus a display name/current staff boolean
+cross into the narrow client controls.
+
+`lib/validation/submissions.ts` normalises invalid, repeated or out-of-range
+view/page input to leads/page 1 and caps the page representation at six digits
+and the value at 100,000 before it can reach `.offset()`. Submission and
+application ids are UUIDs; entity kind and desired role are closed Zod enums.
+
+**One approved prompt assumption was wrong, verified against installed Better
+Auth 1.6.26.** Its default `generateId()` produces 32 alphanumeric characters,
+not a UUID; only `advanced.database.generateId: "uuid"` would change that.
+Existing users already carry the default ids, so changing auth generation now
+would strand them and violate this prompt's no-auth-configuration boundary.
+Staff target ids therefore use the installed bounded
+`^[A-Za-z0-9]{32}$` contract. Synthetic signup confirmed all three generated
+ids matched it.
+
+### Staff controls and removal
+
+`app/submissions/actions.ts` validates first, then re-runs the database-backed
+admin check inside each action. Role mutation can write only `staff` or null;
+its guarded update excludes the acting admin, every admin/unknown-role target
+and every unverified account. The first admin remains a trusted database
+bootstrap operation.
+
+Lead and subscriber removal stamp `deleted_at` once. Application removal:
+
+1. stamps `deleted_at` and returns only pathname plus the exact timestamp;
+2. calls the new strict Blob deletion helper;
+3. on Blob failure, restores only the row carrying that exact timestamp, so the
+   application becomes visible and retryable again;
+4. on success, leaves the audit row soft-deleted while the private bytes are
+   gone.
+
+`deleteCv()` keeps its step-5 best-effort/no-throw contract. The admin flow uses
+the separate `deleteCvStrict()` boolean contract. Unknown/already-removed rows
+are handled outcomes. There is no bulk action, restore UI, scheduled retention
+job or permanent row purge. This is a manual active-workspace control, **not a
+finite retention policy**; that open policy question remains unresolved.
+
+The client controls use an explicit confirm/cancel state before removal,
+keyboard buttons, pending text and a focused polite status result. Success
+revalidates only `/submissions`; no client data-fetching layer or cache was
+added.
+
+### Private CV handoff
+
+The installed Blob 2.7.0 API is used exactly as declared. After session, role,
+UUID and live-row checks, `createCvReadUrl()` calls:
+
+1. `issueSignedToken({ pathname, operations: ["get"], validUntil })`;
+2. `presignUrl(token, { access: "private", operation: "get", pathname,
+   validUntil, useCache: false })`.
+
+Both absolute expiries use one `Date.now() + 5 minutes` value. Five minutes is
+a security/usability judgement, enough for one browser handoff while limiting
+reuse. The API omits a separate URL-expiry query value when it equals the
+delegation ceiling; runtime verification decoded the delegation payload and
+proved the exact pathname, only `get`, the five-minute ceiling and `cache=0`.
+The URL is redirected outside a catch, never stored, cached, listed or logged.
+
+### Secrets and personal data
+
+No new variable and no `NEXT_PUBLIC_*` value was added. The request-time change
+reads existing `DATABASE_URL`, Better Auth's secret/base URL and
+`BLOB_READ_WRITE_TOKEN`, all through server-only modules. Authorised HTML
+contains only the exact fields named above. Subscriber tokens, auth secrets,
+CV pathnames, Blob credentials and signed URLs never enter list HTML or client
+props. Application removal necessarily sends one opaque pathname to Blob; CV
+handoff necessarily sends one expiring signed URL to the requesting browser.
+
+Application/server output during the full check contained only Better Auth's
+fixed email-template/error-class lines and node-postgres's existing SSL-mode
+warning. It contained no synthetic name, address, message, filename, pathname,
+signed URL, query result or secret.
+
+### Prerender impact and verification, prompt 53
+
+Every result below was run on 9 Aug 2026.
+
+- `npm run typecheck` exited 0 and `npm run lint` exited 0.
+- `npm run build` exited 0 on Next 16.2.12, compiled the final code in **8.8
+  seconds**, generated **26** static pages and emitted only `/submissions` plus
+  `/submissions/applications/[id]/cv` as new `ƒ Dynamic` routes. Existing render
+  modes are unchanged.
+- The env-less build first reached Next but the sandbox blocked the three
+  existing Google-font requests. Re-run with network access exited 0, compiled
+  in **10.3 seconds**, emitted the same route table, and `.env.local` was
+  confirmed restored. Database, auth and Blob construction therefore remain
+  request-lazy.
+- `npm run db:generate` listed the existing eight tables and reported **“No
+  schema changes, nothing to migrate”**; no migration was written.
+- A clean parent build at `ee27aed`, with the local Tailwind/Drizzle snapshots
+  mirrored per `docs/automation.md`, had **20 of 20 common prerendered HTML
+  files identical** after stripping RSC flight scripts and normalising
+  generated CSS/JS/font names. This includes every marketing and existing auth
+  page; the two new submissions routes have no prerendered HTML.
+- An isolated production server on 3101 verified the full matrix with synthetic
+  customer/staff/admin accounts and opaque submission ids: 20-row page boundary,
+  deterministic newest-first order, final-page navigation, repeated-input
+  normalisation, customer and staff guards, admin-only Staff view, role
+  grant/revoke guards, token/pathname absence, and account-link visibility.
+- The same pass verified signed CV read 200, unsigned private read 403, all
+  three soft removals, staff removal denial, already-removed handling, and an
+  induced strict Blob failure that restored the application row.
+- Cleanup physically removed every synthetic user/account/session/submission
+  row and confirmed the synthetic Blob prefix listed zero objects. The temporary
+  script containing synthetic credentials was then permanently removed.
+
+`npm run test:e2e` was not run and no focused Playwright test was added: prompt
+51's Playwright setup remains unrelated dirty work and prompt 53 expressly says
+not to use it as evidence until committed. Keyboard focus/announcement behavior
+is implemented from the existing focused-status pattern but is therefore not
+claimed as browser-driven verification in this prompt.

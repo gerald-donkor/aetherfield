@@ -2,10 +2,32 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 
-import { and, eq, gt, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import { getDb } from "./client";
+import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
 import { subscriber } from "./schema";
+
+export type ListedSubscriber = {
+  id: string;
+  email: string;
+  status: "pending" | "confirmed" | "unsubscribed";
+  createdAt: Date;
+  confirmationTokenSentAt: Date | null;
+  confirmedAt: Date | null;
+  unsubscribedAt: Date | null;
+};
 
 /**
  * The only module that touches the `subscriber` table (AGENTS.md 7.5). The
@@ -234,4 +256,42 @@ export async function unsubscribeByToken(
     .limit(1);
 
   return existing ? { state: "already-unsubscribed" } : { state: "unknown" };
+}
+
+export async function listSubscribers(
+  page: number,
+): Promise<ListedSubscriber[]> {
+  return getDb()
+    .select({
+      id: subscriber.id,
+      email: subscriber.email,
+      status: subscriber.status,
+      createdAt: subscriber.createdAt,
+      confirmationTokenSentAt: subscriber.confirmationTokenSentAt,
+      confirmedAt: subscriber.confirmedAt,
+      unsubscribedAt: subscriber.unsubscribedAt,
+    })
+    .from(subscriber)
+    .where(isNull(subscriber.deletedAt))
+    .orderBy(desc(subscriber.createdAt), desc(subscriber.id))
+    .limit(SUBMISSIONS_PAGE_SIZE)
+    .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
+}
+
+export async function countSubscribers(): Promise<number> {
+  const [row] = await getDb()
+    .select({ count: count() })
+    .from(subscriber)
+    .where(isNull(subscriber.deletedAt));
+  return row.count;
+}
+
+/** Tokens never enter either the select above or this handled outcome. */
+export async function softDeleteSubscriber(id: string): Promise<boolean> {
+  const [row] = await getDb()
+    .update(subscriber)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(subscriber.id, id), isNull(subscriber.deletedAt)))
+    .returning({ id: subscriber.id });
+  return Boolean(row);
 }

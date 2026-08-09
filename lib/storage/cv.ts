@@ -1,6 +1,8 @@
 import "server-only";
 
-import { del, put } from "@vercel/blob";
+import { del, issueSignedToken, presignUrl, put } from "@vercel/blob";
+
+const CV_READ_TTL_MS = 5 * 60 * 1000;
 
 /**
  * The CV's blob write, and nothing else.
@@ -80,6 +82,34 @@ export async function deleteCv(pathname: string): Promise<void> {
     /* Swallowed deliberately, and silently: see above, and there is nothing
        loggable here that is not personal data. */
   }
+}
+
+/** Strict deletion for the admin removal flow; false lets the caller restore. */
+export async function deleteCvStrict(pathname: string): Promise<boolean> {
+  try {
+    await del(pathname);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Mints one exact-path, GET-only private URL and never persists it. */
+export async function createCvReadUrl(pathname: string): Promise<string> {
+  const validUntil = Date.now() + CV_READ_TTL_MS;
+  const signedToken = await issueSignedToken({
+    pathname,
+    operations: ["get"],
+    validUntil,
+  });
+  const { presignedUrl } = await presignUrl(signedToken, {
+    access: "private",
+    operation: "get",
+    pathname,
+    validUntil,
+    useCache: false,
+  });
+  return presignedUrl;
 }
 
 /**

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { SignOutButton } from "../_components/auth/sign-out-button";
 import { SiteFooter, SiteNav } from "../_components/chrome";
-import { MetaPair } from "../_components/primitives";
+import { ButtonLink, MetaPair } from "../_components/primitives";
 import { getCurrentAccount } from "../../lib/auth/server";
 
 export const metadata: Metadata = {
@@ -32,9 +32,16 @@ export default async function AccountPage() {
           <MetaPair label="Name" value={account.user.name} />
           <MetaPair label="Email" value={account.user.email} />
         </dl>
-        <div className="mt-10">
-          <SignOutButton />
-        </div>
+        {account.role === "staff" || account.role === "admin" ? (
+          <div className="mt-10 flex flex-wrap gap-3">
+            <ButtonLink href="/submissions">View submissions</ButtonLink>
+            <SignOutButton />
+          </div>
+        ) : (
+          <div className="mt-10">
+            <SignOutButton />
+          </div>
+        )}
       </main>
       <SiteFooter />
     </>
