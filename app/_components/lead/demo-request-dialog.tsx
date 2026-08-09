@@ -43,24 +43,70 @@ import { Button, Field, TextareaField } from "../primitives";
    (AGENTS.md), and `react/no-unescaped-entities` rejects one written inline. */
 const INTRO = "Tell us where to reach you and we'll arrange a walkthrough.";
 
-/* A local duration rather than `register.ts`'s `DUR`, on the `FOOTER_DUR`
-   precedent: 0.5 is the page-reveal vocabulary and is sluggish under a cursor,
-   where the response has to feel attached to the pointer. `EASE` is still
-   imported rather than restated — only the pace changes, not the curve.
-   **Judged, not measured**: there is no recording of this interaction to fit
-   against, and 90 degrees is chosen because the glyph is a `✕`, which lands
-   back on itself and never rests crooked. */
+/* The magnify — the hover *affordance*, and still a **judgement**. A local
+   duration rather than `register.ts`'s `DUR`, on the `FOOTER_DUR` precedent:
+   0.5 is the page-reveal vocabulary and is sluggish under a cursor, where the
+   response has to feel attached to the pointer. `EASE` is still imported rather
+   than restated — only the pace changes, not the curve. It is kept, and kept
+   separate from the spin, because it holds for as long as the pointer is on the
+   button and so says "this target is live", which a 0.45 s turn that ends back
+   at rest cannot. */
 const HOVER_DUR = 0.22;
 const HOVER_SCALE = 1.35;
-const HOVER_ROTATION = 90;
 
-/* The whine, also judged: a servo spinning up, not a notification chime. The
-   site's register is measured and operational and a cheerful ding would be
-   off-voice, so this is quiet (peak gain 0.05), brief, and mechanical. */
-const TONE_FROM_HZ = 420;
-const TONE_TO_HZ = 1080;
-const TONE_SECONDS = 0.18;
-const TONE_PEAK_GAIN = 0.05;
+/* The spin, and unlike everything above it this is **measured**, fitted to
+   `Screencast_20260809_172923.webm` by template-matching the glyph frame by
+   frame (procedure in `docs/automation.md`, result in `docs/backend.md`): one
+   continuous **360 degree clockwise** turn over **0.450 s**, scale flat at 1.0
+   throughout. 360 lands on 0, so nothing has to reverse it and the button never
+   rests crooked. */
+const SPIN_DUR = 0.45;
+const SPIN_ROTATION = 360;
+
+/* The reference's ease is symmetric — p(0.5) = 0.500 to within a frame — which
+   is why `EASE` is *not* imported here: `power3.out` is an out ease and would
+   contradict the measurement. The fit cannot separate `sine.inOut`,
+   `power1.5.inOut` and `power2.inOut` (each wins one of the three clean
+   windows, and the spread between them is the noise floor), so the floor is the
+   measurement and this curve is a **judgement on it** — the only candidate that
+   never loses badly in any window.
+
+   It is written out as a function because **GSAP has no `power1.5` string**:
+   `gsap.parseEase("power1.5.inOut")` returns `undefined`, and an unparseable
+   ease silently falls back to the default `power1.out`, which is the exact out
+   ease the measurement rules out. A function ease needs no plugin, so this
+   costs no bundle and adds no `registerPlugin` call. */
+const SPIN_POWER = 1.5;
+const SPIN_EASE = (p: number) =>
+  p < 0.5
+    ? Math.pow(2 * p, SPIN_POWER) / 2
+    : 1 - Math.pow(2 - 2 * p, SPIN_POWER) / 2;
+
+/* The fan. **Every number here is a judgement, not a measurement** — the
+   reference recording carries a video stream only, so there is nothing to fit
+   and the brief is the user's own four words: "a spinning or whinning sound
+   like a fanning sound". It replaces prompt 45's 420 → 1080 Hz triangle sweep,
+   which read as a chime.
+
+   A fan is broadband, so the source is white noise through a bandpass rather
+   than an oscillator; the band's centre rises and falls across the spin, which
+   is the blade note spinning up and coasting down, and a low-frequency
+   oscillator into the gain gives the chop that separates a fan from a whoosh.
+   Peak gain stays at prompt 45's 0.05: the site's register is measured and
+   operational, and this is meant to be barely there. */
+const FAN_SECONDS = SPIN_DUR;
+const FAN_PEAK_GAIN = 0.05;
+const FAN_GAIN_FLOOR = 0.0001;
+const FAN_ATTACK = 0.06;
+const FAN_HZ_REST = 320;
+const FAN_HZ_PEAK = 1500;
+const FAN_Q = 1.8;
+const FAN_BLADE_HZ_REST = 18;
+const FAN_BLADE_HZ_PEAK = 72;
+const FAN_BLADE_DEPTH = 0.35;
+/* One second of noise, generated once and reused: comfortably longer than the
+   0.45 s burst, so the source never has to loop. */
+const FAN_NOISE_SECONDS = 1;
 
 type DemoRequestDialogProps = {
   /** Which CTA this is, for `lead.source`. Validated server-side against the
@@ -82,14 +128,18 @@ export function DemoRequestDialog({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  /* The paused hover tween, or null. **Null is the reduced-motion state and
-     the not-yet-mounted state alike**, and both handlers below no-op on it —
-     someone who asked for less motion gets no tween and no tone, rather than a
-     zero-duration tween. */
-  const hoverRef = useRef<gsap.core.Tween | null>(null);
+  /* The two paused hover tweens, or null. **Null is the reduced-motion state
+     and the not-yet-mounted state alike**, and every handler below no-ops on it
+     — someone who asked for less motion gets no tween and no sound, rather than
+     a zero-duration tween. They are kept apart because they answer to different
+     gestures: the magnify holds while the pointer is on the button, the spin is
+     a one-shot fired on entry. */
+  const magnifyRef = useRef<gsap.core.Tween | null>(null);
+  const spinRef = useRef<gsap.core.Tween | null>(null);
 
   const audioRef = useRef<AudioContext | null>(null);
-  const toneRef = useRef<OscillatorNode | null>(null);
+  const noiseRef = useRef<AudioBuffer | null>(null);
+  const fanRef = useRef<AudioBufferSourceNode | null>(null);
 
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
@@ -113,17 +163,17 @@ export function DemoRequestDialog({
     if (open) headingRef.current?.focus();
   }, [open]);
 
-  /* The close button's magnify-and-spin.
+  /* The close button's magnify and spin.
      `dependencies: [open]` with `revertOnUpdate` because the button mounts
      *after* this hook first runs — the dialog body renders only while `open`
-     is true, so the ref is null on mount and the body below no-ops. The tweens
-     tween is created here, inside the context, so `mm.revert()` owns it;
-     nothing is wrapped in `contextSafe`, which is banned in this codebase and
-     has no use here (the handlers are React props, not `addEventListener`
-     calls). */
+     is true, so the ref is null on mount and the body below no-ops. Both tweens
+     are created here, inside the context, so `mm.revert()` owns them; nothing
+     is wrapped in `contextSafe`, which is banned in this codebase and has no
+     use here (the handlers are React props, not `addEventListener` calls). */
   useGSAP(
     () => {
-      hoverRef.current = null;
+      magnifyRef.current = null;
+      spinRef.current = null;
       const button = closeRef.current;
       if (!button) return;
 
@@ -140,36 +190,54 @@ export function DemoRequestDialog({
           const { fullMotion } = context.conditions as { fullMotion: boolean };
           if (!fullMotion) return;
 
-          // `scale` and `rotation` — transform aliases, so the hover stays on
-          // the compositor and triggers no layout. GSAP folds Tailwind v4's
+          // `scale` and `rotation` — transform aliases, so both stay on the
+          // compositor and trigger no layout. GSAP folds Tailwind v4's
           // independent `rotate`/`scale` into one `transform`, so the resting
           // values are authored explicitly in the `from` rather than left to
           // CSS. No `clearProps`: nothing here has a hidden CSS start state,
           // and clearing a transform is how an element vanishes elsewhere on
           // this site.
           //
-          // **One paused tween played and reversed, not two `gsap.quickTo`
-          // setters.** The setter pair was tried first and measured wrong:
-          // `scale` is a shorthand over `scaleX`/`scaleY`, and a `quickTo` on
-          // it alongside a second `quickTo` on `rotation` left the button at
-          // `matrix(0, 1, -1, 0, 0, 0)` on hover — the 90 degrees landed and
-          // the magnify was silently dropped. `quickTo`'s reason to exist is a
-          // stream of new target values per frame; a hover has exactly two
-          // states, so a paused tween is both correct and the smaller thing.
-          hoverRef.current = gsap.fromTo(
+          // **Two paused tweens on one element, not one tween doing both, and
+          // not `gsap.quickTo`.** They have to be separate because the gestures
+          // are: the magnify is played and reversed by the pointer and by
+          // focus, while the spin is restarted on entry and runs to completion.
+          // GSAP composes `scale` and `rotation` onto a single matrix, so
+          // concurrent tweens on the two aliases are safe — but prompt 45 lost
+          // a magnify to exactly this class of mistake (a `quickTo` on `scale`,
+          // which is a shorthand over `scaleX`/`scaleY`, alongside one on
+          // `rotation`, left the button at `matrix(0, 1, -1, 0, 0, 0)`), so the
+          // composed matrix is read back in the browser and recorded in
+          // `docs/backend.md` rather than assumed.
+          magnifyRef.current = gsap.fromTo(
             button,
-            { scale: 1, rotation: 0 },
+            { scale: 1 },
             {
               scale: HOVER_SCALE,
-              rotation: HOVER_ROTATION,
               duration: HOVER_DUR,
               ease: EASE,
               paused: true,
             },
           );
 
+          // `fromTo`, never `from` — the front-matter rule, and here it also
+          // means a re-entry mid-turn restarts from 0 rather than from
+          // wherever the glyph had got to. Nothing reverses this one: 360
+          // degrees lands back on 0.
+          spinRef.current = gsap.fromTo(
+            button,
+            { rotation: 0 },
+            {
+              rotation: SPIN_ROTATION,
+              duration: SPIN_DUR,
+              ease: SPIN_EASE,
+              paused: true,
+            },
+          );
+
           return () => {
-            hoverRef.current = null;
+            magnifyRef.current = null;
+            spinRef.current = null;
           };
         },
       );
@@ -184,59 +252,119 @@ export function DemoRequestDialog({
     () => () => {
       void audioRef.current?.close().catch(() => {});
       audioRef.current = null;
+      // The buffer belongs to the closed context; a later mount regenerates it.
+      noiseRef.current = null;
+      fanRef.current = null;
     },
     [],
   );
 
-  /* A short synthesized tone, on pointer enter only. Never on focus — a
-     keyboard user tabbing through the dialog should not be blasted — and never
-     on mount. The dialog is only ever reached through a click, so the gesture
-     that unlocks audio has already happened; `resume()` is defensive. */
-  function whine() {
+  /* A short burst of fan, on pointer enter only. Never on focus — a keyboard
+     user tabbing through the dialog should not be blasted — and never on mount.
+     The dialog is only ever reached through a click, so the gesture that
+     unlocks audio has already happened; `resume()` is defensive.
+
+     Signal path:
+
+       noise ─▶ bandpass ─▶ chop ─▶ envelope ─▶ destination
+                             ▲
+             blade LFO ─▶ depth
+
+     The blade oscillator is connected to the chop gain's *AudioParam*, where it
+     sums with that param's intrinsic value, so the intrinsic sits at
+     `1 - depth` and the LFO swings it between `1 - 2·depth` and `1`. */
+  function fan() {
     if (typeof window.AudioContext !== "function") return;
     try {
       const ctx = (audioRef.current ??= new AudioContext());
       void ctx.resume().catch(() => {});
 
-      // Re-entering before the previous tone finishes must not stack.
-      toneRef.current?.stop();
+      // Re-entering before the previous burst finishes must not stack.
+      fanRef.current?.stop();
+
+      // Generated once and cached. The sample rate is checked because a
+      // buffer belongs to the rate it was made at, and a context that was
+      // closed and remade may not come back at the same one.
+      let noise = noiseRef.current;
+      if (!noise || noise.sampleRate !== ctx.sampleRate) {
+        const frames = Math.ceil(ctx.sampleRate * FAN_NOISE_SECONDS);
+        noise = ctx.createBuffer(1, frames, ctx.sampleRate);
+        const channel = noise.getChannelData(0);
+        for (let i = 0; i < frames; i += 1) channel[i] = Math.random() * 2 - 1;
+        noiseRef.current = noise;
+      }
 
       const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const half = now + FAN_SECONDS / 2;
+      const end = now + FAN_SECONDS;
 
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(TONE_FROM_HZ, now);
-      osc.frequency.exponentialRampToValueAtTime(TONE_TO_HZ, now + TONE_SECONDS);
-      gain.gain.setValueAtTime(TONE_PEAK_GAIN, now);
-      // Exponential, and to a floor rather than 0 — WebAudio rejects 0 as an
-      // exponential ramp target.
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + TONE_SECONDS);
+      const source = ctx.createBufferSource();
+      source.buffer = noise;
 
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + TONE_SECONDS);
-      osc.onended = () => {
-        if (toneRef.current === osc) toneRef.current = null;
+      // The band's centre follows the spin: up over the first half, back down
+      // over the second. Authored as an explicit up-ramp and down-ramp rather
+      // than an attempt to reproduce `SPIN_EASE` in WebAudio.
+      const band = ctx.createBiquadFilter();
+      band.type = "bandpass";
+      band.Q.value = FAN_Q;
+      band.frequency.setValueAtTime(FAN_HZ_REST, now);
+      band.frequency.exponentialRampToValueAtTime(FAN_HZ_PEAK, half);
+      band.frequency.exponentialRampToValueAtTime(FAN_HZ_REST, end);
+
+      const blade = ctx.createOscillator();
+      blade.type = "sine";
+      blade.frequency.setValueAtTime(FAN_BLADE_HZ_REST, now);
+      blade.frequency.exponentialRampToValueAtTime(FAN_BLADE_HZ_PEAK, half);
+      blade.frequency.exponentialRampToValueAtTime(FAN_BLADE_HZ_REST, end);
+
+      const depth = ctx.createGain();
+      depth.gain.value = FAN_BLADE_DEPTH;
+
+      const chop = ctx.createGain();
+      chop.gain.value = 1 - FAN_BLADE_DEPTH;
+
+      // Exponential ramps to a floor rather than 0 — WebAudio rejects 0 as an
+      // exponential target — and starting from the floor rather than the peak
+      // so the burst spins up instead of clicking in at full level.
+      const envelope = ctx.createGain();
+      envelope.gain.setValueAtTime(FAN_GAIN_FLOOR, now);
+      envelope.gain.exponentialRampToValueAtTime(FAN_PEAK_GAIN, now + FAN_ATTACK);
+      envelope.gain.exponentialRampToValueAtTime(FAN_GAIN_FLOOR, end);
+
+      source.connect(band).connect(chop).connect(envelope).connect(ctx.destination);
+      blade.connect(depth).connect(chop.gain);
+
+      source.start(now);
+      source.stop(end);
+      blade.start(now);
+      blade.stop(end);
+      source.onended = () => {
+        // Fires on an early `stop()` too, which is what takes the blade
+        // oscillator down with the burst it belongs to.
+        blade.stop();
+        if (fanRef.current === source) fanRef.current = null;
       };
-      toneRef.current = osc;
+      fanRef.current = source;
     } catch {
-      // The tone is an embellishment; it may never break the dialog.
+      // The sound is an embellishment; it may never break the dialog.
     }
   }
 
   function magnify() {
-    hoverRef.current?.play();
+    magnifyRef.current?.play();
   }
 
   function settle() {
-    hoverRef.current?.reverse();
+    magnifyRef.current?.reverse();
   }
 
   function onCloseEnter() {
     magnify();
-    // Gated on the same preference as the tween: no tween, no tone.
-    if (hoverRef.current) whine();
+    // Both gated on the same preference as the tweens: no tween, no sound.
+    if (spinRef.current) {
+      spinRef.current.restart();
+      fan();
+    }
   }
 
   function onCloseLeave() {
@@ -363,7 +491,8 @@ export function DemoRequestDialog({
                 onPointerEnter={onCloseEnter}
                 onPointerLeave={onCloseLeave}
                 // Keyboard parity: the affordance is not pointer-only. Focus
-                // magnifies and spins but stays silent.
+                // magnifies, but does not spin and stays silent — the spin and
+                // the fan are one gesture, tied to the pointer arriving.
                 onFocus={magnify}
                 onBlur={settle}
                 aria-label="Close"

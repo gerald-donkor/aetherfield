@@ -198,6 +198,27 @@ magick montage frames/f0*.jpg -tile 6x -geometry +2+2 -resize 320x sheet.png
 over the two or three seconds that matter. **A 1 fps sample makes clean opacity
 fades look like blur** — do not diagnose an effect off the coarse pass.
 
+**Fitting rotation on a symmetric glyph needs a synthetic template and an
+unwrap.** A `✕` looks identical every 90 degrees, so centroid tracking aliases
+one full turn into four false oscillations. Crop the glyph to greyscale rawvideo
+at source resolution first:
+
+```
+ffmpeg -v error -i ref.webm -vf "crop=26:26:436:15" \
+  -pix_fmt gray -f rawvideo glyph.gray
+```
+
+Fit the settled crop to a supersampled two-bar `✕` template, solving ink
+amplitude for each arm-length/width candidate. Then fit each frame over rotation
+and scale against that fixed template. When a black cursor crosses a grey glyph,
+mask pixels below the separating threshold (150/255 in the prompt-49 reference)
+and dilate that mask by one pixel before scoring; otherwise cursor motion wins
+the fit. Finally unwrap the fitted angle monotonically modulo the glyph's
+symmetry period — 90 degrees for a `✕` — before reading total travel or ease.
+Always quote the crop, threshold, search grids and clean frame/time windows so
+the fit can be rerun. On `Screencast_20260809_172923.webm`, this procedure
+separated one 360-degree turn from the aliased four-quarter reading.
+
 **A variable-frame-rate capture must be extracted once and indexed against its
 own `pts_time` list.** `~/Videos/Screencasts/*.webm` from this user's recorder is
 VFR: a `-ss/-to` slice returns a **different frame count** from the matching

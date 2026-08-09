@@ -614,11 +614,12 @@ bullet and a border, no colour alone.
 **Success swaps the body in place**, no redirect (§10 rule 5): the page keeps
 its scroll position and its motion state.
 
-### The close button's hover, and the blurred backdrop — prompt 45
+### The close button's fitted spin, fan and blurred backdrop — prompts 45 and 49
 
-A design pass over the leaf, requested by the user against a running dev server
-on 7 Aug 2026. It touches no stage of the write path: no action, schema, query,
-email or environment variable changed.
+A design pass over the leaf began in prompt 45 and was refitted in prompt 49
+against `/home/gdk26/Videos/Screencasts/Screencast_20260809_172923.webm`. It
+touches no stage of the write path: no action, schema, query, email or
+environment variable changed.
 
 **GSAP here is an explicit deviation from §7.5**, which bars GSAP from backend
 UI. The user was shown the conflict, offered a CSS-only alternative that keeps
@@ -632,14 +633,38 @@ grepping each route's referenced chunks: `/` 2 chunks containing `gsap`,
 `/journal` 2, `/about` 2, `/design-system` 1. After the change the per-route
 chunk **counts are unchanged on all 18 prerendered pages**.
 
-**The animation.** On pointer enter and on focus alike the `✕` scales to
-**1.35** and rotates **90 degrees** over **0.22 s**; pointer leave and blur
-reverse it. Every number is a **judgement, not a measurement** — there is no
-recording of this interaction to fit against. 90 degrees is chosen because the
-glyph is a `✕`, which lands back on itself and never rests crooked. `EASE` is
-imported from `motion/register.ts`; the duration is a **local** `HOVER_DUR`,
-on the `FOOTER_DUR` precedent, because `DUR`'s 0.5 is the page-reveal
-vocabulary and is sluggish under a cursor.
+**The spin is now measured.** The 481×230, 60 fps reference has a video stream
+only. Crop the 26×26 glyph, fit each grey frame against a 4× supersampled
+synthetic two-bar `✕`, mask the black cursor at `<150/255`, and unwrap the
+result modulo 90 degrees. All three clean windows give one continuous
+**360-degree clockwise** turn over **0.450 s** (27 frames), rest to rest. The
+earlier "four oscillations" reading was the glyph's 90-degree symmetry aliasing
+one full turn into four identical quarters and is superseded.
+
+The scale fit searched 0.9–1.5 and selected **1.0 on every frame**. The shipped
+**1.35** magnify is therefore a **judgement**, retained as a separate persistent
+hover/focus affordance: it says the target remains live after the measured
+one-shot spin has returned upright. Its **0.22 s** duration and imported `EASE`
+remain the prompt-45 judgement. The spin is pointer-enter only, never reversed,
+and re-entry calls `restart()` rather than stacking.
+
+The fitted progress is symmetric: `p(0.5) = 0.500` to within one frame. RMS
+residuals by clean window were:
+
+| ease | W2 | W3 | W4 |
+| --- | ---: | ---: | ---: |
+| `linear` | 0.0730 | 0.0639 | 0.0808 |
+| `sine.inOut` | 0.0265 | 0.0399 | **0.0188** |
+| `power1.5.inOut` | 0.0300 | **0.0341** | 0.0307 |
+| `power2.inOut` | 0.0339 | 0.0489 | 0.0173 |
+| `power3.inOut` | 0.0743 | 0.0884 | 0.0579 |
+
+`linear` and `power3.inOut` lose by 2–4× in every window and are excluded. The
+remaining three are inside the duplicated-frame noise floor; each wins a
+different window. The shipped `power1.5.inOut`-shaped function is therefore a
+**judgement on that measured floor**, chosen because it never loses badly.
+GSAP has no parseable fractional-power string, so the symmetric power function
+is authored directly rather than silently falling back to an out ease.
 
 - `useGSAP` takes `{ dependencies: [open], revertOnUpdate: true, scope }` —
   the button mounts *after* the hook first runs, because the dialog body
@@ -650,35 +675,40 @@ vocabulary and is sluggish under a cursor.
   through hover, leave, focus and blur under `prefers-reduced-motion: reduce`.
 - No `contextSafe`, which is banned outright; the handlers are React props and
   the tween is created inside the context, so `mm.revert()` owns it.
-- **One paused `fromTo` played and reversed, not two `gsap.quickTo` setters.**
-  The setter pair was written first, as the prompt specified, and **measured
-  wrong**: `scale` is a shorthand over `scaleX`/`scaleY`, and a `quickTo` on it
-  alongside a second `quickTo` on `rotation` left the button at
-  `matrix(0, 1, -1, 0, 0, 0)` on hover — the rotation landed and the magnify was
-  silently dropped. The paused tween measures `matrix(0, 1.35, -1.35, 0, 0, 0)`
-  hovered and `matrix(1, 0, 0, 1, 0, 0)` at rest, which is the specified
-  outcome. `quickTo` exists for a stream of new target values per frame; a hover
-  has two states.
+- **Two paused `fromTo` tweens compose on one transform.** Scale plays/reverses;
+  rotation restarts and completes. Production-browser matrices were
+  `matrix(1, 0, 0, 1, 0, 0)` at rest,
+  `matrix(-0.550541, -1.23264, 1.23264, -0.550541, 0, 0)` mid-spin, and
+  `matrix(1.35, 0, 0, 1.35, 0, 0)` hovered after completion. Leaving settles
+  back to the identity matrix, so the 360-degree turn leaves no residual angle.
+  Re-entering mid-spin moved from a 153-degree matrix to about 29 degrees after
+  40 ms, proving restart rather than accumulation.
 - A pointer leaving a **focused** button does not settle it, so the pointer
   cannot undo the keyboard's state.
 
-**The whine.** A WebAudio tone on pointer enter **only** — never on focus, so a
-keyboard user tabbing through is not blasted, and never on mount. Shape, all
-judged: a **triangle** oscillator sweeping **420 → 1080 Hz** over **0.18 s**,
-gain from **0.05** ramped exponentially to a 0.0001 floor (WebAudio rejects 0 as
-an exponential target). Quiet, brief, mechanical — a servo spinning up, not a
-notification chime, because the site's register is measured and operational.
-It is gated on the same reduced-motion check as the tween: no tween, no tone.
-One lazily created `AudioContext` in a ref, closed on unmount; the running
-oscillator is tracked and stopped before another starts, so re-entering does not
-stack. `resume()` is defensive only — the dialog is reachable only by a click,
-so audio is already unlocked. No input device is opened and no permission is
-requested.
+**The fan is entirely judged.** The reference has no audio stream, so none of
+its sound numbers is measured. On pointer enter only, a cached one-second white
+noise buffer feeds a bandpass whose centre ramps **320 → 1500 → 320 Hz** across
+the measured **0.45 s** spin (`Q = 1.8`). A sine blade LFO ramps
+**18 → 72 → 18 Hz** at depth **0.35** into the chop gain. The output envelope
+attacks over **0.06 s**, peaks at the already-settled **0.05**, then falls to the
+positive **0.0001** floor; MDN confirms that an exponential ramp target must be
+positive. These are sound-design judgements on the user's "spinning or whinning
+sound like a fanning sound" brief, not facts extracted from the silent file.
 
-Verified in a real browser against the production build: focus alone created
-**0** oscillators; five rapid hover cycles created **5** oscillators with **5**
-`stop()` calls; closing and reopening the dialog left the hover working, which
-exercises `revertOnUpdate`; no page errors.
+One lazily created `AudioContext` is closed on unmount and its context-owned
+buffer is discarded. The running source is stopped before another begins, so
+re-entry cannot stack. Five rapid entries created **5 buffer sources** and
+**5 blade oscillators**; every node was stopped. Instrumentation saw **9 source
+`stop()` calls** (five scheduled endings plus four interruptions) and **10 blade
+`stop()` calls** (five scheduled endings plus the source `onended` cleanup).
+Focus alone created **0** sources. No input device is opened and no permission
+is requested.
+
+Production-browser verification also found `transform: none` through hover,
+leave, focus and blur under `prefers-reduced-motion: reduce`, with **0** audio
+sources. Closing and reopening left identity at rest and a composed scaled spin
+on hover, exercising `revertOnUpdate`. There were no page or console errors.
 
 **The backdrop.** `backdrop:bg-ink/40` became
 `backdrop:bg-ink/25 backdrop:backdrop-blur-md`. Both values are **judgements** —
@@ -692,17 +722,13 @@ browser. **No `::backdrop` transition**: animating one needs `@starting-style`
 and `transition-behavior: allow-discrete`, and the dialog has no open/close
 transition to hang it on. That is a separate change with its own measurement.
 
-**Prerender impact, measured — two routes, not four.** The prompt predicted `/`,
-`/journal`, `/about` and `/design-system`. The build says **`/` and
-`/design-system` only**: `CtaBand`'s `demo` prop is opt-in and `/journal`'s band
-is the newsletter's while `/about`'s reads "View open roles", so neither renders
-a dialog at all. Method: build the working tree twice, before and after, strip
-the RSC flight scripts, normalise `BUILD_ID` and generated chunk names. Result —
-**16 of 18 pages markup-identical**, and the remaining two differ **only** by
-the `<dialog>` class string (twice on `/`, once on `/design-system`); zero real
-differences. The route table came back identical to the pre-change build. The
-close button's own markup is absent from every prerendered page: it lives inside
-the `open ? … : null` branch.
+**Prompt 49's prerender impact is measured as none.** Build-before/build-after,
+with RSC flight scripts stripped and `BUILD_ID` plus generated chunk names
+normalised, found all **18 of 18 pages markup-identical**. `/` and
+`/design-system` — the only routes carrying this dialog — have identical markup
+too because the close button is absent from the closed `open ? … : null` branch.
+The route table, CSS chunk, and every prerendered route's count of chunks
+containing `gsap` are unchanged.
 
 ### `Field` gained a textarea, and it was extended rather than forked
 
