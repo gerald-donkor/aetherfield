@@ -189,6 +189,10 @@ Scripts that currently exist in `package.json`:
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
 - `npm run typecheck` — `tsc --noEmit`
+- `npm run test:e2e` — build and start the production app on port 3100 through
+  Playwright, then run the Chromium / Firefox E2E projects
+- `npm run test:e2e:ui` — open Playwright's interactive UI over the same
+  production-server configuration
 - `npm run db:generate` — Drizzle Kit: write a migration from `lib/db/schema.ts`
 - `npm run db:migrate` — apply pending migrations over the **direct** connection
 - `npm run db:studio` — Drizzle Studio against the same direct connection

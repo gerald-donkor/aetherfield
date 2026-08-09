@@ -22,20 +22,55 @@ magick <comp>.png -colorspace Gray -threshold 95% -negate \
 Run it against the render and the comp and diff the box list. Area threshold
 25000 at 1280, 40000 at 800, 15000 at 375.
 
-**Screenshotting the render** — Playwright is not a project dependency but its
-browsers are cached; drive `playwright-core` out of the npx cache
-(`/home/gdk26/.npm/_npx/*/node_modules/playwright-core`) against `npm run start`,
-`deviceScaleFactor: 1`, `fullPage: true`, at 375 / 800 / 1280.
+**Playwright is a first-party project dependency.** Prompt 51 installed
+`@playwright/test` 1.62.1 with Chromium and Firefox projects. The smoke suite
+lives in `e2e/`; run it with `npm run test:e2e`, or use
+`npm run test:e2e:ui` for the interactive runner. `playwright.config.ts` builds
+and starts the production application on port 3100, refuses to reuse an
+existing server, and shuts its managed server down when the run ends. After a
+Playwright package update, refresh the matching browser binaries with
+`npx playwright install chromium firefox`.
 
-`playwright-core` is CommonJS — `import { chromium } from …/index.js` throws
-`Named export 'chromium' not found`. Use
-`import pkg from '…/index.js'; const { chromium } = pkg;`.
+**WebKit is not in the local matrix because this host is unsupported.** This
+machine runs Arch Linux; Playwright 1.62.1 downloads its Ubuntu 24.04 fallback
+WebKit build, which requires Ubuntu's ICU 74, legacy libxml2 and flite ABI. Its
+own dependency command confirms the boundary rather than fixing it:
+`npx playwright install-deps --dry-run webkit` reports the unsupported OS and
+fails with `spawn apt-get ENOENT`. Do not replace Arch's system ICU or copy
+foreign shared libraries into the browser cache to manufacture a pass. Add
+WebKit when the suite has a supported Debian/Ubuntu CI runner, and install its
+dependencies there with Playwright's own command.
 
-**Check port 3000 before starting a server.** A `next dev` may already be
-running there; `npm run start` then dies with `EADDRINUSE` and every screenshot
-silently comes from the dev server instead (the dev-tools badge shows up in the
-render and can land in the connected-components list). Start production on a
-free port — `npx next start -p 3001` — and leave the user's dev server alone.
+**Prompt 51 verification (9 Aug 2026).** `npx playwright --version` reported
+`1.62.1`; `npx playwright test --list` found exactly two cases in one file, one
+each for Chromium and Firefox. `npm run lint` and `npm run typecheck` completed
+with no diagnostics. `npm run test:e2e` built the production application,
+started it on port 3100, passed both projects in 18.9 s, and left no server on
+3100. The final standalone `npm run build` compiled successfully and generated
+26 / 26 pages with the existing static / SSG / dynamic route modes.
+
+The final prerender comparison used a clean worktree at `ce84e14`, after two
+unrelated backend commits landed during verification. Both builds had the four
+ignored skill-doc snapshots excluded and used the same in-memory
+`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` (Next 16 otherwise generates a unique key
+per build and changes Server Action IDs). The two path sets were identical at
+21 HTML files; after normalising only `.next/BUILD_ID`, **0 files differed**.
+The key was neither printed nor written to disk.
+
+**Screenshotting the render** — import from `@playwright/test` or the installed
+`playwright` package rather than resolving `playwright-core` from npm's transient
+cache. Keep the established `deviceScaleFactor: 1`, `fullPage: true`, and 375 /
+800 / 1280 viewport procedure. Wait on `document.fonts.ready`, settle the
+motion, and apply the page-specific masking rules below before comparing a
+render.
+
+**Check the target port before starting an ad-hoc server.** A `next dev` may
+already be running on 3000; `npm run start` then dies with `EADDRINUSE` and every
+screenshot silently comes from the dev server instead (the dev-tools badge
+shows up in the render and can land in the connected-components list). The
+committed Playwright suite isolates itself on 3100 and refuses stale reuse. For
+ad-hoc production probes, start on a confirmed-free port — for example
+`npx next start -p 3001` — and leave the user's dev server alone.
 
 **Identifying which photograph a treated comp image came from is a search, not a
 guess.** Blur, greyscale and downsample both to ~124×50 and rank
@@ -396,7 +431,7 @@ filesystem root, and `/tmp` may be a different filesystem so `cp -al` fails
 with `Invalid cross-device link`; use a regular `cp -a` for that temporary
 worktree when either condition applies.
 
-**`page.accessibility.snapshot()` is gone from the cached `playwright-core`.**
+**`page.accessibility.snapshot()` is gone from the installed Playwright API.**
 It throws `Cannot read properties of undefined`. Use
 `await page.locator("h1").ariaSnapshot()` instead — it returns the YAML form
 (`- heading "…" [level=1]`), which is what you want for checking that a split or
@@ -410,10 +445,6 @@ build. Set the display for the tween's duration only and list it in
 `clearProps` alongside the filter; the settled render then goes back to 0. Check
 element rects *and* `-metric AE`: rects can be identical to two decimal places
 while the glyphs have moved.
-
-**`playwright-core`'s npx cache hash changes.** Do not copy a path out of an
-older note — resolve it each session with
-`ls -d /home/gdk26/.npm/_npx/*/node_modules/playwright-core`.
 
 **There are two "Energy consumption" cards on `/`, and a `.first()` probe hits
 the wrong one.** The hero dashboard carries one and the Capabilities section
