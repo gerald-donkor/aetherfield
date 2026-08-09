@@ -1,6 +1,7 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
@@ -54,10 +55,21 @@ export function SignInForm() {
       const { error } = await authClient.signIn.email({
         email,
         password,
-        callbackURL: new URL("/account", window.location.origin).toString(),
+        /* Better Auth reuses this callback when a valid-password sign-in is
+           blocked for an unverified address and `sendOnSignIn` issues a new
+           link. A verified sign-in still takes the explicit `/account`
+           navigation below; only the verification link lands here. */
+        callbackURL: new URL(
+          "/verify-email?verified=1",
+          window.location.origin,
+        ).toString(),
       });
       if (error) {
-        setMessage("We couldn't sign you in. Check your details and try again.");
+        setMessage(
+          error.code === "EMAIL_NOT_VERIFIED"
+            ? "Your email isn't verified. A new verification link may have been sent, so check your inbox before trying again."
+            : "We couldn't sign you in. Check your details and try again.",
+        );
         return;
       }
 
@@ -123,6 +135,14 @@ export function SignInForm() {
         required
         className="mt-6"
       />
+      <p className="mt-3 text-right font-serif text-[16px] text-muted">
+        <Link
+          href="/forgot-password"
+          className="font-sans font-bold text-ink underline decoration-border underline-offset-4 hover:decoration-ink"
+        >
+          Forgot password?
+        </Link>
+      </p>
       <Button type="submit" className="mt-8 w-full" disabled={pending !== null}>
         {pending === "email" ? "Signing in..." : "Sign in"}
       </Button>

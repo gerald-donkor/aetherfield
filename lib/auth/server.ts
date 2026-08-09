@@ -1,6 +1,7 @@
 import "server-only";
 
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
+import { waitUntil } from "@vercel/functions";
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { headers } from "next/headers";
@@ -8,6 +9,10 @@ import { headers } from "next/headers";
 import { getStaffRole } from "../db/auth-queries";
 import { getDb } from "../db/client";
 import { databaseSchema } from "../db/database-schema";
+import {
+  sendAccountVerificationEmail,
+  sendPasswordResetEmail,
+} from "../email/auth";
 
 /**
  * Better Auth is constructed lazily for the same reason the database pool is:
@@ -24,8 +29,23 @@ function createAuth() {
     }),
     emailAndPassword: {
       enabled: true,
-      // Deliberately false until step 3 can send verification email.
-      requireEmailVerification: false,
+      requireEmailVerification: true,
+      minPasswordLength: 8,
+      maxPasswordLength: 128,
+      resetPasswordTokenExpiresIn: 60 * 60,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url, token }) => {
+        await sendPasswordResetEmail({ user, url, token });
+      },
+    },
+    emailVerification: {
+      expiresIn: 60 * 60,
+      sendOnSignUp: true,
+      sendOnSignIn: true,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url, token }) => {
+        await sendAccountVerificationEmail({ user, url, token });
+      },
     },
     socialProviders: {
       google: {
@@ -56,6 +76,11 @@ function createAuth() {
     rateLimit: {
       enabled: true,
       storage: "database",
+    },
+    advanced: {
+      backgroundTasks: {
+        handler: waitUntil,
+      },
     },
     // Must stay last: it applies Better Auth's Set-Cookie headers through
     // Next.js after the rest of the auth pipeline has completed.

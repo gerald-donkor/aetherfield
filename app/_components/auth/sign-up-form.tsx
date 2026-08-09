@@ -1,7 +1,6 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Field } from "../primitives";
@@ -12,9 +11,9 @@ const authClient = createAuthClient();
 type PendingPath = "email" | "google" | null;
 
 export function SignUpForm() {
-  const router = useRouter();
   const statusRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingPath>(null);
+  const [complete, setComplete] = useState(false);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState({
     name: "",
@@ -23,8 +22,8 @@ export function SignUpForm() {
   });
 
   useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
+    if (message || complete) statusRef.current?.focus();
+  }, [complete, message]);
 
   const onGooglePendingChange = useCallback(
     (googlePending: boolean) => setPending(googlePending ? "google" : null),
@@ -59,7 +58,10 @@ export function SignUpForm() {
         name,
         email,
         password,
-        callbackURL: new URL("/account", window.location.origin).toString(),
+        callbackURL: new URL(
+          "/verify-email?verified=1",
+          window.location.origin,
+        ).toString(),
       });
       if (error) {
         setMessage(
@@ -68,8 +70,7 @@ export function SignUpForm() {
         return;
       }
 
-      router.replace("/account");
-      router.refresh();
+      setComplete(true);
     } catch {
       setMessage(
         "We couldn't create the account. Check your details or sign in instead.",
@@ -77,6 +78,24 @@ export function SignUpForm() {
     } finally {
       setPending(null);
     }
+  }
+
+  if (complete) {
+    return (
+      <div
+        ref={statusRef}
+        role="status"
+        aria-live="polite"
+        tabIndex={-1}
+        className="border-l-2 border-ink pl-4 outline-none"
+      >
+        <h2 className="font-serif text-[28px] leading-tight">Check your inbox</h2>
+        <p className="mt-3 font-serif text-[16px] leading-6 text-muted">
+          If an account can be created for that address, we sent a verification
+          link. Open it to finish setting up your account.
+        </p>
+      </div>
+    );
   }
 
   return (

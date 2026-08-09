@@ -250,10 +250,10 @@ generated auth tables; no `Proxy` wraps the database client.
 
 Options set explicitly:
 
-- email/password enabled; Better Auth's verified 8–128 password limits remain
-  the defaults;
-- `requireEmailVerification: false`, deliberately, until step 3 can send the
-  verification message;
+- email/password enabled with explicit 8–128 password limits;
+- `requireEmailVerification: true`; account verification and password reset now
+  send through step 3's email layer. The exact policy and completed public flows
+  are recorded in the prompt-52 completion section below;
 - a nullable user `role`, `input: false`, so public signup cannot submit or
   grant `staff` / `admin`;
 - rate limiting enabled in every environment with `storage: "database"`;
@@ -2499,3 +2499,180 @@ Next.js 16.2.12. The build compiled in 7.4s, generated 22 static pages, retained
 `/careers` as Static and the three `/job-listing/[slug]` pages as SSG, and
 reported only the existing `serverActions` experimental warning. There is no
 test script, so no test run is claimed.
+
+---
+
+## Step 6 completion — required email verification and password reset
+
+Implemented by prompt 52 on 9 Aug 2026. This closes the email/password gap left
+by prompt 38 now that step 3's Resend/React Email layer exists. It adds no
+schema, migration, provider resource, environment variable, root provider or
+auth middleware matcher.
+
+### Installed APIs and server policy
+
+The implementation was read from Better Auth **1.6.26**, not recalled:
+
+- `emailVerification.sendVerificationEmail`, `sendOnSignUp`, `sendOnSignIn`,
+  `autoSignInAfterVerification` and `expiresIn` are the installed option names;
+- `emailAndPassword.sendResetPassword`, `resetPasswordTokenExpiresIn` and
+  `revokeSessionsOnPasswordReset` are the installed reset options;
+- the generated client methods are `sendVerificationEmail`,
+  `requestPasswordReset` and `resetPassword`;
+- the installed reset callback adds `?token=` on success and `?error=` on an
+  invalid or expired credential; verification adds the provider error code to
+  the configured callback only on failure;
+- the installed implementation consumes a reset value before changing the
+  password, then deletes every session when revocation is enabled. Verification
+  JWTs are checked against the auth secret and their expiry before the user is
+  marked verified.
+
+`lib/auth/server.ts` now makes the policy explicit: verification required,
+passwords 8–128 characters, verification and reset credentials both valid for
+**3,600 seconds (one hour)**, every session revoked after a reset, verification
+sent after email signup and after a valid-password sign-in by an unverified
+user, and a session created only after verification succeeds. Google provider
+configuration, OAuth token encryption, non-input roles, database rate limiting,
+lazy construction and `plugins: [nextCookies()]` last are unchanged.
+
+Better Auth **1.6.26** marks the signup, sign-in and reset sends as background
+work through its own `runInBackgroundOrAwait` path. `advanced.backgroundTasks`
+therefore receives Vercel's `waitUntil` directly. The email hooks are not
+wrapped in a second background call, and provider failure never changes the
+public auth response.
+
+### Auth email contract
+
+`lib/email/auth.ts` is server-only and is the one orchestration module for both
+messages. It passes Better Auth's provider-created `url` through unchanged; it
+never reconstructs a callback or credential. The same hook's retry is
+idempotent, while a newly issued credential sends a new message:
+
+```
+auth-account-verification/<user id>/<sha256(provider token)>
+auth-password-reset/<user id>/<sha256(provider token)>
+```
+
+The raw token, signed URL, address, name, password, subject and body never enter
+the key or application logs. Failure output is limited to the fixed event,
+template and `sendEmail()`'s safe provider error class. Both keys measured under
+Resend's 256-character limit in the live capture, and the final segment was a
+64-character hexadecimal SHA-256 digest rather than the provider token.
+
+`account-verification.tsx` and `password-reset.tsx` are named-export React Email
+templates over the existing `Shell`; the deliberate direct `render()` workflow
+and absence of an email-preview script are unchanged. Both are transactional:
+one `<h1>`, one unique HTTPS action destination used by the button and visible
+fallback, explicit one-hour copy, monitored reply-to policy through `send.ts`,
+and a no-action-needed line for an unsolicited request. Neither carries
+marketing, newsletter or unsubscribe content. `sendEmail()` continues to render
+and send both HTML and plain text explicitly.
+
+### Browser and callback flow
+
+Email signup supplies an absolute same-origin
+`/verify-email?verified=1` callback. Better Auth returns `token: null` before
+verification, including its synthetic duplicate-safe response; the leaf swaps
+to the same focused check-inbox state for either and never navigates to
+`/account`. Google signup still goes directly to `/account`.
+
+Email sign-in also supplies the fixed verification callback. This matters only
+when a valid password belongs to an unverified account: Better Auth reuses that
+field for the new verification link and then returns `EMAIL_NOT_VERIFIED`. A
+normal verified sign-in still follows the leaf's existing explicit `/account`
+navigation. The UI maps only that installed code to safe “may have been sent”
+guidance; every invalid email/password outcome remains generic. The new
+`Forgot password?` link is the only initial-markup change on `/sign-in`.
+
+The public route table is:
+
+| route | render | credential handling |
+| --- | --- | --- |
+| `/forgot-password` | static | email goes directly to Better Auth; known and unknown addresses receive the same visible completion |
+| `/reset-password` | static shell + Suspense client leaf | `useSearchParams()` derives `token` / `error`; the query is removed with `history.replaceState`, the token stays only in a ref until use, and every rejection becomes one invalid-or-expired state |
+| `/verify-email` | static shell + Suspense client leaf | reads only fixed `verified=1` / provider error, removes the query, and offers an enumeration-safe resend form on every non-success state |
+| `/account` | dynamic, unchanged | the real session/database check remains authoritative; typing `?verified=1` is presentation only |
+
+Reset validates 8–128 characters and an exact confirmation in the browser as a
+courtesy, then Better Auth performs the authoritative length, credential,
+single-use and session-revocation checks. No form reads an auth table, no custom
+Route Handler or Server Action wraps Better Auth, and `proxy.ts` still matches
+only `/account`.
+
+### Enumeration, secrets and personal data
+
+The anonymous reset and verification-send endpoints retain Better Auth's
+database rate limit, trusted-origin/origin checks, dummy reset work and 500 ms
+verification-send floor. A known address, unknown address and already-verified
+address do not produce distinguishable site copy. BotID remains the recorded
+auth catch-all gap; this prompt did not replace provider endpoints or invent a
+wrapper to broaden its scope.
+
+No new environment variable and no `NEXT_PUBLIC_*` variable was added. The
+flow reads the existing `DATABASE_URL`, `BETTER_AUTH_SECRET`,
+`BETTER_AUTH_URL`, `RESEND_API_KEY` and optional reply-to policy. Better Auth
+stores the existing user, credential, verification and session records; there
+is no send audit. Verification/reset sends transmit the user's name, address
+and credential-bearing link to Resend over TLS, under Resend's retention policy.
+Nothing personal is logged by application code.
+
+The deployment prerequisite from step 3 becomes stricter now: required
+verification means an arbitrary email/password signup cannot finish while
+`FROM` remains `onboarding@resend.dev`. Acquire and verify an owned domain,
+publish SPF/DKIM/DMARC, then change `FROM`; do not weaken verification to work
+around the sandbox. Google remains the available signup path in the meantime.
+
+### Verified, prompt 52
+
+Every pass below was run on 9 Aug 2026; no result is inferred from the prompt.
+
+- `npm run typecheck` exited 0 (`tsc --noEmit`), and `npm run lint` exited 0
+  (`eslint`).
+- `npm run build` exited 0 on Next **16.2.12**, compiled in **8.4 s**, and
+  generated **25** static pages. `/forgot-password`, `/reset-password` and
+  `/verify-email` are `○ Static`; `/sign-in` and `/sign-up` stay static;
+  `/account` and `/api/auth/[...all]` stay `ƒ Dynamic`.
+- The same production build with `.env.local` safely moved aside exited 0,
+  compiled in **6.5 s**, and emitted the same route table. The file was restored
+  and checked afterwards, proving database, auth and email construction remain
+  request-lazy.
+- `npm run db:generate` reported **“No schema changes, nothing to migrate”**
+  across the existing eight tables and wrote no migration.
+- Both new templates were rendered directly to HTML and plain text. Each had
+  non-empty parts, one `<h1>`, one unique destination, the named action,
+  one-hour and fallback copy, the no-action-needed line, explicit ink/underline
+  fallback-link styling, and no marketing/newsletter/unsubscribe text.
+- Clean baseline build at parent `abe1d17`, with the local skill snapshots
+  mirrored as `docs/automation.md` requires: all **16 of 16** pre-existing
+  non-auth prerendered pages are markup-identical after stripping RSC flight
+  scripts and normalising generated CSS/JS chunk names. `/sign-in` alone changes
+  among the two existing auth pages; `/sign-up`'s initial markup is identical
+  because its new confirmation is post-submit state. The three new route HTML
+  files exist.
+- A production build on isolated port 3101 exercised the complete flow with
+  Resend's documented test recipient and a localhost capture endpoint receiving
+  the **exact payload produced by the installed Resend SDK**: signup created no
+  session; a duplicate returned the same public shape; valid-password
+  unverified sign-in was rejected and issued another verification; verification
+  landed on the fixed marker, marked the user verified and created a session;
+  known/unknown reset responses were byte-equal; reset changed the password,
+  revoked the previous session and consumed the credential; replay and the old
+  password failed; the new password signed in; and both Google sign-in and
+  sign-up initiation still returned Google authorization URLs. The captured
+  payloads contained both rendered parts, one-hour copy and the hashed-token
+  idempotency-key shapes above.
+- Cleanup removed the synthetic user and verified **0 users, 0 accounts, 0
+  sessions and 0 verification values** remained.
+
+**Not verified, and why.** The first pass used the real Resend endpoint, but the
+configured key is send-only: listing the sent message returned
+`restricted_api_key`, and this environment has no inbox connector. Actual inbox
+receipt and link use are therefore **not claimed**. The local capture verified
+the exact provider request and full application lifecycle, not deliverability.
+The credential/error query-removal effects were not browser-driven because
+prompt 51's Playwright installation is still unrelated uncommitted work and
+prompt 52 explicitly forbids using it as evidence. The implementation uses the
+same `history.replaceState(window.history.state, ...)` pattern already shipped
+for Google callback cleanup, and production HTML contains no query credential,
+but the visible-address transition remains a browser check after prompt 51 is
+committed. `npm run test:e2e` was not run for the same reason.
