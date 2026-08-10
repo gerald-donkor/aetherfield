@@ -5,6 +5,7 @@ import {
   add,
   compare,
   decimal,
+  divide,
   fromUnits,
   isZero,
   multiply,
@@ -174,6 +175,52 @@ describe("rescale", () => {
     expect(() => rescale(decimal("1"), -1, "half-up")).toThrow();
     expect(() => rescale(decimal("1"), 1.5, "half-up")).toThrow();
     expect(() => fromUnits(1n, -1)).toThrow();
+  });
+});
+
+describe("divide", () => {
+  const quotient = (
+    a: string,
+    b: string,
+    scale: number,
+    mode: "half-up" | "half-even" | "down",
+  ) => {
+    const result = divide(decimal(a), decimal(b), scale, mode);
+    expect(result.ok).toBe(true);
+    return result.ok ? str(result.value) : "";
+  };
+
+  it("keeps exact quotients exact at the declared scale", () => {
+    expect(quotient("10", "4", 3, "half-even")).toBe("2.500");
+  });
+
+  it("resolves an exact half under every rounding mode", () => {
+    expect(quotient("5", "2", 0, "half-up")).toBe("3");
+    expect(quotient("5", "2", 0, "half-even")).toBe("2");
+    expect(quotient("5", "2", 0, "down")).toBe("2");
+    expect(quotient("7", "2", 0, "half-even")).toBe("4");
+  });
+
+  it("applies half-up away from zero for negative operands", () => {
+    expect(quotient("-5", "2", 0, "half-up")).toBe("-3");
+    expect(quotient("5", "-2", 0, "half-up")).toBe("-3");
+    expect(quotient("-5", "-2", 0, "half-up")).toBe("3");
+  });
+
+  it("truncates a repeating quotient at the declared scale", () => {
+    expect(quotient("1", "3", 6, "down")).toBe("0.333333");
+  });
+
+  it("refuses division by zero without a value", () => {
+    const result = divide(decimal("1"), decimal("0.00"), 2, "half-even");
+    expect(result.ok).toBe(false);
+    expect("value" in result).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/zero/i);
+  });
+
+  it("requires a non-negative integer scale", () => {
+    expect(() => divide(decimal("1"), decimal("2"), -1, "down")).toThrow();
+    expect(() => divide(decimal("1"), decimal("2"), 1.5, "down")).toThrow();
   });
 });
 

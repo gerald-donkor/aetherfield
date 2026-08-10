@@ -164,6 +164,31 @@ const ACTIVITY_IMPORT_WINDOW = "1 h" as const;
 const ACTIVITY_COMMIT_LIMIT = 60;
 const ACTIVITY_COMMIT_WINDOW = "1 h" as const;
 
+/**
+ * Setting and retiring a target, **keyed by user id** — build step 11.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
+ * as every window above it. Nothing here is fitted: the flow has never shipped,
+ * so there is no traffic to fit against, and it is to be revisited against real
+ * usage rather than treated as measured.
+ *
+ * **Keyed by user id for the reason the organisation limiter records.** The path
+ * is authenticated and tenant-scoped, so an IP key would throttle a whole office
+ * behind one NAT while leaving the abusable surface — one account writing rows
+ * in a loop — unbounded. A user id is not personal data.
+ *
+ * **A named limiter rather than a reuse of `checkActivityCommitLimit`**, because
+ * the two bound different things: that one bounds work over rows already staged
+ * in an import, and its 60 an hour is sized for a person iterating on a column
+ * mapping. Setting a target is a deliberate, occasional act — a company files a
+ * handful of commitments, not sixty an hour — and sharing a bucket would let a
+ * busy import session exhaust the allowance for an unrelated flow. 30 is
+ * deliberately loose against honest use: a reporter correcting a mistyped
+ * baseline consumes one slot per attempt.
+ */
+const TARGET_WRITE_LIMIT = 30;
+const TARGET_WRITE_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -359,6 +384,25 @@ export async function checkActivityCommitLimit(
     "activity-commit",
     ACTIVITY_COMMIT_LIMIT,
     ACTIVITY_COMMIT_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Setting and retiring a target, keyed by the **user id**. Stage b of
+ * AGENTS.md 10 — see the constant's docblock for why it is not keyed by IP, why
+ * it is not `checkActivityCommitLimit`, and why the number is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkTargetWriteLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "target-write",
+    TARGET_WRITE_LIMIT,
+    TARGET_WRITE_WINDOW,
     userId,
   );
 }

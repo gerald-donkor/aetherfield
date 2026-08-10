@@ -3672,6 +3672,264 @@ at all.
 | organisation invitations, a members UI | step 8's deferred work, unchanged by this |
 | a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
+
+## Step 11 — targets and forecasting
+
+Built from `prompts/59-targets-and-forecasting.md`. This is the absolute-target
+workspace behind the marketing dashboard's goal reading: the filed target, its
+linear trajectory, and a labelled run-rate projection over stored emissions.
+There is **no AI** in this step and no model produces, adjusts or narrates a
+figure.
+
+### Decisions carried into the implementation
+
+| decision | result |
+| --- | --- |
+| visible surface | a new authenticated `/targets` route beside `/activity`; step 12 still owns the dashboard |
+| target type | absolute only — name, coverage, base year, target year, reduction percentage and baseline |
+| baseline | stated by the reporter or accepted from a calculated suggestion, then stored and never moved by a later import |
+| forecast | both the planned linear trajectory and the observed run-rate projection |
+| rate limit | **judged**, not measured: 30 target writes per user per sliding hour, in its own bucket |
+
+The in-memory read of all calculated emissions is also a **judgement**, not a
+measurement of production scale. It composes the existing `listEmissions()` and
+`totalsByPeriod()` definitions rather than pre-optimising a second aggregation
+in SQL. Revisit it against real tenant volume; do not call it a measured limit.
+
+### What was built, and where
+
+| file | what |
+| --- | --- |
+| `lib/domain/decimal.ts` | caller-scaled, caller-rounded `BigInt` division with a typed zero-divisor refusal; `rescale` and `divide` share one rounding decision |
+| `lib/domain/targets.ts` | coverage totals, exact target figure, annual trajectory, flat/trending run-rate projection and signed reading; pure and clock-parameterised |
+| `lib/validation/targets.ts` | the three enum vocabularies, bounded decimal-string inputs, the cross-field year rule, typed fields and results |
+| `lib/db/schema.ts` | `emission_target` and its three enums |
+| `lib/db/target-queries.ts` | tenant-predicated create/list/get/retire plus the existing-emissions evidence read |
+| `lib/auth/tenant.ts` | the session-plus-membership resolution extracted behaviour-identically from `/activity` |
+| `app/targets/actions.ts` | create and retire Server Actions in §10's stage order |
+| `app/targets/` | the authenticated Server Component page, loading state and error boundary |
+| `app/_components/targets/` | component-only create and retire leaves; server-rendered target reading and trajectory |
+| `proxy.ts` | explicit `/targets/:path*` matcher; no marketing route was added |
+| `app/activity/page.tsx` | reciprocal text link to `/targets` |
+
+### Division: the step-10 statement that changed
+
+The emissions engine still never divides. Its unit ratios remain exact powers
+of ten and `lib/domain/emissions.ts` gained no `divide` call. Step 11 needs an
+arbitrary year-span quotient and a percentage reading, so `decimal.ts` now has:
+
+```ts
+divide(a, b, scale, mode)
+```
+
+Neither `scale` nor `mode` has a default. The operation makes one `BigInt`
+division, weighs the full remainder once, applies the sign afterwards, and
+returns `{ ok: false }` for a zero divisor. Exact-half tests cover `half-up`,
+`half-even` and `down`, including negative operands; tests also cover scale 0,
+an exact quotient, `1 / 3` at six places and the zero-divisor refusal.
+
+### The table, as applied
+
+Read back from `information_schema`, `pg_indexes` and the referential-constraint
+tables after `npm run db:migrate`:
+
+**`emission_target` — 15 columns.** `id` uuid pk `gen_random_uuid()`;
+`organization_id` text not null → `organization.id` **cascade**; `name` text not
+null; `coverage` `target_coverage` not null; `base_year` / `target_year` integer
+not null; `reduction_percent` **numeric(6,3)** not null;
+`baseline_kg_co2e` **numeric(20,3)** not null; `baseline_source`
+`target_baseline_source` not null; `computed_baseline_kg_co2e`
+**numeric(20,3)** nullable; `status` `target_status` not null default `active`;
+`created_by` text nullable → `user.id` **set null**; `created_at` timestamptz not
+null `now()`; `retired_at` / `deleted_at` timestamptz nullable.
+
+`created_by` uses `SET NULL`, not cascade: deleting an account clears the
+attribution and does not erase the organisation's commitment. The target itself
+is soft-deletable, and every read excludes `deleted_at`.
+
+Indexes: primary key; `emission_target_organization_target_year_idx
+(organization_id, target_year)`; and
+`emission_target_organization_created_at_idx (organization_id, created_at)`.
+There is no uniqueness constraint: interim and long-term commitments may share
+a coverage, multiple coverages may share a year, and a retired row may coexist
+with its replacement.
+
+Enums, in applied order:
+
+- `target_coverage`: `scope_1`, `scope_2`, `scope_3`, `scope_1_2`,
+  `scope_1_2_3`
+- `target_status`: `active`, `retired`
+- `target_baseline_source`: `stated`, `computed_at_creation`
+
+The migration is `0006_simple_clint_barton.sql`. It creates only these types,
+this table, its foreign keys and indexes. Its two `ALTER TABLE` statements add
+foreign keys to the newly created `emission_target`; **no existing table is
+altered**.
+
+### Numeric precision, derived
+
+`reduction_percent` is `numeric(6,3)`: validation admits `(0,100]` with at most
+three decimal places, so the widest value is `100.000` — six digits total.
+
+The filed baseline form admits at most 12 integer digits and 3 decimal places in
+tCO2e. Multiplication by 1,000 makes at most 15 integer digits in kgCO2e; the
+database's three-place scale stores to the gram, so 18 digits are required and
+`numeric(20,3)` leaves two integer digits of headroom. The calculated-at-creation
+snapshot uses the same `numeric(20,3)` representation. A calculated suggestion
+is rounded once to the nearest kilogram before it becomes a filed baseline;
+the separate snapshot retains grams, so the two roles do not silently collapse.
+
+### The write path and trust boundary
+
+Both actions deliberately omit BotID because the path requires a live session
+and a current organisation membership. They resolve that tenant, consume the
+user-keyed limiter (failing closed), validate with the shared Zod schema, then
+write through a tenant-predicated query. No request field names an organisation.
+Create re-derives a claimed calculated baseline from stored emissions instead
+of trusting the browser's figure, and refuses that source while any committed
+record is uncalculated. Retire predicates on organisation, id and
+active status in one update; another tenant's id and a missing id answer the
+same message. Neither action logs, emails, redirects or throws an expected
+failure to the client. Both revalidate `/targets` and return a typed result.
+
+`lib/auth/tenant.ts` preserves `/activity`'s three existing messages verbatim;
+only the shared check moved. Aetherfield `staff` and `admin` roles are not read
+and grant no tenant access.
+
+### Projection definitions and refusals
+
+A complete month is strictly earlier than the month containing caller-supplied
+`asOf`. `W1` is the latest 12 complete months and `W0` the 12 before it. With
+both windows, the target-year projection is:
+
+```text
+W1 + (W1 - W0) × months-to-target-year-end / 12
+```
+
+It is linear, not compounded, and computed as one quotient at the caller's
+declared scale. With 12–23 complete months, `W1` is carried forward flat and
+the result says explicitly that no earlier window supports a trend.
+
+Every refusal was exercised:
+
+| refusal | exercised input | result |
+| --- | --- | --- |
+| invalid trajectory span | base year 2028, target year 2028 | no trajectory points |
+| insufficient history | 11 complete months before `2026-01-02` | no projection |
+| flat basis, not a fabricated trend | 12 complete months before `2026-01-02` | projection with `basis: flat`, `W0: null` |
+| target year elapsed | target 2025 as of `2026-01-02`, even with no history | no projection |
+| zero target figure | reading 1 kg against 0 kg | no percentage and no infinity |
+
+### Worked target — measured over a synthetic series
+
+The database readback still reports **0 committed activity records**. This is
+therefore a deterministic synthetic test, not a statement about customer or
+production performance.
+
+| part | hand arithmetic | produced |
+| --- | --- | --- |
+| baseline | stated | 100,000 kgCO2e |
+| reduction | stated | 20% |
+| target figure | `100,000 × (100 - 20) / 100` | 80,000.00 kgCO2e |
+| trajectory, 2024–2028 | four equal steps of `(80,000 - 100,000) / 4 = -5,000` | 100,000 · 95,000 · 90,000 · 85,000 · 80,000 |
+| `W0` | 12 months × 10,000 | 120,000 kgCO2e |
+| `W1` | 12 months × 9,000 | 108,000 kgCO2e |
+| projection to Dec 2028 | `108,000 + (108,000 - 120,000) × 36 / 12` | 72,000.000 kgCO2e |
+| reading | `(72,000 - 80,000) / 80,000 × 100` | `-10.0%` — 10.0% ahead |
+
+### The visible outcome
+
+`/targets` is gated by `requireOrganization("/targets")`. Initial reads happen
+only in its Server Component. The form is the client leaf; target figures,
+baseline comparison, projection basis and windows, signed reading, refusal copy
+and the full annual trajectory render on the server.
+
+Three presentation rules hold:
+
+1. A projection is labelled as one, carries its complete-month count/window,
+   and a refusal is rendered in words rather than as blank or zero.
+2. When any committed activity record lacks a calculated emission, the caveat
+   appears above every affected target reading.
+3. When the filed baseline differs from the calculated-at-creation snapshot,
+   both are visible and the copy says the filed value has not moved.
+
+The baseline source is visible, retired targets remain in the record with their
+transition time, and `/activity` and `/targets` link to each other. `SiteNav`,
+`SiteFooter`, `NAV_ITEMS`, all marketing routes and all GSAP surfaces are
+untouched.
+
+### Prerender impact and verification, prompt 59
+
+**None. Verified, not assumed.** Both sides were built in isolated copies under
+`/home/gdk26/.cache/aetherfield-diff-ptM2Y8`, excluding `.agents/` and
+`.claude/` and pinning the same `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.
+
+Baseline: 27 routes — 11 Static, 2 SSG route groups (6 article paths and 3 job
+paths), 9 Dynamic, plus Proxy. Implementation: the same table plus one Dynamic
+`/targets` route — 28 routes and 10 Dynamic. No Static or SSG route changed
+render mode.
+
+**21 prerendered HTML files per side; after normalising `BUILD_ID`, CSS and JS
+chunk names and stripping RSC flight scripts, 0 of 21 differed.**
+
+The prompt's expected 64,513-byte baseline did **not** reproduce. HEAD
+(`60def3c`) emitted **64,826 bytes**. The exact 313-byte difference was the
+text-overflow rule step 10 had recorded as removed: the rule had been
+reintroduced by the documentation sentences that named it while explaining the
+earlier leak. The repository was the fact (§12 rule 8), so those sentences and
+the prompt's check line were reworded in this change. This is a correction to a
+stale build record, not a target-route style decision.
+
+CSS is **64,826 → 65,280 bytes, +454 net**. Rule-level diff: 11 intentional
+utilities added — `.border-r`, `.last:border-r-0`, `.leading-4`,
+`.max-w-[660px]`, `.max-w-[900px]`, `.min-w-[136px]`, `.min-w-max`,
+`.overflow-x-auto`, `.pl-3`, `.text-[10px]`, `.text-[20px]` — and the one stale
+text-overflow rule removed. A second prose leak from a calendar variable name
+was found in the first implementation build and renamed before the recorded
+build. Every final added rule traces to `/targets` markup.
+
+### Checks run
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no ESLint findings |
+| `npm run typecheck` | clean, no TypeScript findings |
+| `npm test` | **100 passed, 5 files** |
+| `npm run db:generate` | generated `0006_simple_clint_barton.sql`; 3 enums, 1 table, no alteration of an existing table |
+| `npm run db:migrate` | migration applied successfully over the direct connection; `pg` printed its forward-looking SSL-mode warning |
+| `information_schema` / `pg_indexes` readback | 15 columns, the precisions and enum/nullability above, 2 tenant-first indexes plus the primary key |
+| database activity count | **0 committed records**; worked reading is synthetic |
+| `npm run build` | 28 routes; `/targets` Dynamic; all prior route modes unchanged |
+| prerender diff | **0 of 21 differed**; CSS rule diff above |
+| `npm run test:e2e` | native Chromium and Firefox **4/4 passed** (homepage plus protected-target redirect in both). The overall command exits 1 at the WebKit step because Podman is absent: `Podman is required for WebKit on Arch Linux.` |
+
+The `agent-browser` and `browser-use` executables were not installed, so no
+separate interactive browser session was claimed. The repository's pinned
+Playwright path supplied the browser verification instead.
+
+### Secrets and data
+
+- No new environment variable and no `NEXT_PUBLIC_*` variable.
+- Runtime reads keep the existing pooled `DATABASE_URL`; migration/readback used
+  the existing direct `DATABASE_URL_UNPOOLED` through `dotenv -e .env.local`.
+- `lib/db/`, `lib/auth/tenant.ts` and `lib/rate-limit/` remain server-only.
+  Validation and the pure domain module deliberately do not.
+- The only personal reference added is nullable `created_by`; no name, email or
+  request body is logged or transmitted. Targets are tenant-scoped commercial
+  data and soft-deletable.
+- Nothing reaches a third party. No email, blob or AI provider is involved.
+
+### What step 11 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| intensity, per-site or per-category targets | no denominator series or finer target vocabulary exists |
+| SBTi or sector-pathway validation | a published methodology must be read and cited, not recalled |
+| dashboard routes or charts | step 12 |
+| ESG narrative | step 13 |
+| recalculation schedules, threshold alerts or email | step 14 |
+| market-based scope 2 or factor-mapping edits | still owned by their later product surfaces |
+| a second design system, new primitive or GSAP | the existing authenticated-page and field idioms were sufficient |
 | widening `proxy.ts`'s matcher beyond an enumerated `/activity/:path*` | §8.1 |
 | any staff bypass into tenant data | §11, explicitly |
 
@@ -4148,8 +4406,8 @@ baseline has moved 61,752 → 64,385 → 64,513 across earlier steps. **The
 prerendered markup is byte-identical; no marketing route's HTML or render mode
 changed.**
 
-A sixth utility, `.truncate`, appeared and was removed. It came from **the
-English word "truncate" in a doc comment** — Tailwind v4's scanner extracts
+A sixth text-overflow utility appeared and was removed. It came from **a bare
+English verb in a doc comment that matched the utility's name** — Tailwind v4's scanner extracts
 candidate class names from prose in `.ts` files, including test files, and a bare
 word that collides with a utility name ships as dead CSS on every page. Two
 comments were reworded. Added to `docs/automation.md`.

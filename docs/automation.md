@@ -776,8 +776,9 @@ Then normalise `BUILD_ID`, both chunk patterns, strip
 
 ### Tailwind v4 scans prose, and an English word can ship as CSS
 
-`.truncate` appeared in the production CSS at step 10 from **the word "truncate"
-in a doc comment** in `lib/domain/decimal.ts` and `lib/domain/decimal.test.ts`.
+A text-overflow utility appeared in the production CSS at step 10 from **a bare
+English verb in a doc comment that matched the utility's name** in
+`lib/domain/decimal.ts` and `lib/domain/decimal.test.ts`.
 The scanner extracts candidate class names from any scanned file — comments and
 test files included — so a bare word that collides with a utility name becomes
 dead CSS on every page of the site.

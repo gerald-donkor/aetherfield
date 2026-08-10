@@ -43,6 +43,13 @@
       "when": 1786388697981,
       "tag": "0005_amazing_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786395185121,
+      "tag": "0006_simple_clint_barton",
+      "breakpoints": true
     }
   ]
 }

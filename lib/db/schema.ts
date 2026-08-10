@@ -32,6 +32,11 @@ import {
   SCOPE2_METHODS,
   SCOPE3_CATEGORIES,
 } from "../validation/emissions";
+import {
+  TARGET_BASELINE_SOURCES,
+  TARGET_COVERAGES,
+  TARGET_STATUSES,
+} from "../validation/targets";
 
 /**
  * The application schema — AGENTS.md 9.1's phase-one entities, and from build
@@ -783,6 +788,155 @@ export const activityEmission = pgTable(
     ),
   ],
 );
+
+/* -------------------------------------------------------------------------- */
+/*  Phase two — targets and forecasting (build step 11)                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The three enums this step adds, **built from `lib/validation/targets.ts`
+ * rather than restated** — the arrangement the twelve enums above already use,
+ * and for the same bundling reason (AGENTS.md 9.2 rule 2).
+ */
+export const targetCoverage = pgEnum("target_coverage", [...TARGET_COVERAGES]);
+
+export const targetStatus = pgEnum("target_status", [...TARGET_STATUSES]);
+
+export const targetBaselineSource = pgEnum("target_baseline_source", [
+  ...TARGET_BASELINE_SOURCES,
+]);
+
+/**
+ * One absolute emissions-reduction commitment.
+ *
+ * **Strictly tenant-scoped, `not null`.** §9.2 rule 6's reference-data
+ * exception covers a third party's *published* dataset — `emission_factor_set`
+ * and `emission_factor`, and nothing else. A target is a customer's own
+ * commitment about its own emissions, so the rule applies to it unchanged and
+ * every query below filters on `organization_id`.
+ *
+ * **Absolute targets only** (settled with the user before the prompt was
+ * written): base year, baseline figure, target year, percentage reduction. An
+ * intensity target needs a denominator series — revenue, floor area, headcount
+ * — that the schema carries nowhere, and inventing one here would be a second
+ * import path pretending to be a column.
+ *
+ * **The baseline is stored, never re-derived.** `baseline_kg_co2e` is what the
+ * company filed against, whether they typed it or accepted the computed
+ * suggestion, and no recalculation, newly committed import or changed factor
+ * mapping may move it. `computed_baseline_kg_co2e` is a *snapshot* of what the
+ * engine computed for the base year at the moment the target was created, kept
+ * so the surface can show a reporter that their filed baseline and the current
+ * data have diverged. That divergence is information, not an error to hide.
+ *
+ * **Whether the target has been met is not a column.** It is computed from the
+ * current data on every read (`lib/domain/targets.ts`); only `active` /
+ * `retired` — a human decision — is stored, with `retired_at` as its transition
+ * timestamp (§9.2 rule 3). A stored `achieved` would be a derivation that goes
+ * stale the moment an import lands.
+ */
+export const emissionTarget = pgTable(
+  "emission_target",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /** The reporter's own name for it — "Operational 2030", "SBTi near-term". */
+    name: text("name").notNull(),
+    coverage: targetCoverage("coverage").notNull(),
+    baseYear: integer("base_year").notNull(),
+    targetYear: integer("target_year").notNull(),
+
+    /**
+     * The committed reduction, as a percentage of the baseline.
+     *
+     * **`numeric(6, 3)` is derived from the input bound**, not chosen:
+     * `lib/validation/targets.ts` admits `(0, 100]` to three decimal places, so
+     * the widest value is `100.000` — three integer digits and three decimal
+     * places, six in total, exactly.
+     */
+    reductionPercent: numeric("reduction_percent", {
+      precision: 6,
+      scale: 3,
+    }).notNull(),
+
+    /**
+     * The filed base-year figure, in **kgCO2e** — the unit the engine and
+     * `activity_emission` work in, so no conversion sits between this column
+     * and the figures it is compared against.
+     *
+     * **`numeric(20, 3)` is derived from the input bound**, and it is *not*
+     * `activity_emission.kg_co2e`'s `numeric(50, 24)`: that scale is what the
+     * product of a quantity, a factor and a GWP can produce, and a
+     * human-entered baseline is a different quantity. The form takes tCO2e
+     * bounded at 12 integer digits and 3 decimal places
+     * (`TARGET_BASELINE_INTEGER_DIGITS` / `TARGET_BASELINE_DECIMALS`).
+     * Converting to kg is ×1000, an exact scale-preserving shift, so the stored
+     * value carries at most 15 integer digits and exactly 3 decimal places — 18
+     * digits required. 20 leaves two integer digits of headroom.
+     */
+    baselineKgCo2e: numeric("baseline_kg_co2e", {
+      precision: 20,
+      scale: 3,
+    }).notNull(),
+
+    baselineSource: targetBaselineSource("baseline_source").notNull(),
+
+    /**
+     * What the engine computed for the base year when the target was created,
+     * in kgCO2e. Null when the organisation had no calculated emissions for
+     * that year at the time — which is an ordinary state, not a fault.
+     *
+     * **Rounded to the gram on the way in**, because the engine's sum carries
+     * `activity_emission.kg_co2e`'s 24 decimal places and this column carries 3.
+     * That rounding is stated rather than silent (§12 rule 4) and it is
+     * defensible here where it would not be on a stored disclosure figure: this
+     * is a comparison snapshot a person reads, not a number that is filed.
+     */
+    computedBaselineKgCo2e: numeric("computed_baseline_kg_co2e", {
+      precision: 20,
+      scale: 3,
+    }),
+
+    status: targetStatus("status").notNull().default("active"),
+    /** Who set it, for the provenance line. A deleted account clears this
+        attribution rather than cascading away the organisation's commitment. */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** The `retired` transition's timestamp — a column per transition, not just
+        a current-state column (§9.2 rule 3). */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("emission_target_organization_target_year_idx").on(
+      t.organizationId,
+      t.targetYear,
+    ),
+    /** The surface lists newest first, the same read idiom `/activity` uses. */
+    index("emission_target_organization_created_at_idx").on(
+      t.organizationId,
+      t.createdAt,
+    ),
+    /**
+     * **No uniqueness constraint, deliberately.** There is no natural key here
+     * that is not wrong: a company legitimately holds an interim and a long-term
+     * target for the same coverage, two targets for one year on different
+     * coverages, and — because retiring is a soft transition rather than a
+     * delete — a retired target alongside the active one that replaced it. Any
+     * unique index over `(organization_id, coverage, target_year)` would reject
+     * the third case, which is the ordinary one.
+     */
+  ],
+);
+
+export type EmissionTarget = typeof emissionTarget.$inferSelect;
+export type NewEmissionTarget = typeof emissionTarget.$inferInsert;
 
 export type Lead = typeof lead.$inferSelect;
 export type NewLead = typeof lead.$inferInsert;

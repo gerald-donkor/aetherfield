@@ -43,9 +43,15 @@
  * {@link multiply} adds scales and is therefore always exact; {@link add} and
  * {@link sum} align to the wider scale and are therefore always exact. Nothing
  * in this module rounds unless the caller names a rounding mode, which only
- * {@link rescale} and {@link toFixed} take. An engine that rounded each record
- * before summing would produce a different total from one that rounded the
- * total, and only the second is defensible in a disclosure.
+ * {@link rescale}, {@link toFixed} and {@link divide} take. An engine that
+ * rounded each record before summing would produce a different total from one
+ * that rounded the total, and only the second is defensible in a disclosure.
+ *
+ * {@link divide} is the one generally-inexact operation, added by build step 11
+ * for a target's per-year allowance. It takes no default scale and no default
+ * rounding mode, so the inexactness is stated at every call site rather than
+ * absorbed silently — and `lib/domain/emissions.ts`, the module that actually
+ * produces disclosure figures, does not call it at all.
  */
 
 /**
@@ -74,6 +80,13 @@ export type Decimal = {
 export type RoundingMode = "half-up" | "half-even" | "down";
 
 export type DecimalParseResult =
+  | { ok: true; value: Decimal }
+  | { ok: false; error: string };
+
+/** {@link divide}'s answer. Deliberately the same shape as
+    {@link DecimalParseResult}: both are "this value could not be produced",
+    and both are refusals rather than fallbacks. */
+export type DecimalDivideResult =
   | { ok: true; value: Decimal }
   | { ok: false; error: string };
 
@@ -187,12 +200,61 @@ export function multiply(a: Decimal, b: Decimal): Decimal {
   return { units: a.units * b.units, scale: a.scale + b.scale };
 }
 
-/** Exact, for the integer unit ratios in `lib/domain/emissions.ts` (`MWh` to
-    `kWh` is ×1000). Deliberately not a general division: **there is no
-    `divide` in this module.** Division is where an inexact result would have to
-    be rounded silently, and nothing in the calculation path needs one. */
+/**
+ * Exact, for the integer unit ratios in `lib/domain/emissions.ts` (`MWh` to
+ * `kWh` is ×1000).
+ *
+ * **The calculation path still contains no division.** Every unit ratio in
+ * `lib/domain/emissions.ts` is an exact power of ten, so the engine that
+ * produces a disclosure figure multiplies and shifts and never divides —
+ * {@link divide} exists for build step 11's derived target figures only, and
+ * each of those names its scale and its rounding mode at the call site.
+ *
+ * This docblock previously said "there is no `divide` in this module", which
+ * was true until step 11 needed a per-year allowance over an arbitrary year
+ * span. Corrected here rather than left stale (AGENTS.md 12 rule 8).
+ */
 export function multiplyByInteger(value: Decimal, factor: bigint): Decimal {
   return { units: value.units * factor, scale: value.scale };
+}
+
+/**
+ * `a / b`, at exactly `scale` places, resolved by `mode`.
+ *
+ * **Both are caller-declared and neither has a default**, which is the whole
+ * point: unlike every other operation here, division is generally inexact, so
+ * the caller states how much of the quotient it wants and what to do with the
+ * rest. A default would make that decision invisible at the call site.
+ *
+ * **Division by zero is a typed refusal**, never `Infinity`, never `NaN` and
+ * never a throw — the shape {@link parseDecimal} already uses, for the same
+ * reason: a figure that cannot be produced is a reason not to show one, not a
+ * reason to show a fallback (AGENTS.md 5.3).
+ *
+ * No `Number` on the value path. The quotient is computed as one `BigInt`
+ * division of `|a| · 10^(b.scale + scale)` by `|b| · 10^a.scale`, so there is
+ * exactly one rounding, at the declared scale, and the sign is applied after —
+ * making `half-up` a genuine "away from zero" for negative operands.
+ */
+export function divide(
+  a: Decimal,
+  b: Decimal,
+  scale: number,
+  mode: RoundingMode,
+): DecimalDivideResult {
+  if (!Number.isInteger(scale) || scale < 0) {
+    throw new Error(`scale must be a non-negative integer, got ${scale}`);
+  }
+  if (b.units === 0n) {
+    return { ok: false, error: "Division by zero has no value." };
+  }
+
+  const negative = a.units < 0n !== (b.units < 0n);
+  const numerator = (a.units < 0n ? -a.units : a.units) * pow10(b.scale + scale);
+  const denominator = (b.units < 0n ? -b.units : b.units) * pow10(a.scale);
+
+  const rounded = roundedQuotient(numerator, denominator, mode);
+  return { ok: true, value: { units: negative ? -rounded : rounded, scale } };
 }
 
 /** `-1`, `0` or `1`. `1.5` and `1.500` compare equal — see the module docblock. */
@@ -253,26 +315,40 @@ export function rescale(
     return { units: widen(value, scale), scale };
   }
 
-  const divisor = pow10(value.scale - scale);
   const negative = value.units < 0n;
   const magnitude = negative ? -value.units : value.units;
-  const quotient = magnitude / divisor;
-  const remainder = magnitude % divisor;
-
-  let rounded = quotient;
-  if (remainder !== 0n && mode !== "down") {
-    // Compare the discarded tail with half the divisor without leaving BigInt:
-    // `remainder * 2` against `divisor` is the same test and stays exact.
-    const twice = remainder * 2n;
-    if (twice > divisor) {
-      rounded += 1n;
-    } else if (twice === divisor) {
-      const roundUp = mode === "half-up" || quotient % 2n !== 0n;
-      if (roundUp) rounded += 1n;
-    }
-  }
+  const rounded = roundedQuotient(magnitude, pow10(value.scale - scale), mode);
 
   return { units: negative ? -rounded : rounded, scale };
+}
+
+/**
+ * `magnitude / divisor` as an integer, with the discarded remainder resolved by
+ * `mode`. Both arguments are **non-negative magnitudes**; the caller applies the
+ * sign afterwards, which is what makes `half-up` mean "away from zero".
+ *
+ * **The one place in this module a digit is turned into a rounding decision.**
+ * {@link rescale} and {@link divide} both call it rather than each implementing
+ * the three modes, so `half-even` cannot mean one thing in a narrowing and
+ * another in a quotient.
+ */
+function roundedQuotient(
+  magnitude: bigint,
+  divisor: bigint,
+  mode: RoundingMode,
+): bigint {
+  const quotient = magnitude / divisor;
+  const remainder = magnitude % divisor;
+  if (remainder === 0n || mode === "down") return quotient;
+
+  // Compare the discarded tail with half the divisor without leaving BigInt:
+  // `remainder * 2` against `divisor` is the same test and stays exact.
+  const twice = remainder * 2n;
+  if (twice > divisor) return quotient + 1n;
+  if (twice < divisor) return quotient;
+
+  const roundUp = mode === "half-up" || quotient % 2n !== 0n;
+  return roundUp ? quotient + 1n : quotient;
 }
 
 /**

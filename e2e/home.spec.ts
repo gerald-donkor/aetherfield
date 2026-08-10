@@ -11,3 +11,18 @@ test("renders the homepage heading", async ({ page }) => {
     }),
   ).toHaveCount(1);
 });
+
+test("keeps the targets workspace behind sign-in", async ({ page }) => {
+  await page.goto("/targets");
+
+  await expect(page).toHaveURL(
+    /\/sign-in\?callbackURL=%2Ftargets$/,
+  );
+  await expect(
+    page.getByRole("heading", {
+      exact: true,
+      level: 1,
+      name: "Continue to Aetherfield",
+    }),
+  ).toHaveCount(1);
+});

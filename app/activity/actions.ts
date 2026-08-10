@@ -3,8 +3,7 @@
 import { revalidatePath } from "next/cache";
 import * as z from "zod";
 
-import { getCurrentMembership } from "../../lib/auth/organization";
-import { getCurrentAccount } from "../../lib/auth/server";
+import { resolveTenant as resolveTenantFor } from "../../lib/auth/tenant";
 import {
   commitImport as commitImportRows,
   createStagedImport,
@@ -130,35 +129,19 @@ const NOTHING_TO_CALCULATE =
  * Stages **b** and **d** for all four actions: resolve the session, resolve the
  * tenant, and hand back the two ids everything else is scoped by.
  *
- * A signed-out or organisation-less caller gets a handled `{ ok: false }` and
- * never a redirect and never a throw (AGENTS.md 10 rule 2). `proxy.ts`'s
- * redirect is optimistic and is not the enforcement (AGENTS.md 7.3, 11.2
- * rule 1); this is.
+ * **The primitive moved to `lib/auth/tenant.ts` at build step 11**, when
+ * `app/targets/actions.ts` needed the identical check — duplicating an
+ * authorisation primitive across two action files is the worse outcome. The
+ * extraction is behaviour-identical: the three sentences below are this file's
+ * own, passed in verbatim, because the copy is flow-specific and the check is
+ * not.
  */
-async function resolveTenant(): Promise<
-  | { ok: true; userId: string; organizationId: string }
-  | { ok: false; error: string }
-> {
-  let account: Awaited<ReturnType<typeof getCurrentAccount>>;
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    account = await getCurrentAccount();
-    membership = account ? await getCurrentMembership() : null;
-  } catch {
-    return { ok: false, error: GENERIC_FAILURE };
-  }
-
-  /* Two states, told apart deliberately: a signed-out caller needs to sign in,
-     and a signed-in caller with no organisation needs to create one. Neither
-     message says anything about another tenant. */
-  if (!account) return { ok: false, error: SIGNED_OUT };
-  if (!membership) return { ok: false, error: NO_ORGANIZATION };
-
-  return {
-    ok: true,
-    userId: membership.account.user.id,
-    organizationId: membership.organization.id,
-  };
+function resolveTenant() {
+  return resolveTenantFor({
+    signedOut: SIGNED_OUT,
+    noOrganization: NO_ORGANIZATION,
+    failure: GENERIC_FAILURE,
+  });
 }
 
 /* -------------------------------------------------------------------------- */

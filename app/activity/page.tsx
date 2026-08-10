@@ -94,6 +94,12 @@ export default async function ActivityPage({
           {recordCount.toLocaleString("en-GB")}{" "}
           {recordCount === 1 ? "activity record" : "activity records"}.
         </p>
+        <Link
+          href="/targets"
+          className="mt-6 inline-block font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          Set and review targets
+        </Link>
 
         <section className="mt-16" aria-labelledby="activity-upload-heading">
           <h2
