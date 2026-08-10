@@ -189,6 +189,12 @@ Scripts that currently exist in `package.json`:
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
 - `npm run typecheck` — `tsc --noEmit`
+- `npm test` — Vitest, **scoped to `lib/domain/`** and nothing else. Added by
+  build step 10, because AGENTS.md §6.2 requires the pure domain layer to be
+  independently testable and that step put an exact-decimal engine there whose
+  output lands in disclosures. A test that needs a database, a browser or a mock
+  does not belong in it — `npm run test:e2e` covers that ground
+- `npm run test:watch` — the same, in watch mode
 - `npm run test:e2e` — run the complete E2E matrix: Chromium / Firefox natively,
   then WebKit in the pinned rootless Podman container
 - `npm run test:e2e:local` — build and start the production app on port 3100
@@ -200,10 +206,12 @@ Scripts that currently exist in `package.json`:
 - `npm run db:generate` — Drizzle Kit: write a migration from `lib/db/schema.ts`
 - `npm run db:migrate` — apply pending migrations over the **direct** connection
 - `npm run db:studio` — Drizzle Studio against the same direct connection
+- `npm run db:seed:factors` — seed the published DESNZ conversion factors from
+  the committed CSV. Idempotent: an already-seeded revision writes nothing
 
 Report the exact command output; never claim a check passed without running it.
 
-> **Gaps to flag, not to invent.** There is no test script, and **there is no
+> **Gaps to flag, not to invent.** **There is no
 > email-preview script — build step 3 did not add one.** This note used to
 > predict that it would; it is corrected here rather than left predicting
 > something that did not happen (§12 rule 8). `react-email`'s `email dev` CLI
@@ -843,6 +851,20 @@ migrations themselves go in `docs/backend.md`**, not here.
    no "add multi-tenancy later" that is not a rewrite. Phase-one tables are
    deliberately *not* tenant-scoped: leads and applications belong to Aetherfield,
    not to a customer.
+
+   **Published reference data is the one exception, and it is narrow.** A table
+   holding a third party's published dataset — `emission_factor_set` and
+   `emission_factor` are the only ones today — carries a **nullable**
+   organisation reference, where `null` means published and shared by every
+   tenant and non-null means a set a customer supplied under its own licence.
+   **Every query on such a table filters `organization_id IS NULL OR
+   organization_id = $1`**, so no cross-tenant read is possible, which is what
+   this rule exists to guarantee. The alternative is duplicating thousands of
+   identical published rows per organisation. Approved by the user on
+   10 Aug 2026 at build step 10; `docs/backend.md` records the reasoning. A
+   table holding a customer's own data or choices is **not** covered and stays
+   `not null` — `activity_factor_mapping` and `activity_emission` are both
+   strictly tenant-scoped.
 7. Phase-two entities, when they arrive: `organization`, `member`, `site`,
    `activity_record`, `emission_factor`, `target`, `report`. Extend them; never
    fork a parallel table for the same concept.

@@ -3674,3 +3674,531 @@ at all.
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
 | widening `proxy.ts`'s matcher beyond an enumerated `/activity/:path*` | §8.1 |
 | any staff bypass into tenant data | §11, explicitly |
+
+## Step 10 — emission factors and the calculation engine
+
+Built from `prompts/58-emission-factors-and-calculation-engine.md`. Phase two's
+third step, and the one AGENTS.md §5.3's hard rule is written about: **an LLM
+never produces a number that appears in a disclosure.** There is no model
+anywhere in this step. Every figure is produced by deterministic, exact
+arithmetic in `lib/domain/`.
+
+### Decisions taken with the user before the prompt was written
+
+| question | answer |
+| --- | --- |
+| factor dataset | **UK DESNZ ("DEFRA") 2026 conversion factors, flat file, only.** EPA Hub and eGRID deferred; IEA licence-blocked (below) |
+| GWP set | **stored per factor row**, seeded as the publisher states it. Not a global constant |
+| scope 2 | **location-based only**, with a dual-ready schema. `scope2_method` exists from the first migration |
+| AI factor matching | **not in this step.** Deterministic matching only |
+
+### Two decisions taken at execution time
+
+Both were flagged in the prompt as needing the user's say-so, and both were
+approved on 10 Aug 2026 before any code was written.
+
+1. **The reference tables carry a nullable `organization_id`** — the one
+   deliberate deviation from §9.2 rule 6. `null` is published data shared by
+   every tenant, non-null is a set a customer supplied under its own licence,
+   and **every read filters `organization_id IS NULL OR organization_id = $1`**,
+   so no cross-tenant read is possible. AGENTS.md §9.2 rule 6 gained one clause
+   naming reference tables as its exception, in this same change.
+2. **`vitest` was added**, with `npm test` scoped to `lib/domain/`. An
+   exact-decimal engine producing regulatory figures with no unit tests was the
+   wrong call. AGENTS.md §2's "there is no test script" line is corrected in
+   this change, per §12 rule 8.
+
+### What was built, and where it lives
+
+| file | what |
+| --- | --- |
+| `lib/domain/decimal.ts` | exact fixed-point arithmetic over `BigInt`. Parse, add, subtract, multiply, compare, rescale with an explicit rounding mode, render. **No `Number` on the value path** |
+| `lib/domain/gwp.ts` | AR4 / AR5 / AR6 tables with the fossil / non-fossil CH₄ split. A lookup returns a value **or a typed refusal**, never a fallback |
+| `lib/domain/emissions.ts` | the engine: unit conversion, `calculateRecordEmission`, `aggregate`, `totalsOf`, `totalsByPeriod`. Pure |
+| `lib/domain/defra.ts` | normalising one published row into this codebase's vocabulary, plus the eleven default mappings |
+| `lib/validation/emissions.ts` | the eight vocabularies and the recalculate action's schema. Not `server-only`, and imports nothing from `lib/db/` |
+| `lib/db/emission-queries.ts` | every read and write of the four new tables. The tenant predicate is written once, in `visibleFactorScope` |
+| `lib/db/seed/defra-2026-factors.csv` | the derived seed data, 8,740 rows, 1.1 MB, committed |
+| `lib/db/seed/seed-emission-factors.ts` | the idempotent seeder — `npm run db:seed:factors` |
+| `scripts/defra-xlsx-to-csv.py` | the one-off xlsx → CSV conversion, stdlib-only |
+| `app/_components/activity/emissions-summary.tsx` | the totals, the scope split, the coverage line, the attribution. A Server Component |
+| `app/_components/activity/recalculate-control.tsx` | the one client leaf. Component-only, no GSAP |
+| `app/activity/actions.ts` | gained `recalculate`, in the file's existing stage order |
+| `lib/domain/*.test.ts` | 81 tests across four files |
+
+### The finding that shapes the whole step
+
+**Every value DEFRA publishes is already a CO₂ equivalent, including the
+per-gas rows.** The flat file's `GHG/Unit` column reads `kg CO2e`, `kg CO2e of
+CO2 per unit`, `kg CO2e of CH4 per unit`, `kg CO2e of N2O per unit`. The natural
+reading of the third is "the mass of CH₄ emitted", and it is **wrong**. The 2026
+methodology report, paragraph 1.9:
+
+> Values for the non-carbon dioxide (CO2) GHGs, methane (CH4) and nitrous oxide
+> (N2O), are presented as CO2 equivalents (CO2e), using Global Warming Potential
+> (GWP) factors from the [IPCC's] fifth assessment report (IPCC, 2014) (GWP for
+> CH4 = 28, GWP for N2O = 265).
+
+Normalising a `kg CO2e of CH4` row to `gas: "ch4"` would multiply it by 28 a
+second time — a 28-fold overstatement, invisible in the output. So **every
+DEFRA row normalises to `gas: "co2e"`**, which is exactly the value
+`lookupGwp()` refuses to apply a GWP to. The publisher's own wording survives
+verbatim in `emission_factor.published_ghg_unit`, so nothing is lost.
+
+A consequence: **`gwp_set` never enters the arithmetic for a DEFRA row.** It is
+provenance, and the `co2e` refusal is what guarantees it stays that way.
+
+### The prompt's Net CV line was wrong, and is corrected here
+
+`prompts/58` recorded "DEFRA's stated default for company reporting is Net CV"
+and instructed that it be confirmed against the methodology report at execution
+time rather than trusted. It was confirmed, and it is **the opposite** for the
+case that matters. Paragraph 2.9:
+
+> Natural gas consumption figures quoted in kilowatt hours (kWh) by suppliers in
+> the UK are generally calculated (from the volume of gas used) on a **Gross CV
+> basis**. Therefore, the emission factor for energy consumption on a Gross CV
+> basis should be used by default for calculation of emissions from natural gas
+> in kWh, unless your supplier specifically states they have used Net CV basis.
+
+The `fuel` + `kWh` default mapping therefore selects `1_100_1004_6_1` (natural
+gas, Gross CV, 0.18231 kg CO₂e/kWh), not the Net CV row (0.20199). Recorded as
+a correction rather than silently applied (§12 rule 8).
+
+### The seed data, as measured
+
+Produced by `python3 scripts/defra-xlsx-to-csv.py <workbook> lib/db/seed/defra-2026-factors.csv --report`.
+
+| measurement | value |
+| --- | --- |
+| data rows in the flat sheet | **8,740** |
+| Scope 1 / Scope 2 / Scope 3 / Outside of Scopes | **3,059 / 392 / 5,231 / 58** |
+| rows carrying a published value | **7,035** |
+| rows with **no** value | **1,705** |
+| rows whose value was Excel float noise | **28** |
+| rows seeded | **7,035** |
+
+**The prompt predicted 8,741 rows and it is 8,740.** The per-scope figures it
+gave are exactly right and they sum to 8,740, so the total was an arithmetic
+slip in the prompt, not a conversion fault. Recorded rather than adjusted away.
+
+**The 1,705 valueless rows are not seeded.** DEFRA publishes the hierarchy for
+them but no number applies. A null-valued factor row is something a mapping
+could later select, and a mapping that selects nothing is a silent zero in a
+disclosure. The full sheet stays committed, so nothing is lost from the record.
+
+#### Recovering the published decimal from the workbook
+
+An `.xlsx` stores a binary double and Excel serialises it with up to 17
+significant digits: the published `1.74296` appears in the XML as
+`1.7429600000000001`. `repr(float(...))` returns the shortest decimal that
+round-trips to the same double, which recovers `1.74296` exactly.
+
+Where the stored double is itself a computed value the shortest form keeps all
+17 digits, and those trailing digits are floating-point noise from DEFRA's own
+spreadsheet. Measured across the 7,035 valued rows: **7,007 carry ≤ 10
+significant digits, none carries 11–15, and 28 carry 16 or 17.** Rounding to 12
+significant digits sits inside that gap — it collapses exactly those 28
+(`0.13388999999999998` → `0.13389`) and leaves the other 7,007 bit-identical.
+The `--report` flag prints both counts so the claim is re-checkable against a
+later revision.
+
+### The tables, as applied
+
+Read back from `information_schema` and `pg_indexes` after `db:migrate`, not
+from the generated SQL — a generated migration is not evidence that it applied.
+
+**`emission_factor_set`** — 16 columns: `id` uuid pk `gen_random_uuid()`,
+`organization_id` text **nullable** → `organization.id` cascade, `source` text
+not null, `dataset_version` text not null, `publication_year` integer not null,
+`effective_from` / `effective_to` date not null, `licence` / `licence_url` /
+`source_url` text not null, `retrieved_at` timestamptz not null, `gas_basis`
+enum not null, `superseded_by_set_id` uuid → `emission_factor_set.id` **set
+null** (self-reference), `notes` text, `created_at` timestamptz not null
+`now()`, `deleted_at` timestamptz. Indexes: unique
+`emission_factor_set_published_key (source, dataset_version) WHERE
+organization_id is null`; unique `emission_factor_set_organization_key
+(organization_id, source, dataset_version) WHERE organization_id is not null`;
+`emission_factor_set_effective_idx (effective_from, effective_to)`.
+
+**Two partial unique indexes rather than one over three columns**, because
+`NULL` is not equal to `NULL` in a unique index: a single
+`(organization_id, source, dataset_version)` index would let the same published
+set be seeded twice, since both rows' null organisation would compare unequal.
+The seeder's idempotence depends on this being right.
+
+**`emission_factor`** — 24 columns: `id` uuid pk, `set_id` uuid not null →
+`emission_factor_set.id` cascade, `organization_id` text **nullable** →
+`organization.id` cascade, `source_row_id` text not null, then the publisher's
+hierarchy verbatim — `level_1` … `level_4`, `column_text` (all nullable),
+`published_uom` and `published_ghg_unit` text not null — then the normalised
+reading: `scope` enum not null, `scope3_category` enum, `scope2_method` enum,
+`activity_unit` enum not null, `result_unit` enum not null, `gas` enum not null,
+`ch4_variant` enum, `gwp_set` enum not null, `region` text, `biogenic` boolean
+not null default false, `value` **numeric(24, 17)** not null, `created_at` not
+null, `deleted_at`. Indexes: unique `emission_factor_set_row_key (set_id,
+source_row_id)`; `emission_factor_organization_scope_idx (organization_id,
+scope)`; `emission_factor_set_scope_idx (set_id, scope)`.
+
+**`activity_factor_mapping`** — 9 columns: `id` uuid pk, `organization_id` text
+**not null** → `organization.id` cascade, `category` enum not null, `unit` enum
+not null, `factor_id` uuid not null → `emission_factor.id` **restrict**,
+`created_by` text → `user.id` set null, `created_at` / `updated_at` not null
+`now()`, `deleted_at`. Indexes: unique `activity_factor_mapping_key
+(organization_id, category, unit)`; `activity_factor_mapping_factor_idx
+(factor_id)`.
+
+`factor_id` is deliberately `RESTRICT` where the tenant columns cascade: a
+factor row disappearing must not silently un-map a customer's category. A set is
+superseded, never deleted.
+
+**`activity_emission`** — 14 columns: `id` uuid pk, `organization_id` text not
+null → `organization.id` cascade, `activity_record_id` uuid not null →
+`activity_record.id` cascade, `factor_id` uuid not null → `emission_factor.id`
+**restrict**, `kg_co2e` **numeric(50, 24)** not null, `scope` enum not null,
+`scope3_category` enum, `scope2_method` enum, `gwp_set` enum not null,
+`biogenic` boolean not null, `outside_of_scopes` boolean not null,
+`engine_version` text not null, `calculated_at` timestamptz not null `now()`,
+`created_at` timestamptz not null `now()`. Indexes: unique
+`activity_emission_record_key (activity_record_id)`;
+`activity_emission_organization_scope_idx (organization_id, scope)`.
+
+**No `deleted_at` on `activity_emission`, and that is not an omission.** §9.2
+rule 5 is about data a person can ask to have removed; this row is derived,
+holds nothing a person supplied, and is replaced wholesale on recalculation. It
+cascades from the record it describes.
+
+### The enums, as applied
+
+| enum | members |
+| --- | --- |
+| `emission_scope` | `scope_1, scope_2, scope_3, outside_of_scopes` |
+| `scope3_category` | `c1_purchased_goods_and_services` … `c15_investments`, the fifteen of Table 5.3 in the standard's numbering |
+| `scope2_method` | `location_based, market_based` |
+| `gwp_set` | `AR4, AR5, AR6` |
+| `ghg_gas` | `co2, ch4, n2o, sf6, nf3, co2e` |
+| `ch4_variant` | `combustion, fugitive` |
+| `factor_result_unit` | `kg_co2e, kwh` |
+| `factor_activity_unit` | `kwh, kwh_net_cv, kwh_gross_cv, litres, cubic_metres, million_litres, kg, tonnes, km, tonne_km, unknown_unit` |
+| `factor_gas_basis` | `combined_co2e, per_gas` |
+
+`outside_of_scopes` is a fourth member of `emission_scope` rather than a boolean
+beside three: it is a genuine fourth state of one column (§9.2 rule 2), and the
+aggregation carries it separately with no code path that adds it to a scope
+total.
+
+### The two numeric precisions, both derived
+
+**`emission_factor.value` is `numeric(24, 17)`.** Across the 7,035 valued rows
+of the 2026 flat file, after the float-noise round: **maximum 17 decimal places
+and 5 integer digits**, so 22 are required and 24 leaves two of headroom on each
+side.
+
+**`activity_emission.kg_co2e` is `numeric(50, 24)`.** The product is a
+`numeric(18, 6)` quantity, a `numeric(24, 17)` factor and a GWP of up to 5
+integer digits and 1 decimal place: at most 12 + 5 + 5 = 22 integer digits and
+exactly 6 + 17 + 1 = 24 decimal places, so 46 are required and 50 leaves four.
+
+#### Round-trip evidence
+
+Read back from the database after seeding, the same evidence step 9 recorded for
+`numeric(18, 6)`:
+
+| `source_row_id` | published | stored |
+| --- | --- | --- |
+| `5_303_3081_4_3` | `0.00000486077670539` | `0.00000486077670539` |
+| `1_100_1000_15_1` | `3033.38067` | `3033.38067000000000000` |
+| `1_100_1004_6_1` | `0.18231` | `0.18231000000000000` |
+| `3_200_2009_3_1` | `12400` | `12400.00000000000000000` |
+
+The 17-place value survives exactly. The others are padded to the column's scale,
+which is what `numeric(p, s)` does; `Decimal` preserves the scale it reads and
+`compare()` treats `1.5` and `1.500` as equal, so the padding changes no result.
+
+### Seeded distribution, read back from the database
+
+| dimension | counts |
+| --- | --- |
+| scope | scope_1 **2,531** · scope_2 **352** · scope_3 **4,096** · outside_of_scopes **56** |
+| result unit | `kg_co2e` **6,584** · `kwh` **451** |
+| GWP set | AR5 **6,866** · AR4 **169** |
+| scope 3 category | c4 **1,445** · c6 **1,034** · unassigned **952** · c3 **448** · c5 **139** · c1 **75** · c7 **3** |
+
+The scope counts are lower than the flat file's because the 1,705 valueless rows
+are not seeded.
+
+**451 rows produce kWh, not emissions** — DEFRA's `SECR kWh` families, which
+exist so a reporter can derive energy consumption from a distance travelled.
+They are seeded because the set is stored as published, and the engine refuses
+them by `result_unit` rather than letting energy be summed into a carbon total.
+
+**Seed runtime: 39.3 s, warm** — the connection was already established by the
+migration in the same session, so this does not include Neon's scale-to-zero
+cold start (§7.3). Re-running writes nothing and reports the existing set.
+
+### What is judged rather than measured
+
+Labelled as judgements, per §12 rule 4.
+
+- **The eleven default `(category, unit)` mappings.** There is no customer file
+  to fit against. Eleven of the sixty-four possible pairs are seeded and the
+  rest are deliberately empty — an unmapped pair is surfaced as unmatched, which
+  is a legible gap, where a wrong default is an invisible error. `other` is
+  unmapped in every unit.
+- **The scope 3 category assignment**, from DEFRA's `Level 1` to Table 5.3.
+  DEFRA's file carries no category column. `Freighting goods` is the clearest
+  judgement: the same tonne-kilometre is category 4 inbound and category 9
+  outbound, and nothing in the row says which; it is read as category 4 because
+  the activity model records a company's own purchased freight. 952 scope 3 rows
+  are left **unassigned** rather than guessed.
+- **`region` is `"UK"` on every row.** DESNZ publishes UK factors; families that
+  name another country do so in their hierarchy, which is kept verbatim.
+
+### What is measured but could not be fully resolved
+
+- **The GWP basis per family is measured**, from Table 1 of the methodology
+  report. The table's tick glyphs do not survive text extraction but their
+  *column position* does, and reading by position gives **AR4 for Bioenergy,
+  WTT Bioenergy and Material Use; AR5 for every other family.**
+- **Hotel Stay is ticked in both columns.** Footnote 6 says "different countries
+  could be in either AR4 or AR5 basis" and the file carries nothing that
+  resolves it per row. Assigned AR5, the set's headline basis.
+- **Refrigerants are AR5 "where AR5 values were available, and AR6 otherwise"**
+  (footnote 3), and which rows fell to AR6 is not stated per row. Assigned AR5.
+
+Neither qualification moves a number, because every DEFRA value is already CO₂e
+and `gwp_set` is never applied to one.
+
+### What could not be verified this session
+
+`ghgprotocol.org` and `www.gov.uk` are **unreachable from this build
+environment** — WebFetch reports the domain cannot be verified as safe to fetch.
+Two consequences, stated as unverified rather than as checked (§12 rule 2):
+
+- **The GWP values in `lib/domain/gwp.ts` are reproduced from `prompts/58`**,
+  which recorded them from GHG Protocol's August 2024 publication on 10 Aug
+  2026. They were **not** re-fetched at execution time.
+- The DEFRA **methodology report** *was* readable, because
+  `assets.publishing.service.gov.uk` answered `curl` where `www.gov.uk` did not.
+  Everything sourced to the methodology report above was read from the PDF this
+  session, including the OGL v3.0 notice: "This publication is licensed under the
+  terms of the Open Government Licence v3.0 except where otherwise stated."
+- Still unverified, as the prompt predicted: whether the `.xlsx` files
+  themselves carry an OGL notice; whether an EPA Hub 2026 edition or eGRID2024
+  exists; CDP's and SBTi's current GWP requirements.
+
+### IEA factors are licence-blocked for this product
+
+Recorded here so a later session does not reach for them. The IEA's terms state
+that calculating or verifying a third party's carbon footprint "is not permitted
+under our standard terms and conditions", and that putting the data into a model
+whose derived data is visible to third parties requires a signed agreement and a
+fee. **A multi-tenant SaaS computing customers' footprints is the prohibited
+use.** This is not a scheduling decision and it does not expire.
+
+### The engine, and its four refusals
+
+Every refusal is typed, keeps the record **out of the total**, and is counted in
+the coverage report. None is a fallback, a zero or a guess.
+
+| refusal | when |
+| --- | --- |
+| no factor mapped | the record's `(category, unit)` has no `activity_factor_mapping` row |
+| `factor_is_not_an_emission` | the factor's `result_unit` is `kwh` |
+| `unit_mismatch` | cross-dimensional (`km` against `tonne.km`), or a denominator the activity model cannot measure |
+| `gas_not_priceable` | the gas has no GWP in the factor's own set — AR4 publishes no fossil-methane value, and this repository's tables carry no halocarbons |
+
+**Unit conversion is by exact powers of ten only, and that is the design.** A
+decimal scaled by a power of ten is exact in both directions, so no conversion
+can round and `decimal.ts` needs no division at all. Every ratio the activity
+model requires happens to be one: `MWh`→`kWh`, `t`→`kg`, `m3`→`L` are all ×1000.
+The units that are *not* — **`miles` (1.609344 km) and `GJ` (277.7… kWh)** — are
+refused. DEFRA publishes a `km` row beside almost every `miles` row, so the
+correct fix is to map the other row, not to approximate. A guessed 1.609 in a
+disclosure is a fabricated number.
+
+**The halocarbons are deliberately absent from the GWP tables.** DEFRA's
+`Refrigerant & other` family alone names ~170 species and none of their GWPs was
+verified this session. A missing gas is a legible refusal; a remembered GWP for
+HFC-134a in a disclosure is the fabrication §12 rule 7 forbids. Those rows stay
+usable through their combined `kg CO2e` factor, which needs no lookup.
+
+### Coverage, measured over the activity vocabulary
+
+**There is no committed activity record in this database** — the one
+organisation holds zero — so there was no real import to measure against, and
+this is a measurement over a representative set rather than over customer data.
+64 synthetic records, one per `(category, unit)` pair, 100 units each, resolved
+through the eleven default mappings against the **actually seeded** factors:
+
+```
+records 64 · matched 11 · unmatched 53 · unmatched pairs 53 · refusals 0
+total scopes 1-3  65.7620 tCO2e
+  scope 1          0.4792
+  scope 2         13.1266  (location-based)
+  scope 3         52.1562
+  outside scopes   0.0000
+  biogenic         0.0000
+```
+
+Four of the eleven, checked by hand against the published factors:
+
+| record | factor | expected | produced |
+| --- | --- | --- | --- |
+| 100 kWh electricity | 0.13096 /kWh | 13.096 | `13.09600000000000000000000` |
+| 100 MWh electricity | 0.13096 /kWh | 100,000 × 0.13096 = 13,096 | `13096.00000000000000000000000` |
+| 100 kg waste | 520.58023 /tonne | 0.1 × 520.58023 = 52.058023 | `52.05802300000000000000000000` |
+| 100 kWh fuel | 0.18231 /kWh Gross CV | 18.231 | `18.23100000000000000000000` |
+
+The 53 unmatched pairs are mostly combinations that cannot occur in a real file
+— electricity in kilograms, water in kilometres — but they are reported as
+unmatched all the same, because the engine has no opinion about which pairs are
+plausible.
+
+### The visible outcome
+
+On `/activity` (organisation-wide) and on `/activity/[importId]` for a committed
+import. Three rules the component exists to hold:
+
+1. **No total is presented as complete while records are uncalculated.** The
+   coverage line renders *above* the figure, always — not behind a disclosure,
+   not only when something is wrong.
+2. **Biogenic and outside-of-scopes are shown separately and are never in the
+   total**, in words as well as in layout, so the separation survives a screen
+   reader.
+3. **Every scope 2 figure carries its method**, read from the data rather than
+   assumed. This step produces location-based only.
+
+**Attribution is rendered from the set, not hard-coded** — the OGL requires it
+wherever the factors are surfaced, and reading the licence and URL off the row
+means a second dataset cannot make a hard-coded line wrong.
+
+The summary **reads stored figures rather than recalculating on render**: a
+disclosure figure is something computed at a moment, by a named engine version,
+against a named factor row, and re-deriving it per page view would make "what
+did we file" unanswerable.
+
+### `recalculate`
+
+Colocated in `app/activity/actions.ts`, in that file's existing stage order:
+no BotID (deliberately absent on an authenticated path, for the reason
+`stageImport` records) → `resolveTenant()` → rate limit keyed by **user id**,
+failing closed, reusing `checkActivityCommitLimit` → `safeParse` with the shared
+schema → tenant-predicated reads → the pure engine → tenant-predicated write →
+`revalidatePath` → typed `SubmitResult`. **No redirect on success** (§10 rule 5).
+
+**Delete-then-insert, not upsert**, bounded by the same record set the insert
+covers. A record whose mapping was removed must lose its emission rather than
+keep a stale one that the next total would include. Scoping the delete to the
+covered records is what lets one import be recalculated without discarding
+another's figures. The unique index on `activity_record_id` is the backstop.
+
+**Default mappings are seeded on first use, and only when the organisation has
+none** — a reporter's own choice of factor is never overwritten.
+
+### `tsconfig.json`'s target was raised to ES2020
+
+`lib/domain/decimal.ts` is built on `BigInt` literals, whose syntax TypeScript
+gates on `target`; the scaffold's `ES2017` rejected them. The project emits
+nothing (`noEmit`) and Next transpiles through SWC against browserslist, so this
+governs type-checking only — confirmed by the prerender diff below.
+
+**A stale `tsconfig.tsbuildinfo` masked the change**: `tsc --showConfig` reported
+`es2020` while `npm run typecheck` kept reporting the ES2017 error. Deleting it
+resolved it. Added to `docs/automation.md`.
+
+### Prerender impact and verification, prompt 58
+
+**None. Verified, not assumed.**
+
+A dev server was running, so per `docs/automation.md`'s third trap it was left
+alone and both sides were built in copies under
+`/home/gdk26/.cache/aetherfield-diff` — on the `/home` filesystem, because
+`/tmp` is tmpfs and `cp -al` degrades there.
+
+Route table, **identical on both sides, 27/27**: 11 Static, 2 SSG (6 + 3 paths),
+9 Dynamic, plus Proxy (Middleware) — the same table the prompt recorded as the
+baseline.
+
+**21 prerendered HTML files on each side. After normalising `.next/BUILD_ID`,
+the CSS chunk name, `/_next/static/chunks/[A-Za-z0-9_-]+\.js`, and stripping the
+RSC flight scripts: 0 of 21 differed.** Both builds pinned the same
+`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.
+
+Two things had to be got right before that number meant anything, and both are
+now in `docs/automation.md`:
+
+- **The CSS chunk is emitted to `.next/static/chunks/`, not `.next/static/css/`.**
+  A normaliser looking in `static/css/` finds nothing and reports all 20
+  non-trivial pages as differing, every one at identical byte length — the
+  documented signature of a pure rename.
+- **`git archive HEAD` includes the tracked `.claude/` skills; a `tar` of the
+  working tree that excludes them does not.** Tailwind v4 scans those files, so
+  the base built to 70,917 bytes of CSS against the implementation's 64,826 —
+  a 6 KB "regression" that was purely an artefact of the copy method. With both
+  sides excluding `.claude/` and `.agents/`, the base built to **exactly 64,513
+  bytes**, matching the prompt's recorded baseline.
+
+**CSS: 64,513 → 64,758 bytes, +245.** A rule-level diff shows **5 utilities
+added, 0 removed** — `.leading-5`, `.max-w-[26rem]`, `.pb-7`, `.py-1`, `.py-7` —
+all of them from the new `/activity` emissions section. Tailwind v4 emits one
+chunk for the whole app, so a utility used only on a dynamic route still lands
+in the file the marketing pages link. That is inherent and precedented: the
+baseline has moved 61,752 → 64,385 → 64,513 across earlier steps. **The
+prerendered markup is byte-identical; no marketing route's HTML or render mode
+changed.**
+
+A sixth utility, `.truncate`, appeared and was removed. It came from **the
+English word "truncate" in a doc comment** — Tailwind v4's scanner extracts
+candidate class names from prose in `.ts` files, including test files, and a bare
+word that collides with a utility name ships as dead CSS on every page. Two
+comments were reworded. Added to `docs/automation.md`.
+
+### Checks run
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm run db:generate` | `0005_amazing_daimon_hellstrom.sql` — 9 types, 4 tables, **no `ALTER` on any existing table** |
+| `npm run db:migrate` | applied |
+| `information_schema` / `pg_indexes` readback | above |
+| `npm run db:seed:factors` | 7,035 factors in 39.3 s warm; re-run wrote nothing |
+| `npm test` | **81 passed, 4 files** |
+| `npm run build` | 27/27, route table above |
+| prerender diff | **0 of 21 differed** |
+| `npm run test:e2e` | **Chromium and Firefox passed (2/2). WebKit did not run** — `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux", and podman is not installed on this machine. An environment gap, not a regression, and stated rather than papered over (§12 rule 3) |
+
+### Secrets and data
+
+- **No new environment variable.** The seeder reads `DATABASE_URL_UNPOOLED`
+  through the existing `dotenv -e .env.local --` pattern; the app reads
+  `DATABASE_URL`. Both already existed.
+- **No `NEXT_PUBLIC_*`.** Phase one needed none and this step adds none.
+- `lib/db/emission-queries.ts` carries `import "server-only"`. **`lib/domain/`
+  and `lib/validation/` do not** — the domain layer is pure and has no secret to
+  protect, and the validation layer must stay importable by client leaves.
+- **No personal data is added.** Emission factors are public reference data.
+  Activity records are a customer's commercial data and stay tenant-scoped.
+- **Nothing is logged on the request path.** `app/activity/actions.ts` still has
+  no `console` call. The seeder logs counts and a set id — never a tenant, never
+  a figure — and it is a developer-run script with no request path.
+- **Nothing reaches a third party.** There is no model in this step.
+
+### What step 10 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| EPA Hub, eGRID, or any second publisher | decided with the user: DEFRA only. EPA's shape differs fundamentally and generalising over two publishers at once widens the step |
+| IEA factors | licence-blocked for this product, above. Not a scheduling decision |
+| market-based scope 2 | needs REC/GO capture, supplier rates and a residual-mix fallback. `scope2_method` is built now so it is not a rewrite later |
+| **AI factor matching** — no AI SDK, no provider, no model, no prompt | §5.3: sanctioned at this step but "sanctioned, not scheduled". The engine must be correct and tested before a model is near factor selection |
+| halocarbon GWPs | not verified this session; a refusal beats a remembered number |
+| extending `activity_record` with fuel type, region or a Net/Gross CV flag | changes step 9's CSV grammar, its alias table and its mapping UI. Its own prompt |
+| editing the `(category, unit)` mapping in the UI | read-only surfacing this step; the editing surface belongs with step 12's dashboard routes |
+| targets, forecasting, the "16% off your 2027 goal" reading | step 11 |
+| any dashboard route or chart | step 12. `home/dashboard.tsx` stays a marketing illustration |
+| ESG report narrative | step 13 |
+| scheduled recalculation, threshold alerts | step 14 |
+| an xlsx parser in the application | the workbook is converted once by a committed script and the derived CSV is read with the existing pure `parseCsv` |
+| touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |

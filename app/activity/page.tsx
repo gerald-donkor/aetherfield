@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { EmissionsSummary } from "../_components/activity/emissions-summary";
 import { ActivityUploadForm } from "../_components/activity/upload-form";
 import { SiteFooter, SiteNav } from "../_components/chrome";
 import { requireOrganization } from "../../lib/auth/organization";
@@ -134,6 +135,15 @@ export default async function ActivityPage({
           </p>
           <ActivityUploadForm className="mt-10" />
         </section>
+
+        {/* Step 10's visible outcome, across the whole organisation. It reads
+            the stored figures rather than recalculating on render: a disclosure
+            figure is something that was computed at a moment, by a named engine
+            version, against a named factor row. */}
+        <EmissionsSummary
+          organizationId={membership.organization.id}
+          headingId="activity-emissions-heading"
+        />
 
         <section className="mt-20" aria-labelledby="activity-imports-heading">
           <div className="mb-6 flex items-end justify-between gap-5">

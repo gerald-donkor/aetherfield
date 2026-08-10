@@ -12,9 +12,12 @@
     "test:e2e:local": "playwright test --project=chromium --project=firefox",
     "test:e2e:webkit": "sh scripts/playwright-webkit.sh",
     "test:e2e:ui": "playwright test --ui --project=chromium --project=firefox",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:generate": "dotenv -e .env.local -- drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
-    "db:studio": "dotenv -e .env.local -- drizzle-kit studio"
+    "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
+    "db:seed:factors": "dotenv -e .env.local -- tsx lib/db/seed/seed-emission-factors.ts"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.6.26",
@@ -49,6 +52,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

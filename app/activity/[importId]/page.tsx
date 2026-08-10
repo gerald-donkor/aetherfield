@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { EmissionsSummary } from "../../_components/activity/emissions-summary";
 import { ActivityImportControls } from "../../_components/activity/import-controls";
 import { ActivityMappingForm } from "../../_components/activity/mapping-form";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
@@ -217,6 +218,18 @@ export default async function ActivityImportPage({
               className="mt-8"
             />
           </section>
+        ) : null}
+
+        {/* Step 10, scoped to this import. It renders only once the rows are
+            committed: a staged import has no `activity_record` to calculate
+            over, and showing an empty total beside rows a person has not
+            accepted yet would read as a figure rather than as nothing. */}
+        {record.status === "committed" ? (
+          <EmissionsSummary
+            organizationId={membership.organization.id}
+            importId={record.id}
+            headingId="activity-import-emissions-heading"
+          />
         ) : null}
 
         <section className="mt-16" aria-labelledby="activity-invalid-heading">

@@ -730,6 +730,140 @@ silent, and all three were hit in one session.**
 
 A clean pair of builds at this commit is one CSS chunk and 21 HTML files each.
 
+### Three more prerender-diff traps, found at step 10
+
+All three are silent, and together they turned a clean result into an apparent
+20-page regression before they were resolved.
+
+4. **The CSS chunk is emitted to `.next/static/chunks/`, not
+   `.next/static/css/`.** A normaliser that looks in `static/css/` finds no
+   chunk to normalise, leaves the content-hashed name in place, and reports
+   every non-trivial page as differing — **at identical byte length**, which is
+   trap 2's signature and is the tell. Normalise
+   `/_next/static/chunks/[A-Za-z0-9_-]+\.css` alongside the `.js` pattern.
+
+5. **`git archive HEAD` includes the tracked `.claude/` skills; a `tar` of the
+   working tree that excludes them does not.** Tailwind v4 scans those files, so
+   the two sides disagree on CSS by ~6 KB for no implementation reason: the base
+   built to 70,917 bytes against the implementation's 64,826. **Both sides must
+   exclude `.claude/` and `.agents/`.** With that done, the base at `4541641`
+   builds to exactly **64,513 bytes**, which is the number to check the method
+   against before trusting any comparison.
+
+6. **`/tmp` is tmpfs, so `cp -al node_modules` degrades or fails there.** Build
+   copies belong on the same filesystem as `/home` —
+   `/home/<user>/.cache/aetherfield-diff/` works and survives a scratchpad
+   cleanup.
+
+The whole comparison, once those are handled:
+
+```bash
+D=~/.cache/aetherfield-diff
+rm -rf $D && mkdir -p $D/impl $D/base
+tar -cf - --exclude=.next --exclude=node_modules --exclude=.git \
+          --exclude=.agents --exclude=.claude . | tar -xf - -C $D/impl
+git archive HEAD | tar -xf - -C $D/base
+rm -rf $D/base/.claude $D/base/.agents          # trap 5
+cp -al node_modules $D/impl/node_modules
+cp -al node_modules $D/base/node_modules
+export NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleWZha2U9"
+(cd $D/base && npx next build) && (cd $D/impl && npx next build)
+```
+
+Then normalise `BUILD_ID`, both chunk patterns, strip
+`<script>self\.__next_f\.push\(.*?\)</script>`, and compare the 21 files under
+`.next/server/app/`.
+
+### Tailwind v4 scans prose, and an English word can ship as CSS
+
+`.truncate` appeared in the production CSS at step 10 from **the word "truncate"
+in a doc comment** in `lib/domain/decimal.ts` and `lib/domain/decimal.test.ts`.
+The scanner extracts candidate class names from any scanned file — comments and
+test files included — so a bare word that collides with a utility name becomes
+dead CSS on every page of the site.
+
+Check a CSS delta by rule, not by byte count, before accepting it:
+
+```bash
+python3 - <<'EOF'
+import re, glob
+a = open(glob.glob('base/.next/static/chunks/*.css')[0]).read()
+b = open(glob.glob('impl/.next/static/chunks/*.css')[0]).read()
+ra = set(re.findall(r'[^{}]+\{[^{}]*\}', a))
+rb = set(re.findall(r'[^{}]+\{[^{}]*\}', b))
+for r in sorted(rb - ra): print(" +", r.strip()[:120])
+for r in sorted(ra - rb): print(" -", r.strip()[:120])
+EOF
+```
+
+Every added rule should trace to a class you actually wrote. Reword the comment
+rather than shipping the utility.
+
+### A stale `tsconfig.tsbuildinfo` masks a `tsconfig.json` change
+
+Raising `target` at step 10 had no effect on `npm run typecheck`, which kept
+reporting the old target's error, while `npx tsc --showConfig` correctly
+reported the new one. `incremental: true` caches the result in
+`./tsconfig.tsbuildinfo`. Delete it after any `tsconfig.json` edit:
+
+```bash
+rm -f tsconfig.tsbuildinfo && npm run typecheck
+```
+
+### Reading an `.xlsx` without a spreadsheet dependency
+
+An `.xlsx` is a zip of XML, so `zipfile` plus `ElementTree` reads one from the
+Python standard library — `scripts/defra-xlsx-to-csv.py` is the worked example.
+Three things a naive conversion gets wrong, each silent:
+
+- **Cells are addressed, not positional.** A row's XML omits empty cells
+  entirely, so reading `<c>` elements in order shifts columns. Parse the `r`
+  attribute (`"C7"` → index 2).
+- **Text lives in `xl/sharedStrings.xml`**, referenced by index from cells with
+  `t="s"`. Resolve sheet *names* through `xl/_rels/workbook.xml.rels`; sheet
+  order and `sheetN.xml` numbering are not the same thing.
+- **Numbers are binary doubles serialised with up to 17 significant digits.**
+  `repr(float(raw))` gives the shortest decimal that round-trips, recovering the
+  published `1.74296` from `1.7429600000000001`. Where the stored double is
+  itself computed, the shortest form keeps all 17 and those digits are the
+  publisher's own float noise — check the distribution of significant digits for
+  a gap before choosing a rounding precision, and report how many rows the round
+  actually moved.
+
+Convert the DEFRA workbook with:
+
+```bash
+python3 scripts/defra-xlsx-to-csv.py <workbook>.xlsx \
+        lib/db/seed/defra-2026-factors.csv --report
+```
+
+### `pdftotext -layout` recovers a table whose glyphs do not survive extraction
+
+The DEFRA methodology report's Table 1 marks each row with a tick in either an
+AR4 or an AR5 column. The glyphs are in a symbol font and extract as nothing —
+but their **column position** survives `-layout`, which is enough to read the
+table:
+
+```bash
+pdftotext -layout -f 17 -l 18 method.pdf - | python3 -c "
+import sys
+for line in sys.stdin:
+    r = line.rstrip('\n')
+    marks = [i for i, ch in enumerate(r) if i > 55 and not ch.isspace()]
+    if marks: print(f'{r[:56].strip():<45} {marks}')
+"
+```
+
+Two distinct mark columns came out (63 and 86), which is the two table columns.
+
+### Top-level `await` in a one-off `tsx` script needs `.mts`
+
+`npx tsx foo.ts` transforms to CJS and fails with "Top-level await is currently
+not supported with the cjs output format". Name the file `.mts` — already in
+`tsconfig.json`'s `include`. And a throwaway script must live **inside the
+project**, not in the scratchpad, or `pg` and every other dependency fails to
+resolve.
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

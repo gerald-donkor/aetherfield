@@ -36,6 +36,13 @@
       "when": 1786383540937,
       "tag": "0004_black_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786388697981,
+      "tag": "0005_amazing_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

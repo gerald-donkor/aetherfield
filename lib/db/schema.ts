@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   date,
   index,
@@ -11,6 +12,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 import { organization, user } from "./auth-schema";
@@ -20,6 +22,16 @@ import {
   ACTIVITY_IMPORT_STATUSES,
   ACTIVITY_UNITS,
 } from "../validation/activity";
+import {
+  CH4_VARIANTS,
+  EMISSION_SCOPES,
+  FACTOR_ACTIVITY_UNITS,
+  FACTOR_RESULT_UNITS,
+  GHG_GASES,
+  GWP_SETS,
+  SCOPE2_METHODS,
+  SCOPE3_CATEGORIES,
+} from "../validation/emissions";
 
 /**
  * The application schema — AGENTS.md 9.1's phase-one entities, and from build
@@ -421,6 +433,357 @@ export const activityRecord = pgTable(
   ],
 );
 
+/* -------------------------------------------------------------------------- */
+/*  Phase two — emission factors and the calculation engine (build step 10)     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The eight enums this step adds, **built from `lib/validation/emissions.ts`
+ * rather than restated** — the arrangement the four activity enums above
+ * already use, and for the same bundling reason (AGENTS.md 9.2 rule 2).
+ */
+export const emissionScope = pgEnum("emission_scope", [...EMISSION_SCOPES]);
+
+export const scope3Category = pgEnum("scope3_category", [...SCOPE3_CATEGORIES]);
+
+export const scope2Method = pgEnum("scope2_method", [...SCOPE2_METHODS]);
+
+export const gwpSet = pgEnum("gwp_set", [...GWP_SETS]);
+
+export const ghgGas = pgEnum("ghg_gas", [...GHG_GASES]);
+
+export const ch4Variant = pgEnum("ch4_variant", [...CH4_VARIANTS]);
+
+export const factorResultUnit = pgEnum("factor_result_unit", [
+  ...FACTOR_RESULT_UNITS,
+]);
+
+export const factorActivityUnit = pgEnum("factor_activity_unit", [
+  ...FACTOR_ACTIVITY_UNITS,
+]);
+
+/**
+ * Whether a set's rows were taken as the publisher's **combined** CO2e figure
+ * or as its **per-gas** siblings. Recorded on the set, because taking both
+ * double-counts and the choice must be visible on the thing it was made about.
+ *
+ * DEFRA ships a `kg CO2e` row *and* `kg CO2e of CO2 / CH4 / N2O per unit` rows
+ * for the same activity — `1_100_1000_15_1` beside `…_2`, `…_3`, `…_4`. They
+ * are the same emission expressed two ways.
+ */
+export const factorGasBasis = pgEnum("factor_gas_basis", [
+  "combined_co2e",
+  "per_gas",
+]);
+
+/**
+ * One publication of a factor dataset.
+ *
+ * **`organization_id` is nullable here, and that is the one deliberate
+ * deviation from AGENTS.md 9.2 rule 6** — approved by the user on 10 Aug 2026,
+ * with the rule amended in the same change to name reference tables as its
+ * exception.
+ *
+ * `null` means published reference data, shared by every tenant; non-null means
+ * a set a customer supplied under its own licence. **Every read filters
+ * `organization_id IS NULL OR organization_id = $1`**, so no cross-tenant read
+ * is possible, which is what rule 6 exists to guarantee. Duplicating 7,035
+ * factor rows per organisation would be the alternative, and the IEA finding
+ * recorded in `docs/backend.md` means a tenant may genuinely need to bring its
+ * own licensed set one day.
+ *
+ * **A published set is itself mutable, so the version is not the year.** The
+ * 2026 workbook is `Version 1.2` and eGRID2023 was revised twice inside six
+ * months. `dataset_version` is what makes a restatement reproducible.
+ *
+ * **Revisions supersede; they never overwrite.** A new revision inserts a new
+ * set and points the old one at it through `superseded_by_set_id`, because a
+ * factor row edited in place stops last year's disclosure reproducing.
+ */
+export const emissionFactorSet = pgTable(
+  "emission_factor_set",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Null for published reference data — see the docblock. */
+    organizationId: text("organization_id").references(() => organization.id, {
+      onDelete: "cascade",
+    }),
+    /** The publisher, as an identifier rather than a display name: `DESNZ`. */
+    source: text("source").notNull(),
+    /** The publisher's own revision string, never a bare year: `1.2`. */
+    datasetVersion: text("dataset_version").notNull(),
+    publicationYear: integer("publication_year").notNull(),
+    /**
+     * The activity dates this set applies to. **A factor is selected by the
+     * activity's date, not by today's** — DEFRA's own instruction is that the
+     * 2026 factors are "for use with activity data that falls entirely or
+     * mostly within 2026", so a restatement of an earlier year re-selects
+     * against that year's set rather than the current one.
+     */
+    effectiveFrom: date("effective_from", { mode: "string" }).notNull(),
+    effectiveTo: date("effective_to", { mode: "string" }).notNull(),
+    /** Attribution is a licence condition, so it is stored beside the data and
+        rendered wherever the factors are surfaced — never hard-coded in a
+        component that a second dataset would make wrong. */
+    licence: text("licence").notNull(),
+    licenceUrl: text("licence_url").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull(),
+    gasBasis: factorGasBasis("gas_basis").notNull(),
+    supersededBySetId: uuid("superseded_by_set_id").references(
+      (): AnyPgColumn => emissionFactorSet.id,
+      { onDelete: "set null" },
+    ),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    /**
+     * Two partial unique indexes rather than one over three columns, because
+     * **`NULL` is not equal to `NULL` in a unique index**: a single
+     * `(organization_id, source, dataset_version)` index would let the same
+     * published set be seeded twice, since both rows' null organisation would
+     * compare unequal. The seeder's idempotence depends on this being right.
+     */
+    uniqueIndex("emission_factor_set_published_key")
+      .on(t.source, t.datasetVersion)
+      .where(sql`${t.organizationId} is null`),
+    uniqueIndex("emission_factor_set_organization_key")
+      .on(t.organizationId, t.source, t.datasetVersion)
+      .where(sql`${t.organizationId} is not null`),
+    index("emission_factor_set_effective_idx").on(t.effectiveFrom, t.effectiveTo),
+  ],
+);
+
+/**
+ * One published factor row.
+ *
+ * **The publisher's own hierarchy is kept verbatim beside the normalised
+ * keys.** `level_1` through `level_4`, `column_text`, `published_uom` and
+ * `published_ghg_unit` are exactly what the source file said; `scope`,
+ * `activity_unit`, `result_unit`, `gas` and `gwp_set` are this codebase's
+ * reading of it. Keeping both means a person can check the reading against the
+ * source without opening the workbook, and a normalisation bug is a repairable
+ * mistake rather than lost data.
+ *
+ * **`organization_id` is denormalised from the set on purpose** — the same
+ * reasoning `activity_import_row` records. It is derivable through `set_id`,
+ * and carrying it anyway means every tenant filter reads one table's own
+ * column, so no read of factor data can be written that forgets the join.
+ *
+ * **`result_unit` is load-bearing, not descriptive.** 514 rows of the 2026 set
+ * convert an activity into kWh rather than into kgCO2e, and the engine refuses
+ * any factor whose numerator is not `kg_co2e` rather than summing energy into a
+ * carbon total.
+ */
+export const emissionFactor = pgTable(
+  "emission_factor",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    setId: uuid("set_id")
+      .notNull()
+      .references(() => emissionFactorSet.id, { onDelete: "cascade" }),
+    /** Null for published reference data, mirroring the set. */
+    organizationId: text("organization_id").references(() => organization.id, {
+      onDelete: "cascade",
+    }),
+    /** The publisher's stable row identifier — DEFRA's `1_100_1000_15_1`. What
+        makes the seeder idempotent, and what lets a revision be diffed against
+        its predecessor row by row. */
+    sourceRowId: text("source_row_id").notNull(),
+
+    /* The publisher's hierarchy, verbatim. */
+    level1: text("level_1"),
+    level2: text("level_2"),
+    level3: text("level_3"),
+    level4: text("level_4"),
+    columnText: text("column_text"),
+    publishedUom: text("published_uom").notNull(),
+    publishedGhgUnit: text("published_ghg_unit").notNull(),
+
+    /* This codebase's normalised reading of it. */
+    scope: emissionScope("scope").notNull(),
+    scope3Category: scope3Category("scope3_category"),
+    /** Set only on scope 2 rows. **The method travels with the figure**, which
+        the Scope 2 Guidance requires; this step produces `location_based`
+        only, and the column exists from the first migration so market-based is
+        later a seeder change rather than a schema rewrite. */
+    scope2Method: scope2Method("scope2_method"),
+    activityUnit: factorActivityUnit("activity_unit").notNull(),
+    resultUnit: factorResultUnit("result_unit").notNull(),
+    gas: ghgGas("gas").notNull(),
+    /** Required for CH4, null for every other gas — `lib/domain/gwp.ts`
+        records why combustion and fugitive methane take different values. */
+    ch4Variant: ch4Variant("ch4_variant"),
+    /** **Per row, never per dataset.** DEFRA's 2026 methodology puts some fuel
+        families on AR4 and most on AR5, and refrigerants without an AR5 value
+        on AR6. */
+    gwpSet: gwpSet("gwp_set").notNull(),
+    /** The grid, country or region the row applies to, where the publisher
+        states one. Null for a row that is not regional. */
+    region: text("region"),
+    /** Biomass CO2, which "shall not be included in scope 1 but reported
+        separately". Carried out of every scope total by
+        `lib/domain/emissions.ts`, never added to one. */
+    biogenic: boolean("biogenic").notNull().default(false),
+
+    /**
+     * The published value at full precision.
+     *
+     * **`numeric(24, 17)` is measured, not copied.** Across the 7,035 valued
+     * rows of the 2026 flat file the maximum is 17 decimal places and 5 integer
+     * digits; 24 total leaves two digits of headroom on each side. The
+     * derivation, and the 28 rows of Excel float noise that had to be removed
+     * before the measurement meant anything, are in `docs/backend.md`.
+     */
+    value: numeric("value", { precision: 24, scale: 17 }).notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("emission_factor_set_row_key").on(t.setId, t.sourceRowId),
+    index("emission_factor_organization_scope_idx").on(t.organizationId, t.scope),
+    index("emission_factor_set_scope_idx").on(t.setId, t.scope),
+  ],
+);
+
+/**
+ * The organisation's chosen factor for one `(category, unit)` pair — **the
+ * deterministic matcher, and the honest reading of a thin activity model.**
+ *
+ * `activity_record` carries a category from a set of eight, a unit from a set
+ * of eight, a free-text description and a site with only a name. There is no
+ * fuel type, no region and no calorific-value flag. Sixty-four pairs cannot
+ * address 7,035 factor rows, and pretending otherwise is how a plausible wrong
+ * number reaches a disclosure.
+ *
+ * So the mapping is explicit, organisation-scoped, seeded with a small default
+ * set and otherwise **empty** — and every record whose pair has no row here is
+ * surfaced as unmatched, contributes nothing to any total, and is counted in
+ * the coverage figure shown beside every figure it is absent from. That is
+ * AGENTS.md 5.3's "surfaced, never silently accepted" applied to a
+ * deterministic matcher.
+ *
+ * **Strictly tenant-scoped and `not null`** — unlike the two reference tables
+ * above, this is a customer's own choice about its own data, and rule 6 applies
+ * to it unchanged.
+ */
+export const activityFactorMapping = pgTable(
+  "activity_factor_mapping",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    category: activityCategory("category").notNull(),
+    unit: activityUnit("unit").notNull(),
+    factorId: uuid("factor_id")
+      .notNull()
+      /* Deliberately not `cascade`: a factor row disappearing must not silently
+         un-map a customer's category. A set is superseded, not deleted. */
+      .references(() => emissionFactor.id, { onDelete: "restrict" }),
+    /** Who chose it, for the provenance line. Null for the seeded defaults,
+        which no person chose. */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("activity_factor_mapping_key").on(
+      t.organizationId,
+      t.category,
+      t.unit,
+    ),
+    index("activity_factor_mapping_factor_idx").on(t.factorId),
+  ],
+);
+
+/**
+ * One computed emission, for one `activity_record`.
+ *
+ * **It persists the factor row it used, not just the number.** A figure that
+ * reaches a filing has to be re-derivable years later, when the mapping has
+ * moved on and the factor set has been superseded twice: `factor_id`,
+ * `gwp_set` and `engine_version` together say exactly how this number was
+ * produced, and `activity_record.import_id` already says which uploaded row it
+ * came from. Storing only the total would make a restatement a guess.
+ *
+ * **`scope`, `scope3_category`, `scope2_method`, `biogenic` and
+ * `outside_of_scopes` are denormalised from the factor deliberately.** They are
+ * what the figure was computed under, and a later revision of the factor row
+ * must not retroactively move a filed number into a different scope.
+ *
+ * **No `deleted_at`, and that is not an omission.** AGENTS.md 9.2 rule 5 is
+ * about data a person can ask to have removed; this row is derived, holds
+ * nothing a person supplied, and is replaced wholesale on every recalculation.
+ * It cascades from the record it describes, so an erasure there removes it.
+ */
+export const activityEmission = pgTable(
+  "activity_emission",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    activityRecordId: uuid("activity_record_id")
+      .notNull()
+      .references(() => activityRecord.id, { onDelete: "cascade" }),
+    factorId: uuid("factor_id")
+      .notNull()
+      .references(() => emissionFactor.id, { onDelete: "restrict" }),
+
+    /**
+     * The result, exact and **unrounded** — rounding happens once, at
+     * presentation (`lib/domain/decimal.ts`).
+     *
+     * **`numeric(50, 24)` is derived, not guessed.** The product is a
+     * `numeric(18, 6)` quantity, a `numeric(24, 17)` factor and a GWP of up to
+     * 5 integer digits and 1 decimal place: at most 12 + 5 + 5 = 22 integer
+     * digits and exactly 6 + 17 + 1 = 24 decimal places. 24 is therefore the
+     * scale the arithmetic can actually produce, and 50 leaves four integer
+     * digits of headroom above the 46 required.
+     */
+    kgCo2e: numeric("kg_co2e", { precision: 50, scale: 24 }).notNull(),
+
+    scope: emissionScope("scope").notNull(),
+    scope3Category: scope3Category("scope3_category"),
+    scope2Method: scope2Method("scope2_method"),
+    gwpSet: gwpSet("gwp_set").notNull(),
+    biogenic: boolean("biogenic").notNull(),
+    outsideOfScopes: boolean("outside_of_scopes").notNull(),
+    /** `ENGINE_VERSION` from `lib/domain/emissions.ts` at the time of the run. */
+    engineVersion: text("engine_version").notNull(),
+    calculatedAt: timestamp("calculated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    /** One computed figure per record. A recalculation replaces the row rather
+        than appending a second, so a total can never double-count a record. */
+    uniqueIndex("activity_emission_record_key").on(t.activityRecordId),
+    index("activity_emission_organization_scope_idx").on(
+      t.organizationId,
+      t.scope,
+    ),
+  ],
+);
+
 export type Lead = typeof lead.$inferSelect;
 export type NewLead = typeof lead.$inferInsert;
 export type Subscriber = typeof subscriber.$inferSelect;
@@ -440,3 +803,15 @@ export type ActivityImportRow = typeof activityImportRow.$inferSelect;
 export type NewActivityImportRow = typeof activityImportRow.$inferInsert;
 export type ActivityRecord = typeof activityRecord.$inferSelect;
 export type NewActivityRecord = typeof activityRecord.$inferInsert;
+
+export type EmissionFactorSet = typeof emissionFactorSet.$inferSelect;
+export type NewEmissionFactorSet = typeof emissionFactorSet.$inferInsert;
+export type EmissionFactor = typeof emissionFactor.$inferSelect;
+export type NewEmissionFactor = typeof emissionFactor.$inferInsert;
+export type ActivityFactorMapping = typeof activityFactorMapping.$inferSelect;
+export type NewActivityFactorMapping = typeof activityFactorMapping.$inferInsert;
+export type ActivityEmission = typeof activityEmission.$inferSelect;
+export type NewActivityEmission = typeof activityEmission.$inferInsert;
+
+/** Which basis a set's rows were taken on — see `factorGasBasis`. */
+export type FactorGasBasis = (typeof factorGasBasis.enumValues)[number];

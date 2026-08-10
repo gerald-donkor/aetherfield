@@ -1,0 +1,253 @@
+import * as z from "zod";
+
+import type { SubmitResult } from "./result";
+
+/**
+ * The calculation engine's vocabularies and its one input contract — build
+ * step 10.
+ *
+ * **Not `server-only`, and it must stay that way** (AGENTS.md 6.3), on exactly
+ * the footing `lib/validation/activity.ts` records: the `/activity` client
+ * leaves and the Server Actions in `app/activity/actions.ts` both import it, so
+ * the rules exist once and run twice (AGENTS.md 10 rule 1).
+ *
+ * **It imports nothing from `lib/db/`.** `lib/db/schema.ts` calls `pgEnum` at
+ * module scope, so an import in that direction would put `drizzle-orm/pg-core`
+ * into a browser bundle. The enum *members* therefore live here and `schema.ts`
+ * builds its `pgEnum`s from these constants — the arrangement
+ * `ACTIVITY_CATEGORIES` and `ORGANIZATION_ROLES` already use, so each union is
+ * declared exactly once (AGENTS.md 9.2 rule 2).
+ *
+ * `lib/domain/gwp.ts` and `lib/domain/emissions.ts` import *this*, never the
+ * reverse: the pure layer depends on the vocabulary, and the vocabulary depends
+ * on nothing.
+ */
+
+/* -------------------------------------------------------------------------- */
+/*  Scopes                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The GHG Protocol Corporate Standard's three scopes, plus the bucket that is
+ * **not** a scope and must never be summed into one.
+ *
+ * - **`scope_1`** — direct emissions from owned or controlled sources.
+ * - **`scope_2`** — purchased electricity, steam, heat or cooling, as widened
+ *   by the 2015 Scope 2 Guidance. **Generation only**: transmission and
+ *   distribution losses are scope 3 category 3, and DEFRA ships them as
+ *   separate rows for exactly that reason.
+ * - **`scope_3`** — all other indirect emissions, in the fifteen categories of
+ *   the Corporate Value Chain Standard's Table 5.3.
+ * - **`outside_of_scopes`** — direct CO2 from biomass combustion, which the
+ *   Corporate Standard says "shall not be included in scope 1 but reported
+ *   separately". DEFRA ships an explicit `Outside of Scopes` bucket for it: 58
+ *   rows in the 2026 set.
+ *
+ * **A fourth member rather than a boolean beside three**, because it is a
+ * genuine fourth state of one column and AGENTS.md 9.2 rule 2 says so. The
+ * aggregation in `lib/domain/emissions.ts` carries it separately and there is
+ * no code path that adds it to a scope total.
+ */
+export const EMISSION_SCOPES = [
+  "scope_1",
+  "scope_2",
+  "scope_3",
+  "outside_of_scopes",
+] as const;
+
+export type EmissionScope = (typeof EMISSION_SCOPES)[number];
+
+/**
+ * The fifteen scope 3 categories of Table 5.3, upstream first then downstream,
+ * in the standard's own numbering — which the slug carries so a person reading
+ * a row does not have to hold the mapping in their head.
+ */
+export const SCOPE3_CATEGORIES = [
+  "c1_purchased_goods_and_services",
+  "c2_capital_goods",
+  "c3_fuel_and_energy_related_activities",
+  "c4_upstream_transportation_and_distribution",
+  "c5_waste_generated_in_operations",
+  "c6_business_travel",
+  "c7_employee_commuting",
+  "c8_upstream_leased_assets",
+  "c9_downstream_transportation_and_distribution",
+  "c10_processing_of_sold_products",
+  "c11_use_of_sold_products",
+  "c12_end_of_life_treatment_of_sold_products",
+  "c13_downstream_leased_assets",
+  "c14_franchises",
+  "c15_investments",
+] as const;
+
+export type Scope3Category = (typeof SCOPE3_CATEGORIES)[number];
+
+/** The label each category is rendered under. Written once so the totals
+    surface and any later report cannot drift from the standard's wording. */
+export const SCOPE3_CATEGORY_LABELS: Record<Scope3Category, string> = {
+  c1_purchased_goods_and_services: "1. Purchased goods and services",
+  c2_capital_goods: "2. Capital goods",
+  c3_fuel_and_energy_related_activities:
+    "3. Fuel- and energy-related activities",
+  c4_upstream_transportation_and_distribution:
+    "4. Upstream transportation and distribution",
+  c5_waste_generated_in_operations: "5. Waste generated in operations",
+  c6_business_travel: "6. Business travel",
+  c7_employee_commuting: "7. Employee commuting",
+  c8_upstream_leased_assets: "8. Upstream leased assets",
+  c9_downstream_transportation_and_distribution:
+    "9. Downstream transportation and distribution",
+  c10_processing_of_sold_products: "10. Processing of sold products",
+  c11_use_of_sold_products: "11. Use of sold products",
+  c12_end_of_life_treatment_of_sold_products:
+    "12. End-of-life treatment of sold products",
+  c13_downstream_leased_assets: "13. Downstream leased assets",
+  c14_franchises: "14. Franchises",
+  c15_investments: "15. Investments",
+};
+
+export const EMISSION_SCOPE_LABELS: Record<EmissionScope, string> = {
+  scope_1: "Scope 1",
+  scope_2: "Scope 2",
+  scope_3: "Scope 3",
+  outside_of_scopes: "Outside of scopes",
+};
+
+/**
+ * The two scope 2 accounting methods.
+ *
+ * **Only `location_based` is produced in this step**, and every scope 2 figure
+ * is labelled as such wherever it is shown — the Scope 2 Guidance requires the
+ * method to travel with the number. `market_based` exists in the vocabulary and
+ * in the column from the first migration so that adding it later is a seeder
+ * and a UI change rather than a schema rewrite; it needs REC and GO capture,
+ * supplier-specific rates and a residual-mix fallback, none of which the
+ * product models yet.
+ */
+export const SCOPE2_METHODS = ["location_based", "market_based"] as const;
+
+export type Scope2Method = (typeof SCOPE2_METHODS)[number];
+
+export const SCOPE2_METHOD_LABELS: Record<Scope2Method, string> = {
+  location_based: "location-based",
+  market_based: "market-based",
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Gases and warming potentials                                               */
+/* -------------------------------------------------------------------------- */
+
+/** The assessment report a factor row's GWP comes from. **Per row, never per
+    dataset** — `lib/domain/gwp.ts`'s docblock records why. */
+export const GWP_SETS = ["AR4", "AR5", "AR6"] as const;
+
+export type GwpSet = (typeof GWP_SETS)[number];
+
+/**
+ * The gases a factor row can be stated in.
+ *
+ * `co2e` is not a gas: it marks a row that is **already** a carbon-dioxide
+ * equivalent, which is what DEFRA's combined `kg CO2e` rows are. Such a row
+ * carries its publisher's GWP already applied and must never have another one
+ * multiplied into it.
+ */
+export const GHG_GASES = ["co2", "ch4", "n2o", "sf6", "nf3", "co2e"] as const;
+
+export type GhgGas = (typeof GHG_GASES)[number];
+
+/** Which CH4 GWP applies — `combustion` for anything burnt, `fugitive` for
+    vented or leaked fossil methane. `lib/domain/gwp.ts` records why the two
+    differ and why combustion takes the non-fossil value. */
+export const CH4_VARIANTS = ["combustion", "fugitive"] as const;
+
+export type Ch4Variant = (typeof CH4_VARIANTS)[number];
+
+/* -------------------------------------------------------------------------- */
+/*  What a factor produces                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The numerator of a factor row — **what one unit of activity converts *into*,
+ * which is not always an emission.**
+ *
+ * 514 of the 2026 set's rows convert an activity into `kWh` rather than into
+ * kgCO2e: DEFRA's `SECR kWh` families exist so a reporter can derive energy
+ * consumption from a distance travelled. They are real rows with real values
+ * and they are **not** emissions; summing them into a tCO2e total would inflate
+ * it silently, which is precisely the failure AGENTS.md 5.3 is about.
+ *
+ * Storing the numerator as an enum rather than trusting the publisher's free
+ * text is what makes that un-hittable: the engine refuses any factor whose
+ * `result_unit` is not `kg_co2e`.
+ */
+export const FACTOR_RESULT_UNITS = ["kg_co2e", "kwh"] as const;
+
+export type FactorResultUnit = (typeof FACTOR_RESULT_UNITS)[number];
+
+/**
+ * The denominator of a factor row, normalised.
+ *
+ * **`unknown_unit` is a real member and carries its weight.** DEFRA publishes
+ * denominators the activity model has no way to measure — `passenger.km`,
+ * `Room per night`, `per FTE Working Hour` — and denominators that are not an
+ * exact power-of-ten multiple of any unit it does have: `miles` and `GJ`.
+ * Those rows are seeded (the set is stored as published) but can never be
+ * selected, and `lib/domain/emissions.ts` refuses them by name rather than
+ * approximating a conversion. A guessed 1.609 in a disclosure is a fabricated
+ * number.
+ *
+ * The calorific-value split is part of the identity, not a note on it: DEFRA
+ * publishes a Net CV and a Gross CV factor for the same fuel and the same
+ * quantity of kWh, and confusing them is a silent error (the methodology
+ * report's own warning).
+ */
+export const FACTOR_ACTIVITY_UNITS = [
+  "kwh",
+  "kwh_net_cv",
+  "kwh_gross_cv",
+  "litres",
+  "cubic_metres",
+  "million_litres",
+  "kg",
+  "tonnes",
+  "km",
+  "tonne_km",
+  "unknown_unit",
+] as const;
+
+export type FactorActivityUnit = (typeof FACTOR_ACTIVITY_UNITS)[number];
+
+/* -------------------------------------------------------------------------- */
+/*  The recalculate action's contract                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `recalculate`'s one input. An import id, or nothing for the whole
+ * organisation.
+ *
+ * A non-uuid is a forged request, not a typo, and gets the same handled failure
+ * a missing import gets — every `lib/db/` call takes `organizationId` as a
+ * predicate, so a cross-tenant id answers not-found rather than acting as an
+ * existence oracle.
+ */
+export const recalculateInputSchema = z.object({
+  importId: z.uuid().nullable(),
+});
+
+export type RecalculateInput = z.infer<typeof recalculateInputSchema>;
+
+/** The recalculate action answers in the shared vocabulary (AGENTS.md 10
+    rule 2). It has no form fields, so no field errors. */
+export type RecalculateResult = SubmitResult;
+
+/**
+ * The register the engine's refusals are written in — measured and
+ * operational (AGENTS.md 5): what is wrong, and what it means for the total.
+ * Never an apology, never an exclamation.
+ */
+export const EMISSION_ERRORS = {
+  noMapping:
+    "No emission factor is mapped to this category and unit, so these records are outside the total.",
+  notCalculable:
+    "These records could not be calculated. They are outside the total.",
+} as const;

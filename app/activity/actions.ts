@@ -14,8 +14,21 @@ import {
   restageImport,
   type StagedRow,
 } from "../../lib/db/activity-queries";
+import {
+  buildFactorResolver,
+  listFactorMappings,
+  listRecordsForCalculation,
+  replaceEmissions,
+  seedDefaultMappings,
+} from "../../lib/db/emission-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
+import { DEFAULT_FACTOR_MAPPINGS } from "../../lib/domain/defra";
+import { aggregate, toStoredKgCo2e } from "../../lib/domain/emissions";
+import {
+  recalculateInputSchema,
+  type RecalculateResult,
+} from "../../lib/validation/emissions";
 import {
   checkActivityCommitLimit,
   checkActivityImportLimit,
@@ -102,6 +115,12 @@ const NOT_STAGED =
   "That import is no longer staged, so it can't be changed.";
 
 const FIELD_FAILURE = "Check the marked fields and try again.";
+
+/** Step 10. A recalculation with no committed records is not a failure of the
+    engine — it says there is nothing to calculate over yet, which is a
+    different thing from a total of zero. */
+const NOTHING_TO_CALCULATE =
+  "There are no committed activity records to calculate. Commit an import first.";
 
 /* -------------------------------------------------------------------------- */
 /*  Shared stages b and d                                                      */
@@ -467,6 +486,98 @@ export async function discardImport(
 
   revalidatePath("/activity");
   revalidatePath(`/activity/${id.data}`);
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  recalculate                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Recomputes emissions for the organisation, or for one import — build
+ * step 10.
+ *
+ * **The same stage order as every action above it**, in AGENTS.md 10's letters:
+ * no BotID (stage a is deliberately absent on an authenticated path, for the
+ * reason `stageImport` records at length), session and tenant, then the rate
+ * limit keyed by user id and **failing closed**, then `safeParse`, then a
+ * tenant-predicated write, then `revalidatePath`, then a typed `SubmitResult`.
+ * **No redirect on success** (AGENTS.md 10 rule 5).
+ *
+ * **All the arithmetic is in `lib/domain/`, which has no database handle.**
+ * This function is the seam: it reads through `lib/db/emission-queries.ts`,
+ * hands pure values to `aggregate()`, and writes the result back. No figure is
+ * computed here and no SQL is written in `lib/domain/`.
+ *
+ * **Recalculating is not the same as reporting a total.** It replaces the
+ * stored figures for exactly the records it covered, so a record whose mapping
+ * was removed loses its emission rather than keeping a stale one — see
+ * `replaceEmissions`. The coverage figure the surface renders is derived from
+ * the same run, which is why a caller cannot obtain a total without it.
+ */
+export async function recalculate(
+  rawImportId: unknown,
+): Promise<RecalculateResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. ------
+
+  // -- b. Session and tenant, then the rate limit ------------------------
+  const tenant = await resolveTenant();
+  if (!tenant.ok) return tenant;
+
+  const limited = await consumeCommitLimit(tenant.userId);
+  if (limited) return limited;
+
+  // -- c. Parse, with the shared schema ----------------------------------
+  const parsed = recalculateInputSchema.safeParse({
+    importId: rawImportId ?? null,
+  });
+  if (!parsed.success) return { ok: false, error: NOT_FOUND };
+
+  const importId = parsed.data.importId;
+
+  // -- d. Authorise: every query below is predicated on the tenant -------
+  try {
+    /* A new organisation starts with the default `(category, unit)` mappings so
+       its first import produces a total rather than a blank screen. It runs
+       only when the organisation has none — a reporter's own choice is never
+       overwritten (see `seedDefaultMappings`). */
+    await seedDefaultMappings(tenant.organizationId, DEFAULT_FACTOR_MAPPINGS);
+
+    const [records, mappings] = await Promise.all([
+      listRecordsForCalculation(tenant.organizationId, importId),
+      listFactorMappings(tenant.organizationId),
+    ]);
+
+    if (records.length === 0) {
+      return { ok: false, error: NOTHING_TO_CALCULATE };
+    }
+
+    // -- e. The pure engine, over typed inputs --------------------------
+    const { emissions } = aggregate(records, buildFactorResolver(mappings));
+
+    // -- f. Write, scoped to the records this run covered ---------------
+    await replaceEmissions(
+      tenant.organizationId,
+      records.map((record) => record.id),
+      emissions.map((emission) => ({
+        activityRecordId: emission.recordId,
+        factorId: emission.factorId,
+        kgCo2e: toStoredKgCo2e(emission.kgCo2e),
+        scope: emission.scope,
+        scope3Category: emission.scope3Category,
+        scope2Method: emission.scope2Method,
+        gwpSet: emission.gwpSet,
+        biogenic: emission.biogenic,
+        outsideOfScopes: emission.outsideOfScopes,
+        engineVersion: emission.engineVersion,
+      })),
+    );
+  } catch {
+    return { ok: false, error: GENERIC_FAILURE };
+  }
+
+  revalidatePath("/activity");
+  if (importId) revalidatePath(`/activity/${importId}`);
   return { ok: true };
 }
 

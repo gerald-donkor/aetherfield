@@ -1,6 +1,11 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    /* Raised from the scaffold's ES2017 by build step 10: `lib/domain/decimal.ts`
+       is built on BigInt literals, whose syntax TypeScript gates on the target.
+       The project emits nothing (`noEmit`) and Next transpiles through SWC
+       against browserslist, so this governs type-checking only — the prerender
+       diff at that step confirmed the built output is byte-identical. */
+    "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
