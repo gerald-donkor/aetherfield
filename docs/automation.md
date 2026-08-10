@@ -23,23 +23,57 @@ Run it against the render and the comp and diff the box list. Area threshold
 25000 at 1280, 40000 at 800, 15000 at 375.
 
 **Playwright is a first-party project dependency.** Prompt 51 installed
-`@playwright/test` 1.62.1 with Chromium and Firefox projects. The smoke suite
-lives in `e2e/`; run it with `npm run test:e2e`, or use
-`npm run test:e2e:ui` for the interactive runner. `playwright.config.ts` builds
-and starts the production application on port 3100, refuses to reuse an
-existing server, and shuts its managed server down when the run ends. After a
-Playwright package update, refresh the matching browser binaries with
-`npx playwright install chromium firefox`.
+`@playwright/test` 1.62.1; prompt 55 completed the desktop matrix with Chromium,
+Firefox and WebKit. `playwright.config.ts` builds and starts the production
+application on port 3100, refuses to reuse an existing server, and shuts its
+managed server down when the run ends. `npm run test:e2e:local` runs Chromium
+and Firefox natively. `npm run test:e2e:webkit` runs WebKit headlessly in the
+pinned rootless Podman image, and `npm run test:e2e` runs both phases. The
+interactive `npm run test:e2e:ui` intentionally remains Chromium / Firefox only.
 
-**WebKit is not in the local matrix because this host is unsupported.** This
-machine runs Arch Linux; Playwright 1.62.1 downloads its Ubuntu 24.04 fallback
-WebKit build, which requires Ubuntu's ICU 74, legacy libxml2 and flite ABI. Its
-own dependency command confirms the boundary rather than fixing it:
-`npx playwright install-deps --dry-run webkit` reports the unsupported OS and
-fails with `spawn apt-get ENOENT`. Do not replace Arch's system ICU or copy
-foreign shared libraries into the browser cache to manufacture a pass. Add
-WebKit when the suite has a supported Debian/Ubuntu CI runner, and install its
-dependencies there with Playwright's own command.
+**WebKit crosses a container boundary on Arch.** Playwright 1.62.1's Arch
+fallback is an Ubuntu build that needs Ubuntu's ICU, libxml2 and Flite ABIs;
+`npx playwright install-deps --dry-run webkit` tries `apt-get`, which is not an
+Arch package-management path. Do not replace Arch's system ICU, copy foreign
+shared libraries into the browser cache, or patch the browser. Install Podman
+from Arch's official repository instead:
+
+```sh
+sudo pacman -S --needed podman
+podman info --format 'rootless={{.Host.Security.Rootless}}'
+```
+
+The second command must report `rootless=true`. No privileged daemon or host
+port is involved: `tools/playwright-webkit/Containerfile` installs only WebKit
+and its Debian dependencies from Playwright 1.62.1 over Node 22 Bookworm slim;
+`scripts/playwright-webkit.sh` bind-mounts the repository, keeps the caller's
+UID / GID, and runs the existing production build, server and test inside one
+container. The small image build context is only `tools/playwright-webkit/`, so
+the repository, `.env.local`, `node_modules` and generated output never enter an
+image layer.
+
+The first `npm run test:e2e:webkit` builds
+`localhost/aetherfield-playwright-webkit:1.62.1`; later runs reuse it. The first
+successful slim build on 10 Aug 2026 fetched 225 MB of Debian packages in 4 min
+37 s, WebKit's 102.2 MB archive and FFmpeg's 2.3 MB archive. One WebKit mirror
+timed out after 30 s and Playwright retried the next mirror successfully. The
+final image's measured virtual size is 1,231,512,576 bytes (1.232 GB), reduced
+from the rejected full-Bookworm trial's 3,247,248,725 bytes.
+
+The Playwright package version and the Containerfile's
+`PLAYWRIGHT_VERSION` must remain identical; the runner rejects a mismatch. On a
+Playwright upgrade, update both, run `npx playwright install chromium firefox`,
+then run `npm run test:e2e` to build the new version-tagged WebKit image. If the
+Containerfile itself changes without a version bump, remove only its
+reproducible image before rerunning:
+
+```sh
+podman image rm localhost/aetherfield-playwright-webkit:1.62.1
+```
+
+That command is optional cleanup and deletes only the local, reproducible test
+image. It does not touch reports, browser caches, application data or system
+packages.
 
 **Prompt 51 verification (9 Aug 2026).** `npx playwright --version` reported
 `1.62.1`; `npx playwright test --list` found exactly two cases in one file, one
@@ -56,6 +90,25 @@ ignored skill-doc snapshots excluded and used the same in-memory
 per build and changes Server Action IDs). The two path sets were identical at
 21 HTML files; after normalising only `.next/BUILD_ID`, **0 files differed**.
 The key was neither printed nor written to disk.
+
+**Prompt 55 verification (10 Aug 2026).** The Arch package was Podman 6.0.2;
+`podman info` reported `rootless=true`. Because this automation process could
+not answer the workstation's sudo password prompt, verification unpacked those
+same signature-checked Arch packages into `/tmp` instead of installing them;
+the normal workstation prerequisite remains the `pacman` command above.
+`npx playwright --version` reported `1.62.1`, and
+`npx playwright test --list` found exactly three cases in one file. The final
+standalone slim-container `npm run test:e2e:webkit` passed WebKit in 16.5 s. The
+complete cached `npm run test:e2e` passed Chromium and Firefox in 17.7 s, then
+WebKit in 15.4 s. Rootless `--rm` left no test container running. The temporary
+package extraction, its runtime overrides and its image store were never added
+to the repository. `sh -n scripts/playwright-webkit.sh`, `npm run lint` and
+`npm run typecheck` all exited 0 with no diagnostics. `npm run build` compiled
+in 5.6 s, finished TypeScript in 4.0 s and generated all 26 static pages; the
+route table retained the same static / SSG / dynamic classifications. A final
+isolated parent-versus-prompt build used one unprinted, unwritten Server Actions
+encryption key: both sides produced the same 21 `app/**/*.html` paths and,
+after replacing only each side's `.next/BUILD_ID`, **0 files differed**.
 
 **Screenshotting the render** — import from `@playwright/test` or the installed
 `playwright` package rather than resolving `playwright-core` from npm's transient

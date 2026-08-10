@@ -1,0 +1,10 @@
+FROM docker.io/library/node:22-bookworm-slim
+
+ARG PLAYWRIGHT_VERSION=1.62.1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps webkit \
+  && chmod -R a+rX /ms-playwright \
+  && rm -rf /root/.npm /var/lib/apt/lists/*
+
+WORKDIR /work
