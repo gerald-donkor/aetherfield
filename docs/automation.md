@@ -692,6 +692,44 @@ never reconnects, so a reused pool shows six passes and proves nothing. Run the
 script through `./node_modules/.bin/dotenv -e .env.local --`, not `npx dotenv`,
 and require `pg` by absolute path when the script lives in the scratchpad.
 
+## Regenerating Better Auth's schema, and diffing a build against the parent
+
+**Schema generation is a script now — `scripts/generate-auth-schema.py`.** The
+Better Auth CLI refuses to evaluate a config module carrying `server-only`
+("Please remove import 'server-only' from your auth config file temporarily"),
+and every module under `lib/` that touches a secret carries it. Step 6 stripped
+and restored the guards by hand; prompt 56 made it a script, because a
+generator that throws between the two halves leaves the guards off and the next
+commit ships a codebase with no client-import protection. The script holds every
+guarded file body in memory, restores in a `finally`, and refuses an `--output`
+of `lib/db/auth-schema.ts`. Run it, then diff the scratch output and merge.
+
+**The generated file may be a strict superset — check before transcribing.**
+For the organization plugin, `diff` showed 0 removed lines and 80 added, so the
+output was copied wholesale instead of hand-merged. Confirm with
+`diff old new | grep -c '^<'` before assuming a hand-merge is needed; a copy
+that the diff has proven lossless is safer than transcription.
+
+**Three traps sit between you and a trustworthy prerender diff. All three are
+silent, and all three were hit in one session.**
+
+1. **The gitignored docs snapshots contaminate the CSS**, as recorded above —
+   two chunks with them present, one without. Stash the four paths behind a
+   restoring `EXIT` trap before any build you intend to compare.
+2. **JS chunk names are content-hashed and rename on an unrelated change.**
+   Normalising only `BUILD_ID` and the CSS chunk reported 19 of 21 pages as
+   differing, every one at *identical byte length* — the signature of a pure
+   rename. Normalise `/_next/static/chunks/[A-Za-z0-9_-]+\.js` too. Equal byte
+   lengths on both sides is the tell that a "difference" is a rename.
+3. **A running `next dev` rewrites `.next` underneath the comparison.** A page
+   that existed for the first script run was gone for the second. Check
+   `pgrep -af "next dev"` first. Do **not** kill the user's server: copy the
+   working tree to the scratchpad (`tar` excluding `.next`, `node_modules`,
+   `.git`, `.agents`, `.claude`), hard-link `node_modules` in, and build there.
+   That also sidesteps trap 1, since the copy excludes the snapshots.
+
+A clean pair of builds at this commit is one CSS chunk and 21 HTML files each.
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

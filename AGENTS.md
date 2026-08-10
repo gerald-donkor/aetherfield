@@ -843,7 +843,7 @@ migrations themselves go in `docs/backend.md`**, not here.
    no "add multi-tenancy later" that is not a rewrite. Phase-one tables are
    deliberately *not* tenant-scoped: leads and applications belong to Aetherfield,
    not to a customer.
-7. Phase-two entities, when they arrive: `organization`, `membership`, `site`,
+7. Phase-two entities, when they arrive: `organization`, `member`, `site`,
    `activity_record`, `emission_factor`, `target`, `report`. Extend them; never
    fork a parallel table for the same concept.
 

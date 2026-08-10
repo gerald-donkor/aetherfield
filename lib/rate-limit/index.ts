@@ -98,6 +98,35 @@ const NEWSLETTER_ONE_CLICK_WINDOW = "1 h" as const;
 const APPLICATION_LIMIT = 5;
 const APPLICATION_WINDOW = "1 h" as const;
 
+/**
+ * Organisation creation, **keyed by user id rather than IP** — build step 8.
+ *
+ * **The number is a judgement, not a measurement** (AGENTS.md 12 rule 4), on
+ * exactly the same footing as every window above it. Nothing here is fitted:
+ * the flow has never shipped, so there is no traffic to fit against, and it is
+ * to be revisited against real usage rather than treated as measured.
+ *
+ * **Keyed by user id because the path is authenticated.** An IP key would
+ * throttle a whole office behind one NAT for something only a signed-in,
+ * verified account can do, and it would leave the actual abusable surface — one
+ * account probing the slug namespace — unbounded.
+ *
+ * **The real cap is not this limiter.** `organizationLimit` in
+ * `lib/auth/server.ts` bounds how many organisations an account may own; this
+ * bounds how often it may *ask*. Ten an hour is deliberately loose against that
+ * cap: a person creating one organisation may reasonably retry several times
+ * around a rejected slug, and each rejection consumes a slot without creating a
+ * row. What it stops is a script walking the slug space through the duplicate
+ * error, and a broken client hammering Postgres.
+ *
+ * **A user id is not personal data.** It is the opaque database identifier of
+ * the session's own subject — not a name and not an address — so unlike the
+ * newsletter's address key it needs no hash to stay inside AGENTS.md 8.3
+ * rule 2.
+ */
+const ORGANIZATION_CREATE_LIMIT = 10;
+const ORGANIZATION_CREATE_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -243,6 +272,25 @@ export async function checkApplicationLimit(
     APPLICATION_LIMIT,
     APPLICATION_WINDOW,
     identifier,
+  );
+}
+
+/**
+ * Organisation creation, keyed by the **user id**. Stage b of AGENTS.md 10, and
+ * the only limiter on that path — see the constant's docblock for why it is not
+ * keyed by IP, and why the number is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkOrganizationCreateLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "organization-create",
+    ORGANIZATION_CREATE_LIMIT,
+    ORGANIZATION_CREATE_WINDOW,
+    userId,
   );
 }
 

@@ -2856,3 +2856,355 @@ Every result below was run on 9 Aug 2026.
 not to use it as evidence until committed. Keyboard focus/announcement behavior
 is implemented from the existing focused-status pattern but is therefore not
 claimed as browser-driven verification in this prompt.
+
+## Step 8 — organisations and multi-tenancy
+
+Implemented by prompt 56 on 9 Aug 2026. This opens phase two with Better Auth's
+`organization` plugin, the tenant tables it generates, an explicit
+create-organisation flow on `/account`, and the membership resolution every
+later phase-two query filters on (§9.2 rule 6). It adds no provider, no
+environment variable, no public write path, no email and no AI surface (§5.3:
+phase two's first AI surface is step 9).
+
+### Decisions taken with the user before the prompt was written
+
+Recorded here because each one bounds what a later session may assume was
+merely unbuilt:
+
+| decision | consequence |
+| --- | --- |
+| **Organisations are created explicitly**, from a flow on `/account` | sign-up and the settled auth screens are untouched, and the no-organisation state stays reachable and therefore testable |
+| **Invitations are deferred to a follow-up prompt** | they block nothing downstream; an email template, an accept route and a members UI would have doubled an already large step |
+| **Tenant roles are `owner` and `member` only**, per §11.1 | Better Auth's default third role, `admin`, is removed by custom access control rather than left registered and undefined |
+
+### The plugin configuration, and why each option is set
+
+`lib/auth/server.ts` gains one plugin inside the existing `createAuth()`,
+placed **before `nextCookies()`**, which keeps its position last for the reason
+its own comment gives. The options, and the reasoning that is not obvious from
+the option name:
+
+| option | value | why |
+| --- | --- | --- |
+| `ac` / `roles` | `organizationAccessControl`, `organizationRoles` from `lib/auth/organization-access.ts` | constrains the accepted role values to `owner` and `member` (below) |
+| `creatorRole` | `"owner"` | the first member of every organisation lands on the role §11.1 names |
+| `allowUserToCreateOrganization` | `async (user) => user.emailVerified === true` | sign-in already requires verification, so this is not what keeps unverified users out — it states the rule at the creation boundary instead of leaving it a consequence of `requireEmailVerification` elsewhere in the same file |
+| `organizationLimit` | `3` | **a judgement, not a measurement** |
+| `membershipLimit` | `100` | **a judgement, not a measurement** |
+| `disableOrganizationDeletion` | `true` | the plugin's delete cascades members and invitations, while §9.2 rule 5 wants a soft-delete with an audit trail so an erasure request is one reversible operation. Off rather than merely unbuilt; design the two together, later |
+| `teams`, `dynamicAccessControl` | left disabled | neither is in §5.2 step 8, and §5.2's "do not overbuild" covers the temptation |
+
+**Both limits are judgements and are recorded as such** (§12 rule 4). Nothing
+has shipped, so there is no traffic to fit them against. They are bounds
+against runaway creation on the free Neon plan, not product requirements, and
+sit on the same footing as every window in `lib/rate-limit/` — revisit them
+against real usage rather than treating them as fitted.
+
+### Why the organisation-level `admin` role was dropped
+
+Better Auth ships three default organisation roles — `owner`, `admin` and
+`member`. `lib/auth/organization-access.ts` registers two, building the
+controller from the library's own `defaultStatements` and its own `ownerAc` /
+`memberAc` definitions rather than restating either, so a library upgrade that
+adds a resource does not silently leave these roles behind.
+
+`adminAc` is omitted for two reasons:
+
+1. §11.1 names exactly `owner` and `member` on the tenant side. A third role
+   with no defined powers is dead surface, and the first phase-two feature to
+   ask "what can an org admin do?" would have to invent the answer.
+2. **`admin` already means something else in this codebase.** `user.role`
+   carries Aetherfield's own staff roles, `staff` and `admin` (step 7,
+   `lib/db/auth-queries.ts`). An organisation-level `admin` sharing the word
+   would make every authorisation read ambiguous at a glance.
+
+**Omitting the role is not a security boundary on its own.** It means the
+plugin will not accept `admin` as a role value; it authorises nothing by
+itself.
+
+### The orthogonality invariant
+
+**An Aetherfield staff member is not thereby a member of any customer
+organisation** (§11.1). `user.role` being `staff` or `admin` grants nothing on
+the tenant side, and no tenant read may be authorised by it. The membership row
+is re-read from Postgres per request and the role comes from that row, never
+from the session payload (§11.2 rule 5).
+
+This is written as a stated invariant in the resolution module rather than left
+implicit, because the temptation to add a staff bypass arrives at step 12 —
+when a staff account cannot see the dashboard it is trying to debug. Build step
+8 does not have that bypass, and adding one is a decision, not a fix.
+
+`lib/auth/organization.ts` is the tenant gate. It exports
+`getCurrentMembership()`, `requireOrganization(callbackURL)` and
+`authorizeOrganization(organizationId)`.
+
+`getCurrentMembership()` resolves in three steps: the session's
+`activeOrganizationId` if it names an organisation the user is actually a
+member of; otherwise the user's **sole** membership, because a user with
+exactly one organisation has no choice to make and an explicit "set active"
+step before their only workspace appears would be a state with one exit;
+otherwise `null`. A stale or forged `activeOrganizationId` falls back to the
+sole membership rather than locking the user out.
+
+`requireOrganization()` redirects a signed-out caller to
+`/sign-in?callbackURL=...` and a signed-in caller with no organisation to
+`/account`, where the create flow is — not to an error, because having no
+organisation yet is an ordinary state rather than a fault.
+`authorizeOrganization()` is the action-side counterpart: no redirect, just the
+answer, because a Server Action returns a typed result and never throws to the
+client (§10 rule 2).
+
+**Nothing in the module reads `account.role`**, and the docblock says so
+explicitly.
+
+`lib/db/organization-queries.ts` exports `getMembership(userId,
+organizationId)`, `listMembershipsForUser(userId)` and
+`getOrganizationBySlug(slug)`.
+
+**`getMembership()` is the function step 9 onwards filters on.** It joins
+`member` to `organization` and filters on `member.user_id` and
+`member.organization_id` and nothing else — no role column of any kind enters
+the predicate, which is what makes the orthogonality invariant structural
+rather than a convention.
+
+### The generated schema
+
+Better Auth's schema is generated, never authored (§7.3: `npx auth@latest
+migrate` is Kysely-only; on the Drizzle adapter it is `generate`, whose output
+must then be applied by Drizzle Kit). Generation ran to a scratch path and the
+diff was merged into `lib/db/auth-schema.ts` by hand — that file is not purely
+generated, carrying hand-added `index()` calls, the `relations()` block and the
+`rate_limit` table.
+
+Generation ran through a new committed helper,
+`scripts/generate-auth-schema.py`, which wraps:
+
+```
+npx auth@latest generate --config lib/auth/cli.ts \
+  --output <scratch>/auth-schema.generated.ts --yes
+```
+
+The helper exists because the CLI refuses to evaluate a config module carrying
+`server-only` ("Please remove import 'server-only' from your auth config file
+temporarily"). Step 6 cleared that by hand. Doing it by hand is the failure
+mode: if the generator throws, the guards stay off and the next commit ships a
+codebase whose client-import protection is gone. The helper holds all sixteen
+guarded file bodies in memory and restores them in a `finally`, so the guards
+are off only for one subprocess. It also refuses an `--output` of
+`lib/db/auth-schema.ts`. Observed: `Stripping the guard from 16 file(s)` then
+`Restored the guard in 16 file(s)`, and `grep -rl` confirmed 16 files still
+carry the guard afterwards.
+
+The generated output proved to be a **strict superset** of the committed file
+— `diff` reported 0 removed lines and 80 added — so it was copied wholesale
+rather than transcribed, which removes the hand-merge as a fabrication risk
+entirely. The three tables, as generated:
+
+| table | columns |
+| --- | --- |
+| `organization` | `id` text pk, `name` text not null, `slug` text not null unique, `logo` text, `created_at` timestamp not null, `metadata` text |
+| `member` | `id` text pk, `organization_id` text not null → `organization.id` cascade, `user_id` text not null → `user.id` cascade, `role` text not null default `'member'`, `created_at` timestamp not null |
+| `invitation` | `id` text pk, `organization_id` text not null → `organization.id` cascade, `email` text not null, `role` text, `status` text not null default `'pending'`, `expires_at` timestamp not null, `created_at` timestamp not null default now, `inviter_id` text not null → `user.id` cascade |
+
+`invitation` is created by the plugin's own schema even though invitations are
+out of scope for this step; the table exists and is unused, which is the
+library's shape and not a decision made here.
+
+**`member` carries no unique constraint on `(organization_id, user_id)`.** That
+is Better Auth's generated schema as it stands, not an omission made here, and
+it is left alone because the auth schema is generated and never hand-authored
+(§9). Worth revisiting with the library before step 9 relies on one row per
+pair.
+
+`session` gained `active_organization_id text` (nullable), confirmed in the
+migration at line 30 and read back from `information_schema.columns` after the
+apply: `active_organization_id | text | YES`.
+
+**None were added by hand.** The generator emitted
+`member_organizationId_idx`, `member_userId_idx`,
+`invitation_organizationId_idx` and `invitation_email_idx`, plus
+`organizationRelations`, `memberRelations` and `invitationRelations` and the
+`members` / `invitations` additions to `userRelations`. The prompt anticipated
+hand-adding these; the generator already covers them, so nothing was judged
+here. Recorded because the prompt predicted otherwise (§12 rule 8).
+
+`npm run db:generate` reported `11 tables` and wrote
+`lib/db/migrations/0003_dazzling_captain_britain.sql`: three `CREATE TABLE`
+statements, the `session` ALTER, four foreign keys and the four indexes above.
+`npm run db:migrate` applied it over `DATABASE_URL_UNPOOLED` and ended
+`[✓] migrations applied successfully!`.
+
+Read back from Postgres afterwards: `invitation`, `member` and `organization`
+all present in `information_schema.tables`, and `member`'s five columns match
+the generated types exactly.
+
+### The validation contract
+
+`lib/validation/organization.ts` holds the organisation's input contract and
+its role vocabulary — one set of rules, shared verbatim by the client leaf and
+the Server Action so they exist once and run twice (§10 rule 1).
+
+**It stays outside `server-only`, and that is deliberate** (§6.3). It reads no
+secret and touches no connection; being importable from the browser is the
+whole point. It also imports nothing from `lib/db/` and nothing from
+`better-auth` — `lib/db/schema.ts` calls `pgEnum` at module scope, so an import
+there would put `drizzle-orm/pg-core` in a marketing page's browser bundle. The
+`ORGANIZATION_ROLES` union therefore lives in this module and
+`lib/auth/organization-access.ts` imports it, rather than the reverse, so the
+role names are declared exactly once (§9.2 rule 2).
+
+What the schema enforces:
+
+| field | rule |
+| --- | --- |
+| `name` | trimmed, 1–160 characters |
+| `slug` | lowercased and trimmed **before** the shape check, so a pasted capital is corrected rather than rejected — the same courtesy `lib/validation/lead.ts` extends to an email address |
+| `slug` shape | 2–48 characters, `^[a-z0-9]+(?:-[a-z0-9]+)*$` — lowercase alphanumerics with single hyphens between them |
+| `slug` reserved words | rejected against a set covering every top-level route segment that exists today, plus the segments §5.2 already commits phase two to |
+
+The slug is **not** in a URL as of step 8 — no `/[org]` route ships — but it is
+the identifier phase two will reach for, and a slug already in the table is far
+more expensive to reject later than at the point it is created.
+
+`slugifyOrganizationName()` derives a candidate slug from the name for the
+form's convenience only. It is never trusted: the action re-parses whatever
+arrives with the same schema.
+
+`app/account/actions.ts` exports
+`createOrganization(input: unknown): Promise<SubmitResult<CreateOrganizationField>>`.
+
+Stage order is b then c (§10 rule 3): `getCurrentAccount()` first — no session
+returns a handled `{ ok: false }`, never a throw and never a redirect — then
+`checkOrganizationCreateLimit()` keyed by **user id** rather than IP, because
+the path is authenticated and an IP key would throttle a whole NAT while
+leaving single-account slug probing unbounded. Rejection returns `formatRetry()`
+timing. Then `createOrganizationSchema.safeParse`, with `z.flattenError` mapped
+onto `fieldErrors`. Then
+`getAuth().api.createOrganization({ body: { name, slug }, headers: await headers() })`,
+then `revalidatePath("/account")`. No redirect on success (§10 rule 5).
+
+The limiter is 10 per hour, sliding, prefix `organization-create` — **a
+judgement, not a measurement**, on the same footing as every other window in
+`lib/rate-limit/`. It is deliberately loose because the real cap is the
+plugin's `organizationLimit`, not this; the limiter exists to stop a script
+walking the slug namespace, not to bound honest use. The user id needs no
+sha256: it is the opaque identifier of the session's own subject, not a name or
+an address, so the module's "no identifier here is personal" docblock stays
+true.
+
+A duplicate slug is a **typed field error on `slug`**. The discriminant is
+`error.body?.code === ORGANIZATION_ALREADY_EXISTS`, narrowed with `isAPIError`
+from `better-auth/api` — read from `routes/crud-org.mjs` rather than recalled.
+Note `ORGANIZATION_SLUG_ALREADY_TAKEN` is *not* handled: that code is thrown
+only by the check-slug and update endpoints, never by create.
+
+**BotID is deliberately not applied**, and the decision is written into the
+shipped action rather than left to be re-derived. §8.2's BotID rule covers
+*public* write paths; this one requires a live, email-verified session, which
+is a strictly stronger gate. Adding it would also mean listing `/account` in
+`instrumentation-client.ts` — §7.3 records that as a two-file commitment whose
+half-application makes the server call **fail** rather than pass.
+
+### One AGENTS.md line was wrong, and is corrected in this change
+
+§9.2 rule 7 listed the phase-two entity as **`membership`**. Better Auth's table
+is **`member`**, and the name is the library's to choose (§12 rule 6). Per §12
+rule 8 the line is corrected rather than silently contradicted: that one word in
+§9.2 rule 7 now reads `member`. It is the only edit this step made to
+`AGENTS.md` — no build-step ticking, no build record, per the front-matter cap
+rule.
+
+### Prerender impact and verification, prompt 56
+
+**Expected: none, and it must be verified rather than assumed** (§8.1).
+`/account` and `/submissions` are already `ƒ Dynamic` (step 7's route table
+above). Auth adds no root provider and this step adds none, and `proxy.ts`'s
+matcher stays exactly `["/account", "/submissions/:path*"]` — it is not
+widened.
+
+`npm run lint` — exit 0, no output beyond npm's own notice lines.
+
+`npm run typecheck` — exit 0, no diagnostics.
+
+`npm run build` succeeded, generating 26 static pages with 7 workers in 679 ms.
+The route table matches §8.1 verbatim: `/`, `/about`, `/careers`,
+`/design-system`, `/journal` (plus `/_not-found`, `/forgot-password`,
+`/reset-password`, `/sign-in`, `/sign-up`, `/verify-email`) as `○ Static`; the
+six `/article/[slug]` and three `/job-listing/[slug]` as `● SSG`; `/account`,
+`/submissions`, `/submissions/applications/[id]/cv`, `/api/auth/[...all]`,
+`/api/newsletter/unsubscribe`, `/newsletter/confirm` and
+`/newsletter/unsubscribe` as `ƒ Dynamic`. **No marketing route changed mode.**
+
+**21 shared prerendered pages compared, 0 differed.** The parent build was a
+`../aetherfield-base` worktree at `bca19b9` with hard-linked `node_modules`.
+
+Three traps had to be cleared before the number meant anything, and all three
+are now in `docs/automation.md`:
+
+1. **The four gitignored docs snapshots contaminate the CSS.** With them
+   present the build emitted two CSS chunks; stashed behind a restoring `EXIT`
+   trap it emitted one, matching the parent. The contaminated build would have
+   shown every page gaining a stylesheet.
+2. **JS chunk names are content-hashed and rename freely.** Normalising only
+   `BUILD_ID` and the CSS chunk left 19 of 21 pages "differing" — every one at
+   identical byte length, the signature of a pure rename. The helper normalises
+   `/_next/static/chunks/[A-Za-z0-9_-]+\.js` as well.
+3. **A `next dev` server was running in the workspace and rewrites `.next`
+   underneath a comparison.** A page vanished mid-run. The fix was to build a
+   pristine copy of the working tree in the scratchpad rather than touch the
+   user's server; the 0-of-21 result is from that build.
+
+No `magick compare` was run: no page's markup changed, so there is no render to
+compare and the masking rule for `/`, `/journal` and `/careers` did not arise.
+
+`npm run test:e2e` — the Chromium and Firefox projects both passed:
+`2 passed (18.3s)`, building and serving production on port 3100.
+
+The script then chained a WebKit step from concurrent work on the same branch
+and stopped with `Podman is required for WebKit on Arch Linux.` That is not
+this step's work and nothing here depends on it; the native matrix is green.
+
+**Not performed, and that is a gap rather than a pass** (§12 rules 3 and 9).
+The five browser scenarios in prompt 56 — the signed-out redirect, the create
+flow, creation swapping in place with the creator as `owner`, the announced
+duplicate-slug field error, and a second account resolving to no membership —
+were not exercised against a running app in this session.
+
+What *was* verified, against the live database:
+
+- The three tables and the `session` column exist with the generated types.
+- **The orthogonality guard is structural, not demonstrated.** The query
+  `select u.role, count(m.id) from "user" u left join member m on m.user_id =
+  u.id where u.role in ('staff','admin') group by u.role` returned **no rows** —
+  there is no `staff` or `admin` account in the database to assert against. The
+  guarantee rests on `getMembership()`'s predicate, which reads only
+  `member.user_id` and `member.organization_id`, and on
+  `lib/auth/organization.ts` never reading `account.role`. **Demonstrating it
+  with a real staff account and a real organisation is the first thing step 9
+  should do.**
+
+No new environment variable, and no `NEXT_PUBLIC_*` — phase one's set is
+unchanged and this step reads none of it directly. Every new module under
+`lib/` carries `server-only` except `lib/validation/organization.ts`, which is
+the deliberate exception (§6.3) and imports nothing from `lib/db/` or
+`better-auth`; the `server-only` guard was confirmed working when a
+verification script importing `lib/db/client.ts` was refused at load.
+
+No organisation name, slug, member email address or request body is logged
+anywhere on this path: the action's catch blocks log nothing at all, and the
+rate limiter's key is an opaque user id.
+
+### What step 8 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| invitations, `sendInvitationEmail`, an accept route, a members management UI | the user's decision above; blocks nothing downstream, and is the next prompt |
+| teams, `dynamicAccessControl`, custom roles | not in §5.2 step 8 |
+| organisation deletion or renaming | §9.2 rule 5 wants a soft-delete with an audit trail; design it with the erasure path, not ahead of it |
+| any phase-two table — `site`, `activity_record`, `emission_factor`, `target`, `report` | steps 9–13 |
+| any dashboard route or chart | step 12. `home/dashboard.tsx` stays a marketing illustration |
+| refactoring the six existing `app/_components/auth/*` components onto a shared auth client | settled screens, and the churn buys nothing this step needs |
+| touching sign-up | decision 1 above |
+| widening `proxy.ts`'s matcher | §8.1 — the marketing routes must stay unmatched |
+| adding a staff bypass into tenant data | §11, explicitly |

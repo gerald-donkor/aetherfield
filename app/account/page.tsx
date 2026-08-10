@@ -3,8 +3,15 @@ import { redirect } from "next/navigation";
 
 import { SignOutButton } from "../_components/auth/sign-out-button";
 import { SiteFooter, SiteNav } from "../_components/chrome";
+import { CreateOrganizationForm } from "../_components/organization/create-organization-form";
 import { ButtonLink, MetaPair } from "../_components/primitives";
+import { getCurrentMembership } from "../../lib/auth/organization";
 import { getCurrentAccount } from "../../lib/auth/server";
+
+const ORGANIZATION_ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  member: "Member",
+};
 
 export const metadata: Metadata = {
   title: "Account — Aetherfield",
@@ -15,6 +22,8 @@ export default async function AccountPage() {
   const account = await getCurrentAccount();
   if (!account) redirect("/sign-in");
 
+  const membership = await getCurrentMembership();
+
   return (
     <>
       <SiteNav />
@@ -24,8 +33,8 @@ export default async function AccountPage() {
           Your account foundation is ready.
         </h1>
         <p className="mt-7 max-w-[680px] font-serif text-p2 text-muted">
-          Product dashboards and organisation workspaces are not active yet.
-          This page confirms the account that will secure them.
+          Product dashboards are not active yet. This page confirms the account
+          that will secure them, and the organisation their data will belong to.
         </p>
 
         <dl className="mt-14 grid max-w-[760px] gap-8 border-y border-border py-8 md:grid-cols-2">
@@ -42,6 +51,36 @@ export default async function AccountPage() {
             <SignOutButton />
           </div>
         )}
+
+        <section className="mt-20 md:mt-24">
+          <p className="font-mono text-caption text-muted">ORGANISATION</p>
+          {membership ? (
+            <>
+              <p className="mt-7 max-w-[680px] font-serif text-p2 text-muted">
+                This account belongs to one organisation. Emissions, energy and
+                waste data is recorded against it.
+              </p>
+              <dl className="mt-14 grid max-w-[760px] gap-8 border-y border-border py-8 md:grid-cols-2">
+                <MetaPair label="Organisation" value={membership.organization.name} />
+                <MetaPair label="Identifier" value={membership.organization.slug} />
+                <MetaPair
+                  label="Your role"
+                  value={
+                    ORGANIZATION_ROLE_LABELS[membership.role] ?? membership.role
+                  }
+                />
+              </dl>
+            </>
+          ) : (
+            <>
+              <p className="mt-7 max-w-[680px] font-serif text-p2 text-muted">
+                This account belongs to no organisation yet. Create one to hold
+                the data your reporting will be built on.
+              </p>
+              <CreateOrganizationForm className="mt-10 block max-w-[560px]" />
+            </>
+          )}
+        </section>
       </main>
       <SiteFooter />
     </>
