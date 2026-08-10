@@ -43,6 +43,7 @@ export function isOrganizationRole(value: unknown): value is OrganizationRole {
 const RESERVED_SLUGS = new Set([
   "about",
   "account",
+  "activity",
   "api",
   "article",
   "careers",

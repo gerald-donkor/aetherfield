@@ -3199,7 +3199,7 @@ rate limiter's key is an opaque user id.
 
 | not done | why |
 | --- | --- |
-| invitations, `sendInvitationEmail`, an accept route, a members management UI | the user's decision above; blocks nothing downstream, and is the next prompt |
+| invitations, `sendInvitationEmail`, an accept route, a members management UI | the user's decision above; blocks nothing downstream, and **remains deferred**. This line originally read "and is the next prompt". It was not: the user chose step 9 over it, and prompt 57 implemented step 9. Corrected here rather than left standing against what the repository shows (§12 rule 8) |
 | teams, `dynamicAccessControl`, custom roles | not in §5.2 step 8 |
 | organisation deletion or renaming | §9.2 rule 5 wants a soft-delete with an audit trail; design it with the erasure path, not ahead of it |
 | any phase-two table — `site`, `activity_record`, `emission_factor`, `target`, `report` | steps 9–13 |
@@ -3208,3 +3208,469 @@ rate limiter's key is an opaque user id.
 | touching sign-up | decision 1 above |
 | widening `proxy.ts`'s matcher | §8.1 — the marketing routes must stay unmatched |
 | adding a staff bypass into tenant data | §11, explicitly |
+
+## Step 9 — activity-data ingestion
+
+Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation
+and a visible import outcome — the first phase-two data tables, tenant-scoped
+from their first line (§9.2 rule 6). It adds no provider, no environment
+variable, no public write path, no email, and **no AI surface at all**.
+
+### Decisions taken with the user before the prompt was written
+
+| decision | consequence |
+| --- | --- |
+| **Step 9 over step 8's deferred invitations** | invitations block nothing downstream; step 9 unblocks steps 10-13, none of which can begin until rows exist in `activity_record` |
+| **Deterministic header mapping, not the AI mapper** | §5.3 sanctions structured extraction for this step but does not schedule it. A fixed alias table plus a human review step ships instead. **No AI SDK is installed, no model is named, no prompt is scaffolded.** The mapper drops in behind the same review control later with no rework, because `proposeMapping()` already returns a *proposal* that `updateImportMapping` overrides |
+
+### What was built, and where it lives
+
+The directory contract in §6.3 is **not extended** — there is no `lib/import/`:
+
+| module | role |
+| --- | --- |
+| `lib/validation/activity.ts` | the four enum vocabularies, the six canonical fields, the mapping schema, the upload constraints. **Not `server-only`** — the deliberate exception, and it imports nothing from `lib/db/` |
+| `lib/db/schema.ts` (extended) | the four tables and their `pgEnum`s, built from the constants above |
+| `lib/db/activity-queries.ts` | every read and write of them |
+| `lib/domain/csv.ts` | RFC 4180 parsing — **pure**, created by this step |
+| `lib/domain/activity-import.ts` | header mapping and row coercion — **pure** |
+| `lib/storage/activity-import.ts` | the raw CSV's private blob write, delete and signed read |
+| `lib/rate-limit/index.ts` (extended) | `checkActivityImportLimit`, `checkActivityCommitLimit` |
+| `app/activity/actions.ts` | the four Server Actions, colocated |
+| `app/activity/page.tsx`, `app/activity/[importId]/page.tsx` | the workspace and the review view |
+| `app/_components/activity/{upload-form,mapping-form,import-controls}.tsx` | three client leaves, component-only, no GSAP |
+
+**`lib/domain/` is created here and is the phase-two domain layer §6.2
+specifies**: pure functions over typed inputs, no database handle, no `fetch`,
+no implicit `Date.now()`. Step 10's calculation engine lands beside these two
+modules. `parseIsoDate` uses `Date.UTC` rather than `new Date(y, m, d)` so 29
+February's validity does not depend on the server's timezone.
+
+### The tables, as applied
+
+Read back from `information_schema` and `pg_indexes` after `db:migrate`, not
+from the generated SQL — a generated migration is not evidence that it applied.
+
+**`site`** — `id` uuid pk `gen_random_uuid()`, `organization_id` text not null →
+`organization.id` cascade, `name` text not null, `normalized_name` text not
+null, `created_at` timestamptz not null `now()`, `deleted_at` timestamptz.
+Unique index `site_organization_normalized_name_key (organization_id,
+normalized_name)`.
+
+**`activity_import`** — 16 columns: `id` uuid pk, `organization_id` text not
+null → `organization.id` cascade, `uploaded_by` text not null → `user.id`
+cascade, `filename` text not null, `blob_pathname` text **nullable**,
+`status` enum not null, `header_row` text not null, `row_count` /
+`valid_row_count` / `invalid_row_count` integer not null default 0,
+`column_mapping` text not null, `error` text, `created_at` not null,
+`committed_at`, `discarded_at`, `deleted_at`. Index
+`activity_import_organization_created_at_idx (organization_id, created_at)`.
+
+**`activity_import_row`** — 15 columns: `id` uuid pk, `import_id` uuid not null
+→ `activity_import.id` cascade, `organization_id` text not null →
+`organization.id` cascade, `row_number` integer not null, `raw` text not null,
+then the nullable coerced columns `site_name`, `site_normalized_name`,
+`activity_date` date, `category` enum, `description`, `quantity`
+numeric(18,6), `unit` enum, plus `status` enum not null, `error` text,
+`created_at` not null. Unique index
+`activity_import_row_import_row_number_key (import_id, row_number)`; index
+`activity_import_row_import_status_idx (import_id, status)`.
+
+**`activity_record`** — 12 columns: `id` uuid pk, `organization_id` text not
+null → `organization.id` cascade, `site_id` uuid not null → `site.id` **no
+action**, `activity_date` date not null, `category` enum not null,
+`description` text, `quantity` numeric(18,6) not null, `unit` enum not null,
+`import_id` uuid → `activity_import.id` **set null**, `import_row_id` uuid →
+`activity_import_row.id` **set null**, `created_at` not null, `deleted_at`.
+Indexes `activity_record_organization_date_idx (organization_id,
+activity_date)` and `activity_record_organization_category_idx
+(organization_id, category)`.
+
+`site_id` is deliberately `NO ACTION` where every other reference cascades or
+nulls: a committed disclosure figure must not lose the facility it was measured
+at because a site row was removed.
+
+### The enums, as applied
+
+| enum | members |
+| --- | --- |
+| `activity_import_status` | `staged, committed, discarded, failed` |
+| `activity_import_row_status` | `valid, invalid, committed` |
+| `activity_category` | `electricity, fuel, heat, waste, water, travel, freight, other` |
+| `activity_unit` | `kWh, MWh, L, m3, kg, t, km, tkm` |
+
+**All four are declared in `lib/validation/activity.ts` and spread into
+`pgEnum` in `schema.ts`** (§9.2 rule 2), for the reason `ORGANIZATION_ROLES`
+lives in `lib/validation/organization.ts`: `pgEnum` runs at module scope, so a
+client leaf importing `schema.ts` would pull `drizzle-orm/pg-core` into a page
+bundle.
+
+**The category and unit sets are judgements, not measurements** (§12 rule 4).
+There is no corpus of customer files to fit them against. Step 10 may extend
+them; extending an enum is cheap, forking a parallel column is not.
+
+**`failed` is currently unreachable, and that is recorded rather than hidden.**
+The prompt's rationale for it was that "a file that cannot be parsed at all
+still deserves a row a person can see", but the same prompt's stage c makes an
+unparseable file a *rejection* with a legible field error naming the line to
+fix — no blob is written and no row is created. The rejection is the better
+outcome: the person sees the reason immediately, and uploading garbage does not
+accumulate rows. The member stays in the enum because an asynchronous or
+connector-driven ingestion path (step 9's "connectors later") will need it, and
+adding a member to a live enum is more expensive than reserving one.
+
+### `quantity` is `numeric(18, 6)`, and it is read back as a string
+
+`numeric()` without a `mode` yields a **string** in Drizzle — confirmed on the
+snapshot's `pg/column-types` page — and it is left that way on purpose. These
+figures end up in regulatory disclosures (§5.3), and binary floating point is
+the wrong representation for a number that must survive a round trip exactly.
+`lib/domain/activity-import.ts` never passes a quantity through `Number`: the
+source string is validated against a pattern and handed to the column
+unchanged.
+
+**The precision and scale are a judgement, not a measurement.** 12 digits
+before the point covers a national grid's annual kWh with room to spare; 6
+after it covers a fuel meter's litres. Both halves are enforced at coercion
+time, so an over-long value is a legible row error rather than a write failure
+that takes a whole commit down.
+
+Verified against the live database: `500`, `11980.25` and `12450.5` round-trip
+as `500.000000`, `11980.250000`, `12450.500000`.
+
+### The CSV grammar the parser accepts
+
+Hand-written rather than a package, and **no CSV package is installed**. The
+parser must be pure, deterministic and independently testable to sit in
+`lib/domain/` at all; the grammar is small and fully specified; and §12 rule 2
+makes an unverified third-party API a cost rather than a saving.
+
+- **UTF-8**, leading BOM stripped. `TextDecoder(..., { fatal: true })` — without
+  `fatal` a UTF-16 or Latin-1 file decodes into replacement characters and
+  parses "successfully" into nonsense.
+- **Comma** only. No delimiter sniffing.
+- **`"` quoting**, `""` for a literal quote. Quoted fields may contain commas
+  and newlines.
+- **CRLF or LF.** A lone CR outside a quoted field is a failure.
+- **A header row is required**, and it is the first record.
+- **Blank lines are skipped** wherever they occur, so a trailing newline is not
+  an empty final row.
+
+Anything outside that grammar is a parse failure carrying the physical line it
+happened on — never a silent mis-parse. Observed messages, exercised directly:
+`Line 2: a quoted value is never closed.`, `Line 2: there are characters after
+a closing quote.`, `That file has a header row and no data rows.`, `That file
+is not UTF-8 text.`
+
+**Dates accept `YYYY-MM-DD` and `YYYY/MM/DD` only, and that is the decision.**
+`05/06/2026` is 5 June to a British export and 6 May to an American one, and a
+wrong date silently moves a figure into another reporting period. Guessing is
+worse than asking, so an ambiguous date is a row error reading `use an ISO
+date, for example 2026-03-31.`
+
+**Quantities take no thousands separators.** Stripping commas is ambiguous
+against a European decimal comma in a comma-delimited file, so the pattern is
+`^[+-]?\d{1,12}(\.\d{1,6})?$`; a leading `+` is dropped because Postgres
+`numeric` rejects one, and nothing else is rewritten.
+
+### The alias table
+
+`lib/domain/activity-import.ts` matches on a normalised header — lowercased,
+non-alphanumeric runs collapsed to single spaces, trimmed — so `Activity_Date`,
+`activity date` and `Activity-Date` are one header and `Qty.` is `qty`. **A
+judgement, not a measurement**: it is the set of headers a utility bill export,
+a fleet-card statement and a waste-contractor report were expected to use.
+
+Two guarantees the review view relies on and that are enforced rather than
+assumed: the **leftmost** matching column wins, and **no column is proposed for
+two fields**. The alias sets are disjoint today; the second guarantee exists so
+an alias later added to two lists cannot silently duplicate one column's value
+across two schema fields.
+
+Verified: the header row `Facility,Activity Date,Category,Notes,Consumption,UOM`
+proposes `{site:0, date:1, category:2, description:3, quantity:4, unit:5}`.
+
+### The four actions
+
+All four resolve the tenant server-side and take **no organisation id from the
+browser**. `getCurrentMembership()` is the primitive rather than
+`authorizeOrganization(organizationId)` — the prompt named the latter, but it
+takes an id, and the only way an action could obtain one is from the request,
+which is exactly what must not happen. **This is a deliberate deviation from
+the prompt's wording in service of the prompt's own rule**, recorded here per
+§12 rule 8. The two are the same database-backed check; this one takes no
+argument to get wrong.
+
+| action | signature | stages |
+| --- | --- | --- |
+| `stageImport` | `(formData: FormData) => Promise<StageImportResult>` | a skipped (below), b session + tenant then `checkActivityImportLimit(userId)`, c file gates then UTF-8 decode then parse, d the tenant from the membership row, e blob `put` then one transaction, f none |
+| `updateImportMapping` | `(importId, mapping) => Promise<SubmitResult<ActivityField>>` | b, `importIdSchema` + `activityMappingSchema`, every index re-checked against the **stored** header row, then re-coerce every staged row and rewrite the counts in one transaction |
+| `commitImport` | `(importId) => Promise<SubmitResult>` | b, then one transaction: re-read status, upsert sites, insert records, mark rows `committed`, mark the import `committed` |
+| `discardImport` | `(importId) => Promise<SubmitResult>` | b, then one transaction: read the pathname, mark `discarded`, null the pathname; then a best-effort blob delete |
+
+`stageImport` returns `{ ok: true, importId }` — the one result shape in this
+repository that carries a value on success, and a deliberate extension of
+`SubmitResult` rather than a second vocabulary. Its failure half is
+`SubmitResult`'s verbatim.
+
+**The `type` gate is deliberately absent on this upload**, unlike the CV path's.
+Browsers report CSV as `text/csv`, `application/vnd.ms-excel`,
+`application/octet-stream` or an empty string for the same file, so an equality
+check would reject honest uploads. The parse is the real check (§8.2 rule 3):
+a file that does not decode as UTF-8 and yield a header row is rejected
+whatever it claims to be.
+
+**BotID is deliberately not applied**, and the decision is written into the
+shipped action rather than left to be re-derived — the same reasoning step 8
+recorded. §8.2's BotID rule covers *public* write paths; this one requires a
+live session on a verified account **and** a `member` row, which is strictly
+stronger. Adding it would mean listing `/activity` in
+`instrumentation-client.ts`, and §7.3 records that as a two-file commitment
+whose half-application makes the server call **fail** rather than pass.
+
+**Success navigates, and this is the one sanctioned navigation on a write path
+in this repository.** §10 rule 5 forbids a redirect because the phase-one forms
+sit inside settled, measured marketing pages whose scroll and motion state a
+navigation would discard. `/activity` is neither, and moving to the staged
+import *is* the outcome — there is nothing else for the form to swap to. **Not
+licence to redirect a marketing form.**
+
+### The two limiter windows
+
+Both are **judgements, not measurements**, on the same footing as every window
+beside them, and both are keyed by **user id** rather than IP for the reason
+`organization-create` records: the path is authenticated, an IP key would
+throttle a whole NAT, and the abusable surface is one account in a loop.
+
+| limiter | window | reasoning |
+| --- | --- | --- |
+| `activity-import` | 20 / hour | deliberately loose — correcting a mapping often means several re-exports in one sitting. What it bounds is cost: every accepted upload writes a private blob and up to 10,000 staged rows, by far the most expensive write in the codebase |
+| `activity-commit` | 60 / hour | looser still — commit, discard and mapping override write no blob and read no file; the limit stops a broken client hammering Postgres, not a dangerous path |
+
+### Upload constraints
+
+`CSV_MAX_BYTES` 2 MB, `CSV_MAX_ROWS` 10,000 — **both judgements**. 2 MB sits
+under `next.config.ts`'s existing 6 MB Server Action body limit with room for
+the multipart envelope, so the framework never rejects a request before the
+action can render an error. `CSV_MAX_ROWS` bounds the parse rather than the
+file, because 2 MB of one-byte rows is still a million records. A file over the
+row cap **fails as a whole rather than being truncated**: a truncated import is
+a disclosure built on part of a customer's data.
+
+### The visible outcome
+
+`/activity/[importId]` shows the file, who uploaded it and when, the status,
+the resolved mapping with each canonical field naming its source header or
+reading `Not mapped`, the three counts, and the invalid rows with their line
+number and reason, paged at 25. Commit and discard render only while the import
+is `staged` — **and the actions authorise regardless**, because hiding a control
+is presentation and never enforcement (§6.2, §11.2 rule 2).
+
+Every outcome is announced through a focused live region and is legible without
+colour (§8.2 rule 5), copying `create-organization-form.tsx`. The register is
+measured and operational: "3 of 5 rows need attention", never "Oops".
+
+### Retention
+
+The raw blob is stored privately at `activity-import/<uuid>.csv` — non-guessable
+and carrying **no tenant identity**: never the organisation id, its slug, the
+uploader, or the customer's filename, so a store listing is not itself a list of
+who Aetherfield's customers are.
+
+**A discard deletes the object and nulls `blob_pathname` in the same
+transaction**, so retention is finite and stated (§8.3 rule 5). **A committed
+import keeps its file** — that is the deliberate intent, because `import_id` and
+`import_row_id` on `activity_record` exist so step 13 can trace a disclosed
+figure back to the row a customer uploaded, and the source file is the last link
+in that chain. There is no automatic expiry yet; the erasure path and a stated
+retention period are to be designed together, as step 8 said of organisation
+deletion.
+
+### The four small edits outside the new area
+
+1. `proxy.ts`'s matcher is now `["/account", "/activity/:path*",
+   "/submissions/:path*"]` — **enumerated, not widened**. The marketing routes
+   stay unmatched (§8.1).
+2. `RESERVED_SLUGS` gains `"activity"`.
+3. `/account` gains an "Import activity data" `ButtonLink` inside the
+   organisation section, shown only when a membership exists. `/account` is
+   already `ƒ Dynamic`.
+4. `lib/rate-limit/index.ts` gains the two limiters above.
+
+`SiteNav` and `SiteFooter` are untouched.
+
+### The two items inherited from step 8, both resolved
+
+**1. The staff / tenant orthogonality invariant is now demonstrated, not just
+argued.** Step 8 could only offer the structural argument, because the database
+held no staff account. A verification harness created a `role = 'admin'`
+account and an organisation it is not a member of, then ran the real query
+modules against the live database:
+
+```
+PASS  staff account has no membership of any organisation
+PASS  getMembership(staff, orgA) is null even though the account is role=admin
+PASS  getMembership(owner, orgA) resolves
+PASS  getMembership(owner, orgB) is null — membership is per organisation
+PASS  staff account still has no membership after all of that
+```
+
+**2. Better Auth does not guarantee one `member` row per `(organization_id,
+user_id)`, and this step does rely on it.** Read from
+`node_modules/better-auth/dist/plugins/organization/`, not recalled:
+
+- `adapter.mjs`'s `createMember` is a bare `adapter.create({ model: "member" })`
+  with no existence check;
+- `routes/crud-members.mjs`'s `addMember` checks `countMembers` against
+  `membershipLimit` and then creates — it never looks for an existing row for
+  the pair;
+- `routes/crud-invites.mjs`'s `acceptInvitation` likewise creates
+  unconditionally inside its transaction;
+- the generated schema carries no unique constraint on the pair, and the
+  library's own source carries a `FIXME(team-cap-race)` acknowledging the same
+  count-then-create race for `teamMember`.
+
+**So duplicate rows are possible** — an account already in an organisation
+accepting a second invitation to it, or `addMember` called twice server-side,
+produces two rows.
+
+**What it does and does not affect here.** It is **not** a tenant-boundary
+problem: both rows name the same organisation, so no query can return another
+customer's data because of one. `getMembership()` takes `.limit(1)` with no
+`ORDER BY`, so the only exposure is a **non-deterministic role** if the two rows
+disagree — an `owner` duplicate and a `member` duplicate for the same person.
+Nothing in step 9 branches on the tenant role, so nothing here is affected
+today; step 12's tenant-side authorisation would be.
+
+**No constraint was hand-added.** `lib/db/auth-schema.ts` is generated and is
+never hand-authored (§9), and adding a unique index behind the library's back
+would make the next `auth generate` diff misleading. The fix belongs with the
+library — an upstream constraint, or an explicit decision recorded with the user
+to add one — and is flagged here for step 12 rather than taken silently.
+
+### Prerender impact and verification, prompt 57
+
+**Expected: none, and verified rather than assumed** (§8.1).
+
+`npm run lint` — exit 0, no output beyond npm's own notice lines.
+`npm run typecheck` — exit 0, no diagnostics.
+
+`npm run db:generate` reported `15 tables` and wrote
+`lib/db/migrations/0004_black_ghost_rider.sql`: four `CREATE TYPE`, four
+`CREATE TABLE`, nine foreign keys and six indexes. `npm run db:migrate` applied
+it over `DATABASE_URL_UNPOOLED` and ended `[✓] migrations applied
+successfully!`. The applied schema was then read back from
+`information_schema.columns`, `pg_type`/`pg_enum`,
+`information_schema.referential_constraints` and `pg_indexes`, and matches the
+tables above column for column.
+
+`npm run build` succeeded, generating 27 static pages with 7 workers in 357 ms.
+The route table matches §8.1 verbatim: `/`, `/about`, `/careers`,
+`/design-system`, `/journal` (plus `/_not-found`, `/forgot-password`,
+`/reset-password`, `/sign-in`, `/sign-up`, `/verify-email`) as `○ Static`; the
+six `/article/[slug]` and three `/job-listing/[slug]` as `● SSG`; `/activity`
+and `/activity/[importId]` join `/account`, `/submissions`,
+`/submissions/applications/[id]/cv`, `/api/auth/[...all]`,
+`/api/newsletter/unsubscribe`, `/newsletter/confirm` and
+`/newsletter/unsubscribe` as `ƒ Dynamic`. **No marketing route changed mode.**
+
+**21 shared prerendered pages compared, 0 differed**, with no page present in
+one build and absent from the other. The base was a `../aetherfield-base`
+worktree at `cc8c8c3` with `node_modules` hard-linked in after
+`rm -rf`; the implementation build ran in the workspace with the four
+gitignored docs snapshots stashed behind a restoring `EXIT` trap, and both
+emitted a single CSS chunk (70,917 bytes against the base's 70,468 — the new
+views' utilities, which renames the content-hashed chunk on every page and is
+what the normalisation exists for). `BUILD_ID`, the CSS chunk name and the
+content-hashed JS chunk names were all normalised, per the three traps
+`docs/automation.md` records. No `next dev` server was running.
+
+No `magick compare` was run: no page's markup changed, so there is no render to
+compare and the masking rule for `/`, `/journal` and `/careers` did not arise.
+
+`npm run test:e2e:local` — Chromium and Firefox both passed: `2 passed (18.8s)`,
+building and serving production on port 3100. **WebKit was not run**: `podman`
+is not installed on this machine, and `npm run test:e2e:webkit` requires it on
+Arch Linux. That is a gap, not a pass.
+
+### What was exercised, and what was not
+
+**Exercised, against the live database, through the real query and domain
+modules** (28 assertions, all passing, fixtures created and deleted in the same
+run — the database was confirmed back to 0 rows in all six tables afterwards):
+
+- staging a six-column vendor file with two deliberately broken rows: 5 rows,
+  3 valid, 2 invalid, with line numbers and per-field reasons;
+- cross-tenant isolation on every read: the same `importId` read as another
+  organisation returns `null` from `getImport`, and no rows from
+  `listImportRows` or `listRawImportRows`;
+- cross-tenant isolation on every write: `restageImport` returns `false`,
+  `commitImport` and `discardImport` both return `not-found` — the identical
+  answer a non-existent id gets, so there is no existence oracle;
+- a mapping override in both directions: unmapping `unit` moved the counts to
+  0 valid / 5 invalid, re-mapping restored 3 / 2;
+- commit: 3 records written, idempotent on a second call
+  (`already-committed`), the 2 invalid rows still `invalid` afterwards;
+- site upsert: `Bristol Works` and `Bristol works ` became **one** site, and
+  the stored display name is refreshed to the spelling the latest file used;
+- discard: returns the pathname to delete, writes no records, and a committed
+  import can be neither discarded nor re-mapped.
+
+**Not exercised, and that is a gap rather than a pass** (§12 rules 3 and 9):
+
+- **the flow through a browser.** No organisation existed in the database and
+  the one verified account's password is not available to this session, so
+  sign-in could not be driven. The three client leaves' announcement, focus and
+  pending states are implemented from the settled pattern in
+  `create-organization-form.tsx` and `action-controls.tsx`; they are **not**
+  claimed as browser-verified.
+- **the Server Actions' own stages.** `resolveTenant`, the two rate limiters,
+  the BotID-shaped absence, the file gates and the blob write were not run —
+  the harness exercises the query and domain layers those actions call, not the
+  actions themselves, which need a request context.
+- **a real blob round trip.** `putActivityImport` /
+  `createActivityImportReadUrl` were not called; the harness passed a synthetic
+  pathname.
+- **WebKit**, as above.
+
+There is **no unit-test script in this repository**, and `lib/domain/`'s two
+pure modules are the first thing here that genuinely wants one. Whether to add
+a harness is its own decision and is not taken here.
+
+### Secrets and data
+
+No new environment variable and no `NEXT_PUBLIC_*`. The change reads
+`DATABASE_URL` through `lib/db/client.ts`, `KV_REST_API_URL` /
+`KV_REST_API_TOKEN` through the limiter and `BLOB_READ_WRITE_TOKEN` through
+`@vercel/blob` — all existing, all server-only.
+
+Every new `lib/` module carries `import "server-only"` **except**
+`lib/validation/activity.ts`, the deliberate exception (§6.3), and the two
+`lib/domain/` modules, which read no secret and touch no connection.
+
+**Nothing on any of these paths is logged** — no filename, no blob pathname, no
+cell value, no organisation name, no row body, on no path and in no catch.
+There is no `console` call in `lib/db/activity-queries.ts`,
+`lib/storage/activity-import.ts`, `lib/domain/*` or `app/activity/actions.ts`.
+A customer's activity file is their commercial data (§5.3's last bullet), and
+**it is never sent to any third party**: no AI provider is involved in this step
+at all.
+
+### What step 9 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| emission factors, scope 1/2/3 calculation, any tCO₂e figure | step 10. This step writes what was *measured*, never a computed emission |
+| targets, forecasting, the "16% off your 2027 goal" reading | step 11 |
+| any dashboard route or chart | step 12. `home/dashboard.tsx` stays a marketing illustration |
+| report generation or export | step 13 |
+| scheduled recalculation, threshold alerts | step 14 |
+| **AI header mapping** — no AI SDK, no provider, no model, no prompt | §5.3: sanctioned but not scheduled, and the user chose deterministic |
+| connectors, an ingestion API, a webhook | §5.2: "CSV import first, connectors later" |
+| a site management UI — create, rename, merge, delete | sites are created implicitly by an import; a CRUD screen is not in step 9 |
+| editing or deleting a committed `activity_record` | provenance matters more than convenience here; design it with the erasure path |
+| organisation invitations, a members UI | step 8's deferred work, unchanged by this |
+| a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
+| touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
+| widening `proxy.ts`'s matcher beyond an enumerated `/activity/:path*` | §8.1 |
+| any staff bypass into tenant data | §11, explicitly |

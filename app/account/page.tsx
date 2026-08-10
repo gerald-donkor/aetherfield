@@ -70,6 +70,9 @@ export default async function AccountPage() {
                   }
                 />
               </dl>
+              <div className="mt-10">
+                <ButtonLink href="/activity">Import activity data</ButtonLink>
+              </div>
             </>
           ) : (
             <>

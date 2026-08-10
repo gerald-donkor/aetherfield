@@ -127,6 +127,43 @@ const APPLICATION_WINDOW = "1 h" as const;
 const ORGANIZATION_CREATE_LIMIT = 10;
 const ORGANIZATION_CREATE_WINDOW = "1 h" as const;
 
+/**
+ * Activity-file uploads, **keyed by user id** — build step 9.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
+ * as every window above it. Nothing here is fitted: the flow has never shipped,
+ * so there is no traffic to fit against, and it is to be revisited against real
+ * usage rather than treated as measured.
+ *
+ * **Keyed by user id for the reason the organisation limiter records.** The
+ * path is authenticated and tenant-scoped, so an IP key would throttle a whole
+ * office behind one NAT while leaving the abusable surface — one account
+ * uploading files in a loop — unbounded. A user id is not personal data: it is
+ * the opaque database identifier of the session's own subject, so unlike the
+ * newsletter's address key it needs no hash.
+ *
+ * **20 an hour is deliberately loose**, because a person correcting a mapping
+ * often re-exports and re-uploads several times in one sitting, and each of
+ * those is honest use. What it bounds is the cost of the path: every accepted
+ * upload writes a private blob and up to `CSV_MAX_ROWS` staged rows, which is
+ * by far the most expensive write in this codebase.
+ */
+const ACTIVITY_IMPORT_LIMIT = 20;
+const ACTIVITY_IMPORT_WINDOW = "1 h" as const;
+
+/**
+ * Commits, discards and mapping overrides, **keyed by user id**. Also a
+ * judgement and also unfitted.
+ *
+ * Looser than the upload's because these write no blob and read no file: the
+ * work is one transaction over rows that are already staged. The limit exists
+ * so a broken client cannot hammer Postgres, not because the path is dangerous
+ * — every one of the three re-resolves the tenant and re-reads the import
+ * scoped to it before writing anything.
+ */
+const ACTIVITY_COMMIT_LIMIT = 60;
+const ACTIVITY_COMMIT_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -290,6 +327,38 @@ export async function checkOrganizationCreateLimit(
     "organization-create",
     ORGANIZATION_CREATE_LIMIT,
     ORGANIZATION_CREATE_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Activity-file uploads, keyed by the **user id**. Stage b of AGENTS.md 10 —
+ * see the constant's docblock for why it is not keyed by IP, and why the number
+ * is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkActivityImportLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "activity-import",
+    ACTIVITY_IMPORT_LIMIT,
+    ACTIVITY_IMPORT_WINDOW,
+    userId,
+  );
+}
+
+/** The commit, discard and mapping-override actions, keyed by the user id.
+    Also a judgement, also unfitted — see the constant's docblock. */
+export async function checkActivityCommitLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "activity-commit",
+    ACTIVITY_COMMIT_LIMIT,
+    ACTIVITY_COMMIT_WINDOW,
     userId,
   );
 }

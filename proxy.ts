@@ -17,5 +17,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/account", "/submissions/:path*"],
+  // Enumerated, never widened: the marketing routes must stay unmatched, or a
+  // static page pays for an auth check per request (AGENTS.md 8.1).
+  matcher: ["/account", "/activity/:path*", "/submissions/:path*"],
 };
