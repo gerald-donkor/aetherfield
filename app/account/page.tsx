@@ -33,8 +33,8 @@ export default async function AccountPage() {
           Your account foundation is ready.
         </h1>
         <p className="mt-7 max-w-[680px] font-serif text-p2 text-muted">
-          Product dashboards are not active yet. This page confirms the account
-          that will secure them, and the organisation their data will belong to.
+          This page confirms the account that secures your product workspace,
+          and the organisation its evidence belongs to.
         </p>
 
         <dl className="mt-14 grid max-w-[760px] gap-8 border-y border-border py-8 md:grid-cols-2">
@@ -71,7 +71,7 @@ export default async function AccountPage() {
                 />
               </dl>
               <div className="mt-10">
-                <ButtonLink href="/activity">Import activity data</ButtonLink>
+                <ButtonLink href="/dashboard">Open overview</ButtonLink>
               </div>
             </>
           ) : (

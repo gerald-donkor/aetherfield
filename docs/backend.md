@@ -3673,6 +3673,205 @@ at all.
 | a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
 
+## Step 12 — authenticated dashboard routes
+
+Built from `prompts/60-dashboard-routes.md`. This is the authenticated
+organisation overview behind the marketing illustration's four data ideas. It
+reads only stored tenant evidence and deterministic domain results. There is no
+AI, generated recommendation, report narrative, alert, scheduled job or write
+path in this step.
+
+### Definitions carried by the dashboard
+
+- The primary reporting period is the latest 12 complete UTC calendar months;
+  the comparison is the 12 complete months immediately before it. The Server
+  Component captures one `YYYY-MM-DD` clock value and passes it into the pure
+  domain layer. The current partial month is excluded.
+- The headline emissions figure sums stored `activity_emission` rows in the
+  primary period. It never recalculates a factor on read. Scopes 1, 2 and 3 are
+  visible; biogenic and outside-of-scopes remain separate.
+- Recorded energy is committed `electricity` or `heat` activity measured in
+  `kWh` or `MWh`, and nothing else. `kWh` becomes MWh by an exact scale shift.
+  The comparison percentage has three typed refusals: no current readings, no
+  comparison readings, and a zero comparison denominator.
+- A missing emissions month is `null`, not zero. A present zero-valued month is
+  still present evidence. The accessible table says `No calculated record` for
+  a gap.
+- The target selector takes active, not-elapsed targets; then earliest target
+  year, newest creation time, and stable id. Projection, reading and refusal
+  semantics are the unchanged step-11 functions.
+- Actions are an ordered pure result: no activity, calculation gaps, no target,
+  off-target projection, then the current-evidence fallback. They are ordinary
+  links to `/activity` or `/targets`, never generated prose.
+
+Calendar-window tests include January rollover and 29 Feb 2024. Trend tests
+distinguish missing from stored zero and cover all-missing, all-zero, one-month
+and values beyond JavaScript's safe integer range. Energy tests cover exact
+`kWh`/`MWh` conversion, excluded categories/units, positive, negative and zero
+deltas, all three refusals, and an input beyond JavaScript's safe integer range.
+No arithmetic input is coerced through `Number`; only the final bounded chart
+percentage crosses to a CSS height.
+
+### What was built, and where
+
+| file | what |
+| --- | --- |
+| `lib/domain/dashboard.ts` / `.test.ts` | pure reporting windows, emissions trend/totals, exact recorded energy, target selection and actions; focused unit coverage of every approved state |
+| `lib/db/dashboard-queries.ts` | one page-facing tenant read, composing existing emissions, calculation-gap, target, activity-count and factor-set reads plus the narrow energy select |
+| `app/_components/workspace-nav.tsx` | server-rendered Overview / Activity / Targets navigation with `aria-current`; component-only and JavaScript-independent |
+| `app/dashboard/page.tsx` | authenticated Server Component overview, three evidence cards, accessible 12-month HTML/CSS chart, four-verb readiness and actions |
+| `app/dashboard/loading.tsx`, `error.tsx` | route-level loading and unexpected-error states; the error state reveals no partial tenant figure |
+| `app/activity/page.tsx`, `app/targets/page.tsx` | shared workspace navigation replaces the reciprocal one-off links |
+| `app/account/page.tsx` | stale pre-dashboard copy corrected and the established organisation state now links to the overview |
+| `proxy.ts` | exactly `/dashboard/:path*` added to the enumerated optimistic matcher |
+| `e2e/home.spec.ts` | signed-out `/dashboard` redirect with the exact encoded callback |
+
+The dashboard imports nothing from `home/` or `motion/`, adds no chart package,
+and is not a Client Component. Searching the built dashboard server output and
+client-reference manifest found no `EmissionsChart`, chart data selector,
+`home/dashboard` or `motion/register` reference. The settled shared chrome
+keeps its existing behaviour; this route adds no marketing animation bundle.
+
+### Query, trust and scale boundaries
+
+`requireOrganization("/dashboard")` runs before `readDashboardEvidence()`. A
+signed-out request is redirected to
+`/sign-in?callbackURL=%2Fdashboard`; a signed-in account with no current
+membership is redirected to `/account`. The browser sends no organisation id,
+date window, target id or figure. A current database membership supplies the
+only tenant id, and every customer-data query predicates on it; soft-deleted
+activity is excluded. Aetherfield `staff`/`admin` roles are not consulted.
+
+The new energy select projects only date, category, unit and numeric quantity,
+with approved category/unit predicates in SQL and the same defensive predicates
+in the pure function. Numeric values leave Postgres as strings. Independent
+reads use one `Promise.all`. The existing all-emissions read remains the
+step-11 **judgement**, not a measured production-scale limit; this step did not
+invent a second SQL total.
+
+There is no mutation, Server Action, Route Handler, schema change or migration.
+Nothing on the request path logs an organisation, name, count, target or figure.
+
+### Visible outcome — judged and measured
+
+There is no comp. Card composition, copy, three-column desktop arrangement and
+the flat evidence-first chart are **judgements** against the existing
+authenticated-route vocabulary. The marketing illustration supplied only the
+four data ideas; none of its traced numbers or its organisation name was used.
+
+The production render was **measured** at device scale 1 after
+`document.fonts.ready`:
+
+| viewport | cards | workspace navigation | document overflow |
+| --- | --- | --- | --- |
+| 375 × 812 | one column | visible, one row in the fixture copy | `scrollWidth === clientWidth` |
+| 800 × 1000 | two columns, target spans the row | visible, one row | equal widths |
+| 1280 × 960 | three columns | visible, one row | equal widths |
+
+At all three widths the visible and accessible order matched: workspace
+navigation, heading/window, emissions, recorded energy, target, trend, then the
+four-verb evidence/actions. The chart exposed all 12 months in a table; its
+bars were `aria-hidden`. Focus was visibly outlined on every workspace/action
+link. An injected 200% text-size check found no text clipped by an
+`overflow-hidden` box. The only horizontal overflow is the deliberate inner
+chart-table scroller on narrow screens; the document itself never overflowed.
+
+### Disposable authenticated browser matrix
+
+`agent-browser` was not installed (`command -v agent-browser` returned no
+path), so the prompt's recorded fallback was used: Playwright 1.62.1 from the
+repository. A temporary helper under `/tmp` created a uniquely named synthetic
+account, one exact organisation membership, activity across both 12-month
+windows, stored emissions, an active target and a second, unjoined sentinel
+tenant. It exercised:
+
+- complete evidence with a negative energy comparison, then a positive one;
+- one uncalculated committed record and repeated incomplete-figure caveats;
+- no active target; no activity; an explicit missing-month gap;
+- absence of the sentinel organisation and row from the member's response;
+- a forged session cookie reaching the page check and being redirected, never
+  authorising tenant data.
+
+The verifier reported:
+
+```text
+authenticated dashboard matrix passed: states=6 viewports=3 overflow=0 focus=visible tenant-isolation=passed forged-cookie=rejected
+cleanup verified: users=0 organizations=0
+```
+
+Cleanup was limited to the exact UUIDs the run created, cross-checked against
+its unique run-specific slugs and names. It removed both organisations (and
+their cascading tenant rows), then the synthetic user/account/session and
+verification rows. The helper, cookie state and screenshots were removed after
+inspection; no credential, session token, environment value, personal data or
+tenant figure was printed.
+
+### Prerender and CSS verification, prompt 60
+
+**No prerender impact. Verified, not assumed.** Isolated parent (`b13bc02`) and
+implementation copies excluded `.agents/` and `.claude/`, used the same
+unprinted/unwritten Server Actions encryption key, and each produced 21
+prerendered HTML files. After normalising build id plus CSS/JS chunk names and
+stripping RSC flight scripts, **0 of 21 differed**.
+
+The parent route table had 28 routes; the implementation had the same table
+plus Dynamic `/dashboard`, for 29. Every Static, SSG and existing Dynamic
+classification remained unchanged.
+
+CSS was **65,280 → 66,526 bytes, +1,246**, with **24 rules added and 0
+removed**. The additions were the workspace active state and dashboard-only
+layout/chart utilities: `aria-[current=page]:underline`, `bg-accent`,
+`border-collapse`, `border-muted`, `gap-1`, `gap-px`, `grid-cols-12`, the two
+chart heights, the 700px inner table width, small table padding, the responsive
+card spans/columns/gaps/padding, and the action-list spacing rule. Every rule
+traces to authenticated workspace markup; no prose-candidate utility leaked.
+
+The first CSS run was discarded: it reproduced the documented asymmetric-skill
+tree trap and showed 90 unrelated removals. The numbers above are the rerun
+with both copies excluding both skill trees. The HTML result was 0/21 on both
+runs.
+
+### Checks run
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean; ESLint printed no findings |
+| `npm run typecheck` | clean; TypeScript printed no findings |
+| `npm test` | **110 passed, 6 files** |
+| `npm run build` | compiled, typechecked and generated **29 routes**; `/dashboard` Dynamic; prior classifications unchanged |
+| signed-out redirect | Chromium and Firefox both reached the exact `%2Fdashboard` callback and the sign-in heading |
+| authenticated Playwright matrix | six states, three viewports, overflow/focus/tenant/forged-cookie checks passed; cleanup 0/0 |
+| prerender comparison | **0 of 21 differed** |
+| CSS comparison | **+1,246 bytes; 24 added rules; 0 removed** |
+| `npm run test:e2e` | Chromium and Firefox **6/6 passed**; command then stopped at the known environment gap: `Podman is required for WebKit on Arch Linux.` |
+
+`npm run db:generate` and `npm run db:migrate` were not run: this step has no
+schema change, and the approved prompt explicitly excluded both as checks.
+
+### Secrets and data
+
+- No new environment variable and no `NEXT_PUBLIC_*` variable.
+- Runtime reads the existing pooled `DATABASE_URL`; the browser fixture used
+  the same configured database and never printed it.
+- `lib/db/dashboard-queries.ts` is server-only. The pure domain module is not.
+- Activity, emissions, energy and targets are customer commercial data and
+  render only after current membership resolution. Nothing is transmitted to
+  email, Blob, Upstash, analytics or a model provider.
+- No AI is used. No model calculates, selects, ranks or narrates a figure or
+  action.
+
+### What step 12 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| report generation, narrative, export or `/reports` | step 13 |
+| scheduled recalculation, thresholds, alerts or email | step 14 |
+| factor-mapping edits, new ingestion, target types or target editing | existing/later owning surfaces |
+| client chart, chart dependency, GSAP or dashboard interaction | a server-rendered evidence chart is sufficient |
+| cache directives, API routes, Server Actions, provider or environment work | this is a fresh read-only tenant route |
+| staff impersonation or tenant bypass | staff status remains orthogonal to membership |
+| changes to `SiteNav`, `SiteFooter`, `NAV_ITEMS` or marketing markup | settled surfaces and prerender contract |
+
 ## Step 11 — targets and forecasting
 
 Built from `prompts/59-targets-and-forecasting.md`. This is the absolute-target

@@ -22,6 +22,7 @@ export const config = {
   matcher: [
     "/account",
     "/activity/:path*",
+    "/dashboard/:path*",
     "/submissions/:path*",
     "/targets/:path*",
   ],

@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
 import { CreateTargetForm } from "../_components/targets/create-target-form";
 import { TargetCard } from "../_components/targets/target-card";
 import { SiteFooter, SiteNav } from "../_components/chrome";
+import { WorkspaceNav } from "../_components/workspace-nav";
 import { requireOrganization } from "../../lib/auth/organization";
 import {
   listTargets,
@@ -42,6 +42,7 @@ export default async function TargetsPage() {
     <>
       <SiteNav />
       <main className="mx-auto min-h-[720px] w-full max-w-page px-5 py-16 md:py-24 lg:px-6">
+        <WorkspaceNav current="targets" />
         <p className="font-mono text-caption text-muted">TARGETS</p>
         <h1 className="mt-6 max-w-[880px] font-serif text-[48px] leading-[0.98] text-balance md:text-[64px]">
           Put the commitment beside the evidence.
@@ -51,13 +52,6 @@ export default async function TargetsPage() {
           read the planned trajectory against the observed run rate. Projections
           are labelled projections; gaps in calculated activity stay visible.
         </p>
-        <Link
-          href="/activity"
-          className="mt-6 inline-block font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          Review activity data
-        </Link>
-
         <section className="mt-16" aria-labelledby="create-target-heading">
           <h2 id="create-target-heading" className="font-sans text-[28px] leading-8 font-bold">
             Set a target

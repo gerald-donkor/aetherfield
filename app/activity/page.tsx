@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { EmissionsSummary } from "../_components/activity/emissions-summary";
 import { ActivityUploadForm } from "../_components/activity/upload-form";
 import { SiteFooter, SiteNav } from "../_components/chrome";
+import { WorkspaceNav } from "../_components/workspace-nav";
 import { requireOrganization } from "../../lib/auth/organization";
 import {
   ACTIVITY_PAGE_SIZE,
@@ -83,6 +84,7 @@ export default async function ActivityPage({
     <>
       <SiteNav />
       <main className="mx-auto min-h-[720px] w-full max-w-page px-5 py-16 md:py-24 lg:px-6">
+        <WorkspaceNav current="activity" />
         <p className="font-mono text-caption text-muted">ACTIVITY DATA</p>
         <h1 className="mt-6 max-w-[880px] font-serif text-[48px] leading-[0.98] text-balance md:text-[64px]">
           Bring your activity data in, one file at a time.
@@ -94,13 +96,6 @@ export default async function ActivityPage({
           {recordCount.toLocaleString("en-GB")}{" "}
           {recordCount === 1 ? "activity record" : "activity records"}.
         </p>
-        <Link
-          href="/targets"
-          className="mt-6 inline-block font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          Set and review targets
-        </Link>
-
         <section className="mt-16" aria-labelledby="activity-upload-heading">
           <h2
             id="activity-upload-heading"
