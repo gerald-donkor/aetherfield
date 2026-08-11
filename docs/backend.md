@@ -3673,6 +3673,414 @@ at all.
 | a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
 
+## Step 14 — scheduled recalculation and threshold alerts
+
+Built from `prompts/62-scheduled-recalculation-and-threshold-alerts.md`. **The
+last row of AGENTS.md §5.2.** A nightly Vercel cron recalculates every
+organisation's emissions through the same seam the workspace button uses, reads
+each active target against the run-rate projection, and emails the
+organisation's owners once per crossing.
+
+Two halves, one invocation. Recalculation exists so a tenant's totals are not
+stale until somebody remembers to press the button
+`app/_components/activity/recalculate-control.tsx` renders; alerts exist so a
+target that has drifted is something a company is told about rather than
+something it discovers at filing time.
+
+**No AI, anywhere on this path.** Step 14 has no sanctioned surface (§5.3), and
+every figure in the email is computed by `lib/domain/` and passed in.
+
+### Decisions taken with the user before the prompt was written
+
+| decision | chosen | rejected |
+| --- | --- | --- |
+| what raises an alert | target drift only — the signed `readingAgainstTarget` against an active target | month-over-month spike (a single month is noisy and seasonal); a stale-data alert |
+| where the threshold lives | one fixed constant in `lib/domain/`, recorded as a judgement | a per-organisation column with a settings UI |
+| recipients, and the off switch | organisation **owners** only, with a per-member opt-out honoured server-side | all members; owners with no opt-out |
+
+### The platform constraint, measured
+
+**The team is on the Hobby plan** — `vercel api /v2/teams/dgsloxx417s-projects`
+reports `billing.plan = hobby`. Vercel's pricing page states for Hobby: minimum
+interval **once per day**, scheduling precision **per-hour (±59 min)**, and that
+a finer expression such as `0 * * * *` **fails deployment**.
+
+So `vercel.json` carries `"schedule": "0 2 * * *"` and the implementation
+assumes nothing about landing at 02:00 — Hobby triggers anywhere in the hour,
+always UTC, with no timezone configuration. `maxDuration` is **300**, the Hobby
+ceiling.
+
+Two further facts relied on rather than recalled: Vercel makes an HTTP **`GET`**
+to the production deployment URL at the configured path, so the handler exports
+`GET` and nothing else; and the `vercel-cron/1.0` user agent and
+`x-vercel-cron-schedule` header are **not authentication** — both are
+attacker-supplied on a direct request, and nothing gates on them.
+
+**`vercel.json`, not `vercel.ts`.** The `vercel-functions` skill documents the
+`crons` and `functions` keys in `vercel.json` and it needs no new dependency;
+`vercel.ts` would add `@vercel/config` for no gain here. Recorded so a later
+session does not re-litigate it. This is the **first `vercel.json` in the
+repository**, and the build confirms it changes no route's render mode.
+
+### One recalculation seam, shared
+
+`recalculateOrganization(organizationId, importId)` in
+`lib/db/emission-queries.ts` now holds the whole orchestration — seed defaults,
+read records and mappings, `buildFactorResolver`, `aggregate`, `toStoredKgCo2e`,
+`replaceEmissions` — and returns `{ records, written }`.
+`app/activity/actions.ts`'s `recalculate` calls it, and so does the sweep.
+**Two implementations of what a recalculation is would be two definitions of a
+disclosure figure.** The `NOTHING_TO_CALCULATE` branch stays in the action, keyed
+off a zero record count: what to say to a person is the surface's business.
+
+A query module composing a pure domain function is the established idiom here,
+not a new smear — `readTargetEvidence` and `readDashboardEvidence` already do it.
+`lib/domain/` keeps no database handle. The action's behaviour is unchanged, and
+`replaceEmissions` keeps its delete-then-insert semantics bounded by the covered
+record set.
+
+### The assessment composition, factored out
+
+`buildTargetEvidence` in `lib/domain/reports.ts` used to restate the chain
+`targetFigure` → `projectTargetYear` → `readingAgainstTarget` with the bare
+literals `3` and `1`. It now calls **`assessTarget` in `lib/domain/targets.ts`**,
+and so does the alert evaluator. The scales are named constants in one place:
+
+```
+PROJECTION_SCALE = 3
+READING_SCALE    = 1
+ASSESSMENT_MODE  = "half-even"
+```
+
+An alert and a report disagreeing about the same target's reading would be the
+worst failure the pair can have — one number in a filed disclosure, a different
+one in the email. Sharing the function is what makes that impossible. The
+refactor is behaviour-preserving: `npm test` went from 156 to 170 passing with
+`reports.test.ts` unchanged.
+
+`ProjectionBasis` also moved its members to `lib/validation/targets.ts` as
+`PROJECTION_BASES`, because a column now stores it and `schema.ts` must build a
+`pgEnum` from the constant rather than restate the union (§9.2 rule 2).
+
+### The evaluator — `lib/domain/alerts.ts`
+
+Pure: no database handle, no `fetch`, `asOf` as a parameter. It takes an
+organisation's targets, its emissions and its open alerts, and returns
+`{ raise, resolve }`.
+
+- **Only `active` targets are evaluated.**
+- **The comparison is strictly greater than**, so a reading of exactly the
+  threshold is not a crossing and an open alert resolves when the reading returns
+  to at-or-below it.
+- **No hysteresis band**, and the reason is stated rather than implicit: the data
+  changes on import, not continuously, and the sweep runs once a day, so flapping
+  needs a committed import in each direction on successive days. Observed
+  flapping would be a measured reason to add a band later.
+- **Every refusal produces no alert — never a zero and never an alert.** All four
+  of step 11's refusals pass through: fewer than 12 complete months, an elapsed
+  target year, a zero target figure, and a non-active target.
+- **A refusal is not a resolution either.** An open alert whose target can no
+  longer be read is left open, because resolving would assert that the gap
+  closed and nothing knows that. Same for a retired target: retiring is a human
+  decision about a commitment, not evidence the projection improved, and the row
+  is the record of a crossing that did happen.
+- **A flat-basis projection does raise**, and `basis` and `completeMonths`
+  travel with the alert and are rendered in the email — a flat projection and a
+  trending one are different claims about the future.
+
+14 cases in `lib/domain/alerts.test.ts`, picked up by `npm test`.
+
+### The threshold — a judgement, said to be one
+
+```
+ALERT_THRESHOLD_PERCENT = 10
+```
+
+**This is a judgement, not a measurement** (§12 rule 4). No recording, comp or
+dataset was fit to produce it. The reasoning: the projection is a linear
+two-window run rate whose own uncertainty is not quantified anywhere in this
+codebase, so a threshold below roughly ten per cent would alert on movement the
+method cannot distinguish from noise. `home/dashboard.tsx`'s illustrative "16%
+off your 2027 emissions goal" sits above it, which is the intent the marketing
+mock states. It is a `Decimal`, because it is compared on the value path.
+
+### The two tables
+
+Migration **`0008_unique_mystique.sql`**. It creates two enums, two tables,
+their foreign keys and their indexes; **no existing table is altered.**
+
+`target_alert` — one row per crossing, strictly tenant-scoped with a `not null`
+`organization_id` (§9.2 rule 6's reference-data exception covers
+`emission_factor_set` and `emission_factor` only; an alert is a customer's own
+data). Status enum `target_alert_status` is `raised` → `notified` → `resolved`,
+with `created_at`, `notified_at`, `resolved_at` and `deleted_at` — a timestamp
+per transition, not just a current-state column (§9.2 rule 3).
+
+**The figures in force at the moment of raising are stored on the row**, so a
+later change to the constant cannot rewrite what a company was told and when.
+Nothing is recomputed on read. The local exercise below confirms it: after the
+target was widened and the alert resolved, the row still carried `2388.2` and a
+`20000.000` target figure.
+
+#### Numeric precision, derived
+
+| column | type | derivation |
+| --- | --- | --- |
+| `target_kg_co2e` | `numeric(20, 3)` | its source: `emission_target.baseline_kg_co2e` is exactly that, and a target figure is the baseline scaled by a percentage, so it cannot be wider |
+| `threshold_percent` | `numeric(6, 3)` | the same quantity and range as `emission_target.reduction_percent` — `(0, 100]` to three places, so `100.000` is the widest |
+| `reading_percent` | **unbounded `numeric`** | a quotient: widest storable projection over smallest non-zero target figure. A 0.001 tCO2e baseline at 99.999% gives a 1e-5 kg figure, and `activity_emission.kg_co2e` is `numeric(50, 24)`, so the true ceiling is past 1e54 — not a bound worth a constraint. The value is rounded to one place by `lib/domain/` before the write, so the scale is enforced where the arithmetic is |
+| `projected_kg_co2e` | **unbounded `numeric`** | a sum over `numeric(50, 24)` rows, which has no finite bound in the number of rows. Rounded once at `PROJECTION_SCALE` before it arrives |
+
+**Dedupe is one open alert per target, in the database:**
+
+```sql
+CREATE UNIQUE INDEX "target_alert_open_key" ON "target_alert" (target_id)
+  WHERE status <> 'resolved' AND deleted_at IS NULL;
+```
+
+A partial unique index rather than a read-then-write, for the same concurrency
+reason `retireTarget` puts its status predicate in the `WHERE`: two sweeps at
+once would both read "no open alert" and both insert. `raiseAlerts` uses
+`onConflictDoNothing` and returns only the rows actually written, so exactly one
+set of emails is sent per crossing. Resolved rows are excluded, so a target that
+drifts again after resolving raises a second alert — exercised below.
+
+`alert_preference` — the opt-out. Unique on `(organization_id, user_id)`,
+`email_alerts boolean not null default true`, `created_at` and `updated_at`.
+**A row's absence means opted in**, so nothing needs backfilling. **It is a
+separate table and must stay one**: §9.1 forbids adding columns to Better Auth's
+generated tables, and `member` — the natural home for this column — is one of
+them. `lib/db/auth-schema.ts` is untouched.
+
+`lib/db/alert-queries.ts` carries `import "server-only"`, every function takes
+`organizationId` and predicates on it, and the tenant predicate is written once
+in `visible()`.
+
+### The one query that is not tenant-scoped, and why that is the rule working
+
+`listAllOrganizationIds()` in `lib/db/organization-queries.ts` is the only read
+in this codebase not scoped to one tenant. **That is not a violation of §9.2
+rule 6; it is what makes obeying it possible here.** The sweep has no session and
+no request to derive a tenant from, so it derives the whole set server-side and
+then runs the ordinary tenant-predicated queries once per id. The alternative —
+accepting an organisation id from the request — is precisely the failure rule 6
+exists to prevent. Its only caller is the cron handler.
+
+### The endpoint
+
+`app/api/cron/recalculate/route.ts`, exporting `GET` only, with the sweep in a
+sibling `sweep.ts` so the handler stays what §6.2 requires: authenticate, call,
+answer.
+
+**A Route Handler is correct here and is not a §6.2 violation** — §6.2 names
+"cron endpoints" among the external callers handlers exist for, and the caller is
+Vercel's scheduler, not this application.
+
+| stage | what happens |
+| --- | --- |
+| a. BotID | **deliberately absent**, and for a stronger reason than the authenticated-path one `stageImport` records: the caller is not a browser, `instrumentation-client.ts` protects page paths rather than API routes, and §7.3 records that a path missing from that list makes the server call **fail** rather than pass |
+| b. authenticate | `authorization` must equal `Bearer ${CRON_SECRET}`, compared with `timingSafeEqual` over equal-length buffers with the length checked first. **An unset `CRON_SECRET` fails closed.** Anything else is `401`, empty body, no detail, nothing logged |
+| b2. rate limit | `checkCronSweepLimit()`, keyed on a constant, **failing open** — the inverted stance `app/api/newsletter/unsubscribe/route.ts` documents, for the same class of reason: refusing the nightly job because Redis is unreachable is worse than letting an idempotent sweep run unmetered during an outage |
+| c–f | the sweep |
+
+**The rate limit of 6 per hour is a judgement, not a measurement**, on the same
+footing as every window in `lib/rate-limit/index.ts`. It is deliberately loose
+against a once-daily schedule: Hobby's precision is ±59 minutes, a deploy can
+retrigger the job, and the sweep is idempotent. It exists so a leaked secret
+cannot drive repeated full-tenant sweeps, not to shape traffic. The `/account`
+preference limiter is **30 per hour keyed by user id**, also a judgement.
+
+The response body is counts only — organisations, recalculated, alerts raised,
+alerts resolved, alerts notified, failures. **No tenant identifier, no
+organisation name, no address and no figure** (§8.3 rule 2 as extended to
+commercial data by §5.3); this body lands in Vercel's function logs.
+
+### The sweep
+
+One `asOf` for the whole run, so two organisations evaluated a second apart
+cannot land on different months. Per organisation: recalculate through the shared
+seam (zero records is skipped, not failed), read targets, open alerts and
+evidence, evaluate, resolve, raise, then email each newly raised alert to the
+owners who have not opted out.
+
+**One organisation's failure must not end the sweep.** Each is wrapped, the
+error is counted, and the loop continues; nothing about which tenant failed
+reaches the response or the console.
+
+**`notified` only when a message actually left.** A total send failure leaves the
+row at `raised` so the next sweep retries — which is why the status is a state
+rather than a boolean, and why a failed email cannot be mistaken for a delivered
+one. A failed email never fails the sweep (§10 rule 4).
+
+**Scale boundary, stated rather than pre-optimised.** The sweep is sequential and
+reads each organisation's full calculated set into memory — the same boundary
+`readTargetEvidence` and `readDashboardEvidence` already document. Revisiting
+sequencing and pagination is a future judgement against real tenant volume, not
+something to guess at now.
+
+### The email
+
+`lib/email/templates/target-alert.tsx` on the existing `Shell`, sent by
+`lib/email/alerts.ts` in the best-effort shape of `lib/email/newsletter.ts`.
+
+**Transactional, not marketing, and that has a consequence.** Per
+`email-best-practices`'s `references/email-types.md` it reports on the service
+the recipient's organisation contracted for, is non-promotional, and is sent
+under contract fulfilment rather than consent. So it carries **no
+`List-Unsubscribe` header** — that passthrough exists for the newsletter's bulk
+message, and the same skill warns against the transactional/marketing hybrid.
+The off switch is the in-app preference, and the footer links to it in plain
+words.
+
+**The idempotency key is `target-alert/<alert-id>-<sha256(address) prefix>`.**
+Step 3's format is `<event-type>/<entity-id>`, and the recipient had to become
+part of the entity: an organisation with two owners sends two messages for one
+crossing with the same key but different payloads, which Resend answers with a
+**409**, so the second owner would never be told. The address is hashed rather
+than embedded — the key is a value we construct and log around, and §8.3 rule 2
+keeps addresses out of everything but the table that owns them.
+
+Figures are converted from stored kgCO2e to tCO2e at `REPORT_TONNES_DECIMALS`,
+so a company never sees the same quantity at two precisions. An unreadable stored
+figure means the message is **not sent at all** rather than sent with a number
+nobody can stand behind.
+
+### The off switch
+
+`/account` gains a `TARGET ALERTS` section rendering
+`app/_components/alerts/alert-preference-control.tsx` — a client leaf,
+component-only, built from the existing `Button` primitive, no GSAP, no new
+primitive. It posts to `setAlertEmailPreference` in `app/account/actions.ts`,
+which follows §10 unchanged: no BotID on an authenticated path, session and
+tenant, user-keyed limit failing closed, `safeParse` with
+`alertPreferenceSchema`, tenant-predicated write, `revalidatePath`, typed result,
+**no redirect on success**.
+
+The action takes **no user id and no organisation id from the browser** — only
+`{ emailAlerts: boolean }`. Turning alerts off is not enforcement by absence: the
+sweep re-reads the preference in `listAlertRecipients`'s own SQL predicate every
+night, as a `LEFT JOIN` with `is null or is true` so an organisation whose
+members never touched the setting stays reachable.
+
+**Aetherfield's `staff` and `admin` roles grant nothing here** (§11.1). The only
+thing that puts an address on the recipient list is a `member` row with
+`role = 'owner'`.
+
+### Secrets and data
+
+`CRON_SECRET` is **new, generated locally (64 base64 characters) and not
+auto-provisioned** — Vercel does not set it. Added with `vercel env add` to
+production, preview and development, and the name read back from
+`vercel env ls`. Sensitive on production and preview; **the CLI refuses
+`--sensitive` on development** (`sensitive_not_allowed_on_development`), so it is
+stored non-sensitive there. The value was never echoed. `.env.example` gained the
+name only.
+
+**No `NEXT_PUBLIC_*` was added** — phase two still has none.
+
+Personal data: the alert email goes to a `user.email` already held for an
+authenticated account. No address, organisation name, target name or figure is
+logged — not in the response body, not in a catch, not in the send helper.
+Nothing reaches a third party but Resend.
+
+**Retention.** A resolved alert is **retained** as the record of what the
+workspace told a customer and when. `deleted_at` is available for an erasure
+request, and every read filters on it.
+
+### Two inherited blockers, reported rather than routed around
+
+1. **The alert email cannot reach an arbitrary customer yet.**
+   `lib/email/config.ts` sends `from onboarding@resend.dev`, Resend's sandbox
+   sender, which delivers only to the Resend account's own address and 403s every
+   other recipient. That is the same unclosed prerequisite step 3 recorded, and it
+   now bites a **customer-facing** message rather than an internal one. In the
+   local exercise below the message did leave, because the seeded owner is the
+   Resend account's own address — which is exactly the boundary of what works.
+2. **One line in `lib/email/config.ts` was stale and is corrected in this
+   change** (§12 rule 8). Its docblock said Aetherfield had "no deployment and no
+   assigned production domain". The deployment half is no longer true —
+   `vercel project ls` reports `aetherfield` at
+   `https://aetherfield-rho.vercel.app`. The **domain** half remains true and
+   remains the actual blocker: a `*.vercel.app` URL is not a domain SPF, DKIM and
+   DMARC can be published on. The sentence now says exactly that.
+
+### Prerender impact — verified, not assumed
+
+`npm run build` route table: `/`, `/about`, `/careers`, `/design-system` and
+`/journal` remain `○ Static`; `/article/[slug]` ×6 and `/job-listing/[slug]` ×3
+remain `● SSG`. `/account` remains `ƒ` — its render mode did not change.
+`/api/cron/recalculate` is new and `ƒ`.
+
+The prerendered-HTML diff per `docs/automation.md`, both sides excluding
+`.claude/` and `.agents/` and normalising `BUILD_ID` plus both content-hashed
+chunk patterns: **21 files each side, 0 differing.** The CSS chunk is
+**66,990 bytes on both sides with 0 added and 0 removed rules**, so no Tailwind
+utility leaked out of the new prose.
+
+Because the HTML is byte-identical, the standing masking warning about `/`,
+`/journal` and `/careers` did not arise — no image comparison was needed or
+quoted.
+
+`proxy.ts`'s matcher is **unchanged and was not widened**; `/api/cron/*` is
+deliberately not in it, since an auth redirect in front of the cron path would
+break the scheduler. The `401` in the exercise below arrived from the handler
+rather than as a redirect to `/sign-in`, which is the confirmation.
+
+### What was exercised locally, and what could not be
+
+**Vercel does not run cron schedules locally**, so the schedule itself is only
+confirmable after a deploy. It has not been exercised.
+
+Against `npm run dev` with a seeded organisation (24 months of electricity
+records, an active scope-2 target the run rate misses):
+
+| check | result |
+| --- | --- |
+| no `authorization` header | `401`, 0 bytes |
+| wrong secret | `401`, 0 bytes |
+| correct secret, empty tenant | `200`, `{"organizations":1,"recalculated":0,…}` |
+| first sweep with fixture | `alertsRaised: 1`, `alertsNotified: 1`; row `notified`, `basis: trend`, `complete_months: 24`, `window_end: 2026-07`, `reading_percent: 2388.2` |
+| second sweep, unchanged | `alertsRaised: 0` and still **one** row — the partial unique index holds |
+| target widened so the projection sits **above** it by 25.7% | `alertsResolved: 0` — correctly *not* resolved, since 25.7% is still past the threshold |
+| target widened far past the projection | `alertsResolved: 1`; row `resolved`, and its stored figures **unchanged** |
+| owner opted out, target tightened again | `alertsRaised: 1`, `alertsNotified: 0` — no send attempted, row stays `raised`, and a second row was written because the first had resolved |
+
+**Not exercised:** the `/account` toggle was not driven in a browser. The
+preference's *effect* was verified by writing `alert_preference` directly and
+observing the sweep skip the send; the control and its action are typechecked and
+call the query that was verified, but the UI path itself is unconfirmed.
+
+The fixture was removed afterwards; the database carries no step-14 test data.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **8 files, 170 tests passed** (was 7/156) |
+| `npm run build` | compiled, route table as above |
+| prerender diff | 21/21 identical, CSS 0 rules changed |
+| `npm run db:generate` / `db:migrate` | `0008_unique_mystique.sql` generated and applied |
+| `npm run test:e2e` | Chromium + Firefox **10 passed (52.8s)**; **WebKit did not run** — the pinned rootless Podman container needs `podman`, which is not installed on this machine. A pre-existing environment gap, not a change from this step |
+
+### What step 14 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| per-organisation configurable thresholds, a settings UI | decided with the user: one constant, recorded as a judgement. A settings surface is its own prompt |
+| month-over-month spike alerts, or a stale-data alert | decided with the user: target drift only |
+| alerts to all members, or to `staff` / `admin` | owners only; staff status stays orthogonal to membership (§11) |
+| an in-app alert surface, a notification centre, Slack or webhooks | a step-14 alert is an email; anything else is a new surface |
+| a finer-than-daily schedule, a second cron job, or a queue | Hobby is capped at once per day, measured above |
+| any AI — no model, no prompt, no provider | §5.3: step 14 has no sanctioned AI surface at all |
+| scheduled *report* generation | step 13 shipped reviewed drafts on purpose; nothing auto-publishes |
+| changing the emissions engine, factor mappings, or any target formula | steps 10–12 own those definitions; this step consumes them |
+| a hysteresis band on the threshold | no flapping has been observed; a band without one would be a guessed number |
+| widening `proxy.ts`'s matcher, or touching any marketing markup | §8.1 and the front matter's settled surfaces |
+| a new primitive, a second design system, or GSAP | §7.5 |
+| adding a column to any Better Auth generated table | §9.1 |
+
 ## Step 13 — ESG report generation and export
 
 Built from `prompts/61-esg-report-generation-and-export.md`. This is the

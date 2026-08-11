@@ -82,6 +82,32 @@ export async function listMembershipsForUser(
 }
 
 /**
+ * Every organisation's id, oldest first — build step 14's nightly sweep, and
+ * the **only** read in this codebase that is not scoped to one tenant.
+ *
+ * **That is not a violation of AGENTS.md 9.2 rule 6; it is what makes obeying it
+ * possible here.** Rule 6 requires every query on a tenant table to filter on an
+ * organisation id. The sweep has no session and no request to derive one from,
+ * so it derives the whole set server-side and then runs the ordinary
+ * tenant-predicated queries once per id. The alternative — accepting an
+ * organisation id from the request — is the failure the rule exists to prevent.
+ *
+ * **Its only caller is the cron handler**, which is authenticated by
+ * `CRON_SECRET` and reachable by nothing else. Nothing in the authenticated UI
+ * may call this: a person's access is always a membership row.
+ *
+ * Ordered stably so a sweep interrupted partway resumes over the same sequence
+ * the next night rather than a reshuffled one.
+ */
+export async function listAllOrganizationIds(): Promise<string[]> {
+  const rows = await getDb()
+    .select({ id: organization.id })
+    .from(organization)
+    .orderBy(asc(organization.createdAt), asc(organization.id));
+  return rows.map((row) => row.id);
+}
+
+/**
  * Slug lookup, for the create form's uniqueness feedback.
  *
  * The database's `organization_slug_unique` constraint is the actual guarantee;

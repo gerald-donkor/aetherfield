@@ -893,6 +893,39 @@ import { Client } from "pg";
 **Always read the schema back from `information_schema` after a migration on
 this machine. A clean exit is not evidence.**
 
+## Three source files are `data` to `file(1)`, and `grep` skips them silently
+
+`grep` finds **nothing** in `lib/db/emission-queries.ts` or
+`lib/domain/emissions.ts` and prints no warning, because both contain literal
+`NUL` bytes and `grep` treats a file with one as binary. `file` reports them as
+`data` rather than TypeScript, which is the tell.
+
+The bytes are deliberate: they are the composite map-key separator in the factor
+resolver — `` `${mapping.category}\0${mapping.unit}` `` — chosen so no category
+or unit string can collide by containing the separator. **Do not "fix" them.**
+
+Verified this session, so the count is measured rather than assumed:
+
+| file | `NUL` bytes | where |
+| --- | --- | --- |
+| `lib/db/emission-queries.ts` | 2 | `buildFactorResolver`'s `byPair.set` and `byPair.get` |
+| `lib/domain/emissions.ts` | 1 | `aggregate`'s `const key` |
+
+**`grep -a` is the workaround**, on every search that might touch `lib/db/` or
+`lib/domain/`. To find the offenders after an edit:
+
+```bash
+python3 -c "
+import sys
+for f in sys.argv[1:]:
+    b=open(f,'rb').read()
+    n=b.count(0)
+    if n: print(f, n)
+" $(git ls-files '*.ts' '*.tsx')
+```
+
+This cost time in two separate sessions.
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

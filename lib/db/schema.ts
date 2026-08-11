@@ -32,8 +32,10 @@ import {
   SCOPE2_METHODS,
   SCOPE3_CATEGORIES,
 } from "../validation/emissions";
+import { TARGET_ALERT_STATUSES } from "../validation/alerts";
 import { REPORT_NARRATIVE_STATUSES } from "../validation/reports";
 import {
+  PROJECTION_BASES,
   TARGET_BASELINE_SOURCES,
   TARGET_COVERAGES,
   TARGET_STATUSES,
@@ -1055,6 +1057,202 @@ export const report = pgTable(
     index("report_organization_id_idx").on(t.organizationId, t.id),
   ],
 );
+
+/* -------------------------------------------------------------------------- */
+/*  Phase two — scheduled recalculation and threshold alerts (build step 14)    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The two enums this step adds, **built from `lib/validation/` rather than
+ * restated** — the arrangement the sixteen enums above already use, and for the
+ * same bundling reason (AGENTS.md 9.2 rule 2).
+ */
+export const targetAlertStatus = pgEnum("target_alert_status", [
+  ...TARGET_ALERT_STATUSES,
+]);
+
+export const projectionBasis = pgEnum("projection_basis", [
+  ...PROJECTION_BASES,
+]);
+
+/**
+ * One crossing of the alert threshold, for one target.
+ *
+ * **Strictly tenant-scoped, `not null`.** §9.2 rule 6's reference-data exception
+ * covers a third party's *published* dataset — `emission_factor_set` and
+ * `emission_factor`, and nothing else. An alert is a customer's own data about
+ * its own commitment, so the rule applies unchanged and every query in
+ * `alert-queries.ts` filters on `organization_id`.
+ *
+ * **The figures that produced it are stored on the row, including the threshold
+ * in force at the time.** A later change to `ALERT_THRESHOLD_PERCENT` must not
+ * rewrite what a company was told and when — the row is the record of a message
+ * that was sent, not a view over today's constant. It is the same reasoning
+ * `report.evidence` records for a disclosure and `emission_target`'s stored
+ * baseline records for a commitment.
+ *
+ * **Nothing here is recomputed on read.** The email and any later surface render
+ * these columns; re-deriving them would make "what did we tell them"
+ * unanswerable, and would silently change an old alert when a new import lands.
+ */
+export const targetAlert = pgTable(
+  "target_alert",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    targetId: uuid("target_id")
+      .notNull()
+      .references(() => emissionTarget.id, { onDelete: "cascade" }),
+
+    /**
+     * The signed reading, as a percentage, at `READING_SCALE` (one place).
+     *
+     * **Unbounded `numeric`, and the bound is why.** This is a quotient: the
+     * widest storable projection over the smallest non-zero target figure. A
+     * baseline of 0.001 tCO2e with a 99.999% reduction gives a target figure of
+     * 1e-5 kg, and `activity_emission.kg_co2e` is `numeric(50, 24)`, so the
+     * ratio's true ceiling is past 1e54 — not a number a column constraint
+     * should carry, and not one that would ever be reached. The value written is
+     * always rounded to one place by `lib/domain/`, so the scale is enforced
+     * where the arithmetic is rather than by the column.
+     */
+    readingPercent: numeric("reading_percent").notNull(),
+
+    /**
+     * The run-rate projection for the target year, in kgCO2e.
+     *
+     * Unbounded for the same reason: it is a sum over
+     * `activity_emission.kg_co2e`, whose own `numeric(50, 24)` gives no finite
+     * bound to a sum of arbitrarily many rows. `lib/domain/targets.ts` rounds it
+     * once at `PROJECTION_SCALE` before it reaches this column.
+     */
+    projectedKgCo2e: numeric("projected_kg_co2e").notNull(),
+
+    /**
+     * The target figure the projection was read against, in kgCO2e.
+     *
+     * **`numeric(20, 3)`, derived from its source** — `emission_target`
+     * `.baseline_kg_co2e` carries exactly that, and a target figure is the
+     * baseline scaled by a percentage, so it cannot be wider. It is not
+     * unbounded like the two above precisely because its bound *is* known.
+     */
+    targetKgCo2e: numeric("target_kg_co2e", {
+      precision: 20,
+      scale: 3,
+    }).notNull(),
+
+    /**
+     * The threshold in force when this alert was raised, as a percentage.
+     *
+     * **`numeric(6, 3)`, derived from `emission_target.reduction_percent`** —
+     * the same quantity in the same range, `(0, 100]` to three places, so the
+     * widest value is `100.000`.
+     */
+    thresholdPercent: numeric("threshold_percent", {
+      precision: 6,
+      scale: 3,
+    }).notNull(),
+
+    /** Whether the projection carried a trend or was carried forward flat, and
+        how many complete months stood behind it. **Both are stored because both
+        are rendered**: a flat projection and a trending one are different claims
+        about the future (`ProjectionBasis`). */
+    basis: projectionBasis("basis").notNull(),
+    completeMonths: integer("complete_months").notNull(),
+    /** The last complete month behind the projection, `"YYYY-MM"`. Text, not a
+        date: it names a month, and `monthOf` produces exactly this shape without
+        ever constructing a `Date` (the timezone reasoning `activity_record`
+        records). */
+    windowEnd: text("window_end").notNull(),
+
+    status: targetAlertStatus("status").notNull().default("raised"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** A timestamp per transition, not just a current-state column (§9.2
+        rule 3). */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    /**
+     * **One open alert per target, enforced in the database.**
+     *
+     * A partial unique index rather than a read-then-write in application code,
+     * for the same concurrency reason `retireTarget` puts its status predicate
+     * in the `WHERE`: two sweeps running at once would both read "no open
+     * alert" and both insert. `resolved` and soft-deleted rows are excluded, so
+     * a target that drifts again after resolving can raise a second alert —
+     * which is the ordinary case, not an edge one.
+     */
+    uniqueIndex("target_alert_open_key")
+      .on(t.targetId)
+      .where(sql`${t.status} <> 'resolved' and ${t.deletedAt} is null`),
+    /** The sweep reads this organisation's open alerts, and any later surface
+        lists newest first. Tenant-first, so both are one index scan. */
+    index("target_alert_organization_status_idx").on(
+      t.organizationId,
+      t.status,
+    ),
+    index("target_alert_organization_created_at_idx").on(
+      t.organizationId,
+      t.createdAt,
+    ),
+  ],
+);
+
+/**
+ * Whether one account wants alert email for one organisation.
+ *
+ * **A row's absence means opted in**, so nothing needs backfilling and a new
+ * member is reachable from the moment they join. The row exists only once
+ * somebody has expressed a preference.
+ *
+ * **A separate table, and it must stay one.** §9.1 forbids adding columns to
+ * Better Auth's generated tables, and `member` is one of them — the natural
+ * place for this column is exactly the place the rule puts out of bounds.
+ *
+ * **Tenant-scoped**, because the preference is per organisation: an account that
+ * belongs to two customers may reasonably want alerts from one and not the
+ * other.
+ */
+export const alertPreference = pgTable(
+  "alert_preference",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    emailAlerts: boolean("email_alerts").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    /** One preference per account per organisation. The upsert in
+        `alert-queries.ts` targets this constraint by name. */
+    uniqueIndex("alert_preference_organization_user_key").on(
+      t.organizationId,
+      t.userId,
+    ),
+  ],
+);
+
+export type TargetAlert = typeof targetAlert.$inferSelect;
+export type NewTargetAlert = typeof targetAlert.$inferInsert;
+
+export type AlertPreference = typeof alertPreference.$inferSelect;
+export type NewAlertPreference = typeof alertPreference.$inferInsert;
 
 export type Report = typeof report.$inferSelect;
 export type NewReport = typeof report.$inferInsert;

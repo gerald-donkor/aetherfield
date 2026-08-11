@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { AlertPreferenceControl } from "../_components/alerts/alert-preference-control";
 import { SignOutButton } from "../_components/auth/sign-out-button";
 import { SiteFooter, SiteNav } from "../_components/chrome";
 import { CreateOrganizationForm } from "../_components/organization/create-organization-form";
 import { ButtonLink, MetaPair } from "../_components/primitives";
 import { getCurrentMembership } from "../../lib/auth/organization";
+import { getAlertPreference } from "../../lib/db/alert-queries";
 import { getCurrentAccount } from "../../lib/auth/server";
 
 const ORGANIZATION_ROLE_LABELS: Record<string, string> = {
@@ -23,6 +25,12 @@ export default async function AccountPage() {
   if (!account) redirect("/sign-in");
 
   const membership = await getCurrentMembership();
+
+  /* Only a member of an organisation has an alert preference to read, and only
+     Server Components fetch initial page data (AGENTS.md 6.2). */
+  const emailAlerts = membership
+    ? await getAlertPreference(membership.organization.id, account.user.id)
+    : true;
 
   return (
     <>
@@ -72,6 +80,18 @@ export default async function AccountPage() {
               </dl>
               <div className="mt-10">
                 <ButtonLink href="/dashboard">Open overview</ButtonLink>
+              </div>
+
+              {/* Build step 14's off switch. The preference is read
+                  server-side, per organisation; a missing row means on. */}
+              <div className="mt-20 md:mt-24">
+                <p className="font-mono text-caption text-muted">
+                  TARGET ALERTS
+                </p>
+                <AlertPreferenceControl
+                  className="mt-7"
+                  emailAlerts={emailAlerts}
+                />
               </div>
             </>
           ) : (

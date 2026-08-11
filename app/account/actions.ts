@@ -5,11 +5,19 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import * as z from "zod";
 
+import { getCurrentMembership } from "../../lib/auth/organization";
 import { getAuth, getCurrentAccount } from "../../lib/auth/server";
+import { setAlertPreference } from "../../lib/db/alert-queries";
 import {
+  checkAlertPreferenceLimit,
   checkOrganizationCreateLimit,
   formatRetry,
 } from "../../lib/rate-limit";
+import {
+  ALERT_PREFERENCE_ERRORS,
+  alertPreferenceSchema,
+  type AlertPreferenceResult,
+} from "../../lib/validation/alerts";
 import {
   type CreateOrganizationField,
   createOrganizationSchema,
@@ -154,6 +162,85 @@ export async function createOrganization(
      `/account` renders the account's organisation and role, and the row it
      reads has just changed. **No redirect** (10 rule 5) — the page swaps to its
      new state in place, and the leaf renders this result. */
+  revalidatePath("/account");
+  return { ok: true };
+}
+
+/**
+ * Turn alert email on or off for this account, in its current organisation —
+ * build step 14.
+ *
+ * **The same stage order as `createOrganization` above it**, in AGENTS.md 10's
+ * letters: no BotID on an authenticated path, session and tenant, then the rate
+ * limit keyed by user id and failing closed, then `safeParse` with the shared
+ * schema, then a tenant-predicated write, then `revalidatePath`, then a typed
+ * result. **No redirect on success** (10 rule 5).
+ *
+ * **It writes only the calling account's own row**, and takes no user id and no
+ * organisation id from the browser — both are resolved server-side from the
+ * session and the membership. A tenant identifier accepted from a request is the
+ * whole multi-tenancy failure in one line.
+ *
+ * **Turning alerts off is not enforcement by absence.** The sweep re-reads this
+ * preference in `listAlertRecipients`'s own predicate, server-side, every night
+ * (AGENTS.md 11.2 rule 2 — hiding a control is presentation).
+ */
+export async function setAlertEmailPreference(
+  input: unknown,
+): Promise<AlertPreferenceResult> {
+  // -- a. BotID: absent on an authenticated path. See `createOrganization`. --
+
+  // -- b. Session and tenant, then the rate limit ---------------------------
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: ALERT_PREFERENCE_ERRORS.GENERIC };
+  }
+  if (!membership) {
+    /* Two ordinary states, told apart so the message is honest: signed out, or
+       signed in with no organisation to receive alerts about. */
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account
+        ? ALERT_PREFERENCE_ERRORS.NO_ORGANIZATION
+        : ALERT_PREFERENCE_ERRORS.SIGNED_OUT,
+    };
+  }
+
+  try {
+    const limit = await checkAlertPreferenceLimit(membership.account.user.id);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many changes. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    // Fails closed, as every authenticated path beside it does.
+    return { ok: false, error: ALERT_PREFERENCE_ERRORS.GENERIC };
+  }
+
+  // -- c. Parse, with the same schema the leaf ran --------------------------
+  const parsed = alertPreferenceSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: ALERT_PREFERENCE_ERRORS.INVALID };
+  }
+
+  // -- d/e. Authorise and write, predicated on the resolved tenant ----------
+  try {
+    await setAlertPreference(
+      membership.organization.id,
+      membership.account.user.id,
+      parsed.data.emailAlerts,
+    );
+  } catch {
+    return { ok: false, error: ALERT_PREFERENCE_ERRORS.GENERIC };
+  }
+
   revalidatePath("/account");
   return { ok: true };
 }

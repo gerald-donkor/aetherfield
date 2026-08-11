@@ -13,17 +13,9 @@ import {
   restageImport,
   type StagedRow,
 } from "../../lib/db/activity-queries";
-import {
-  buildFactorResolver,
-  listFactorMappings,
-  listRecordsForCalculation,
-  replaceEmissions,
-  seedDefaultMappings,
-} from "../../lib/db/emission-queries";
+import { recalculateOrganization } from "../../lib/db/emission-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
-import { DEFAULT_FACTOR_MAPPINGS } from "../../lib/domain/defra";
-import { aggregate, toStoredKgCo2e } from "../../lib/domain/emissions";
 import {
   recalculateInputSchema,
   type RecalculateResult,
@@ -488,9 +480,11 @@ export async function discardImport(
  * **No redirect on success** (AGENTS.md 10 rule 5).
  *
  * **All the arithmetic is in `lib/domain/`, which has no database handle.**
- * This function is the seam: it reads through `lib/db/emission-queries.ts`,
- * hands pure values to `aggregate()`, and writes the result back. No figure is
- * computed here and no SQL is written in `lib/domain/`.
+ * `recalculateOrganization` in `lib/db/emission-queries.ts` is the seam: it
+ * reads, hands pure values to `aggregate()`, and writes the result back. Build
+ * step 14 gave that seam a second caller — the nightly sweep — which is why it
+ * lives there rather than inline here. No figure is computed in this file and no
+ * SQL is written in `lib/domain/`.
  *
  * **Recalculating is not the same as reporting a total.** It replaces the
  * stored figures for exactly the records it covered, so a record whose mapping
@@ -518,43 +512,25 @@ export async function recalculate(
 
   const importId = parsed.data.importId;
 
-  // -- d. Authorise: every query below is predicated on the tenant -------
+  // -- d/e/f. Authorise, calculate and write -----------------------------
+  /* **The orchestration lives in `recalculateOrganization`**, and this action is
+     one of its two callers — build step 14's nightly sweep is the other. Two
+     implementations of what a recalculation is would be two definitions of a
+     disclosure figure, so the chain is stated once, in `lib/db/`, and both
+     callers share it. Every query inside it is predicated on the organisation
+     id resolved above; no figure is computed here and no SQL is written in
+     `lib/domain/`.
+
+     The `NOTHING_TO_CALCULATE` branch stays here, keyed off a zero record
+     count: what to say to a person is this surface's business, not the seam's. */
   try {
-    /* A new organisation starts with the default `(category, unit)` mappings so
-       its first import produces a total rather than a blank screen. It runs
-       only when the organisation has none — a reporter's own choice is never
-       overwritten (see `seedDefaultMappings`). */
-    await seedDefaultMappings(tenant.organizationId, DEFAULT_FACTOR_MAPPINGS);
-
-    const [records, mappings] = await Promise.all([
-      listRecordsForCalculation(tenant.organizationId, importId),
-      listFactorMappings(tenant.organizationId),
-    ]);
-
-    if (records.length === 0) {
+    const outcome = await recalculateOrganization(
+      tenant.organizationId,
+      importId,
+    );
+    if (outcome.records === 0) {
       return { ok: false, error: NOTHING_TO_CALCULATE };
     }
-
-    // -- e. The pure engine, over typed inputs --------------------------
-    const { emissions } = aggregate(records, buildFactorResolver(mappings));
-
-    // -- f. Write, scoped to the records this run covered ---------------
-    await replaceEmissions(
-      tenant.organizationId,
-      records.map((record) => record.id),
-      emissions.map((emission) => ({
-        activityRecordId: emission.recordId,
-        factorId: emission.factorId,
-        kgCo2e: toStoredKgCo2e(emission.kgCo2e),
-        scope: emission.scope,
-        scope3Category: emission.scope3Category,
-        scope2Method: emission.scope2Method,
-        gwpSet: emission.gwpSet,
-        biogenic: emission.biogenic,
-        outsideOfScopes: emission.outsideOfScopes,
-        engineVersion: emission.engineVersion,
-      })),
-    );
   } catch {
     return { ok: false, error: GENERIC_FAILURE };
   }

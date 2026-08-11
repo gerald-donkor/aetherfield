@@ -232,6 +232,43 @@ const REPORT_WRITE_WINDOW = "1 h" as const;
 const REPORT_NARRATIVE_LIMIT = 10;
 const REPORT_NARRATIVE_WINDOW = "1 h" as const;
 
+/**
+ * The `/account` alert-email preference, **keyed by user id** — build step 14.
+ *
+ * **A judgement, not a measurement**, like every window above it. The flow has
+ * never shipped, so there is nothing to fit against.
+ *
+ * **A named limiter rather than a reuse**, for the reason the target and report
+ * limiters each record: this bounds a one-row upsert a person toggles, and
+ * sharing a bucket with a heavier flow would let an afternoon's work exhaust the
+ * allowance for turning off an email. 30 an hour is deliberately loose — a
+ * person flipping a switch back and forth while deciding consumes one slot per
+ * flip, and that is honest use.
+ */
+const ALERT_PREFERENCE_LIMIT = 30;
+const ALERT_PREFERENCE_WINDOW = "1 h" as const;
+
+/**
+ * The nightly recalculation sweep, **keyed on a constant rather than an
+ * identifier** — build step 14.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), like every window
+ * above it. There is nothing to fit against: the endpoint has one legitimate
+ * caller and it calls once a day.
+ *
+ * **Not keyed by IP.** Vercel's scheduler calls from its own infrastructure and
+ * there is exactly one job, so an IP key would bound nothing an id key does not.
+ * The constant key bounds the *endpoint*, which is the thing that can be abused:
+ * a leaked `CRON_SECRET` driving repeated full-tenant sweeps.
+ *
+ * **Six an hour against a once-daily schedule** is deliberately loose: the Hobby
+ * plan's scheduling precision is ±59 minutes, a deploy can retrigger the job,
+ * and the sweep is idempotent, so refusing a legitimate second run would cost
+ * more than allowing it. This limiter is not traffic shaping.
+ */
+const CRON_SWEEP_LIMIT = 6;
+const CRON_SWEEP_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -481,6 +518,37 @@ export async function checkReportNarrativeLimit(
     REPORT_NARRATIVE_WINDOW,
     userId,
   );
+}
+
+/**
+ * The alert-email preference, keyed by the **user id**. Stage b of AGENTS.md 10.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkAlertPreferenceLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "alert-preference",
+    ALERT_PREFERENCE_LIMIT,
+    ALERT_PREFERENCE_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * The nightly sweep, keyed on a constant. See the constant's docblock for why it
+ * is not keyed by IP, and why the number is a judgement.
+ *
+ * **Its caller fails open**, which is the opposite of every authenticated
+ * action's stance and the same inversion `app/api/newsletter/unsubscribe`
+ * documents: refusing the nightly job because Redis is unreachable is worse than
+ * letting an idempotent sweep run unmetered during an outage. That decision
+ * belongs to the caller, so this function still just reports the outcome.
+ */
+export async function checkCronSweepLimit(): Promise<RateLimitOutcome> {
+  return consume("cron-sweep", CRON_SWEEP_LIMIT, CRON_SWEEP_WINDOW, "sweep");
 }
 
 async function consume(

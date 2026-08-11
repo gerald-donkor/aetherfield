@@ -62,8 +62,16 @@ import {
   subtract,
   sum,
 } from "./decimal";
-import type { ScopeTotals } from "./emissions";
-import type { TargetCoverage } from "../validation/targets";
+import {
+  monthOf,
+  totalsByPeriod,
+  type RecordEmission,
+  type ScopeTotals,
+} from "./emissions";
+import {
+  PROJECTION_BASES,
+  type TargetCoverage,
+} from "../validation/targets";
 
 const ONE_HUNDRED = decimal("100");
 const TWELVE = decimal("12");
@@ -214,7 +222,7 @@ export type MonthlyTotal = {
  * projection and a trending one are different claims about the future, and
  * showing them identically would present the weaker one as the stronger.
  */
-export type ProjectionBasis = "trend" | "flat";
+export type ProjectionBasis = (typeof PROJECTION_BASES)[number];
 
 export type Projection = {
   /** The projected figure for the target year, at the declared scale. */
@@ -423,6 +431,91 @@ export function readingAgainstTarget(
     };
   }
   return { ok: true, percent: percent.value };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The whole assessment, composed once                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The scales the projection and the reading are declared at, **in one place**.
+ *
+ * Every function above takes its `scale` and `mode` as parameters with no
+ * defaults, deliberately, so the inexactness is visible at the call site. These
+ * constants do not weaken that: they are the *project's* declared answer for the
+ * one composition two modules share, named so the two cannot drift apart.
+ *
+ * **A report and an alert disagreeing about the same target's reading would be
+ * the worst failure either can have** — one number in a filed disclosure and a
+ * different one in the email telling a company it has drifted. Restating a bare
+ * `3` or a bare `1` in a second module is exactly how that happens, so the
+ * literals live here and nowhere else.
+ */
+export const PROJECTION_SCALE = 3;
+export const READING_SCALE = 1;
+export const ASSESSMENT_MODE: RoundingMode = "half-even";
+
+export type TargetAssessmentInput = {
+  coverage: TargetCoverage;
+  targetYear: number;
+  /** The stored `numeric` values, already parsed. Never a `Number`. */
+  baselineKgCo2e: Decimal;
+  reductionPercent: Decimal;
+  /** The organisation's stored emissions — **all of them**. The projection's
+      two 12-month windows need the full history, not one period's slice. */
+  emissions: readonly RecordEmission[];
+  /** One `YYYY-MM-DD` clock value, captured by the caller. This module reads
+      no clock. */
+  asOf: string;
+};
+
+export type TargetAssessment = {
+  /** `baseline × (100 − reduction%) ÷ 100` — exact, and never rounded. */
+  figure: Decimal;
+  projection: ProjectionResult;
+  /** `null` when the projection refused: there is nothing to read against the
+      target, and a reading of zero would be an invention. */
+  reading: ReadingResult | null;
+};
+
+/**
+ * `targetFigure` → `projectTargetYear` → `readingAgainstTarget`, at the declared
+ * scales, over one target's covered monthly totals.
+ *
+ * **This is the composition, and both callers use this function** — build
+ * step 13's `buildReportEvidence` and build step 14's alert evaluator. Neither
+ * restates the chain and neither restates a scale.
+ *
+ * Every refusal the three functions can return travels out untouched, as a
+ * typed value: a refusal is **not** a crossing, **not** a zero, and **not** an
+ * absent field. The caller decides how to say so — a report renders the
+ * sentence, an alert declines to raise — but neither may turn one into a
+ * number.
+ */
+export function assessTarget(input: TargetAssessmentInput): TargetAssessment {
+  const figure = targetFigure(input.baselineKgCo2e, input.reductionPercent);
+
+  const projection = projectTargetYear({
+    monthly: totalsByPeriod(input.emissions, monthOf).map((period) => ({
+      month: period.period,
+      kgCo2e: totalsForCoverage(period.totals, input.coverage),
+    })),
+    asOf: input.asOf,
+    targetYear: input.targetYear,
+    scale: PROJECTION_SCALE,
+    mode: ASSESSMENT_MODE,
+  });
+
+  const reading = projection.ok
+    ? readingAgainstTarget(
+        projection.projection.kgCo2e,
+        figure,
+        READING_SCALE,
+        ASSESSMENT_MODE,
+      )
+    : null;
+
+  return { figure, projection, reading };
 }
 
 /* -------------------------------------------------------------------------- */

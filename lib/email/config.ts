@@ -9,11 +9,21 @@ import "server-only";
 /**
  * **A development sender, and this is the step's one unclosed prerequisite.**
  *
- * Resend can only send `from` a domain it has verified, and Aetherfield has no
- * deployment and no assigned production domain (recorded at prompt 38, and
- * still true at prompt 43). `onboarding@resend.dev` is Resend's sandbox
- * sender: it is accepted without a domain, and it **delivers only to the
- * Resend account's own address**. Every other recipient is refused with a 403.
+ * Resend can only send `from` a domain it has verified, and **Aetherfield owns
+ * no domain Resend can verify.**
+ *
+ * That sentence is narrower than the one this docblock carried at prompts 38
+ * and 43, which said Aetherfield had "no deployment and no assigned production
+ * domain". **The deployment half is no longer true and is corrected here rather
+ * than left standing** (AGENTS.md 12 rule 8): `vercel project ls` reports
+ * `aetherfield` with the production URL `https://aetherfield-rho.vercel.app`.
+ * The domain half remains true and remains the actual blocker — a `*.vercel.app`
+ * URL is not a domain SPF, DKIM and DMARC can be published on.
+ *
+ * `onboarding@resend.dev` is Resend's sandbox sender: it is accepted without a
+ * domain, and it **delivers only to the Resend account's own address**. Every
+ * other recipient is refused with a 403. Build step 14's target alert is the
+ * first customer-facing message this bites rather than an internal one.
  *
  * So the internal notification below works end to end today, and the
  * requester's confirmation does not reach a requester until a domain is

@@ -114,6 +114,31 @@ export const TARGET_BASELINE_SOURCE_LABELS: Record<
   computed_at_creation: "Computed from activity data when the target was set",
 };
 
+/**
+ * What a run-rate projection stands on — build step 11's concept, moved here at
+ * step 14 because a column now stores it.
+ *
+ * `trend` — two 12-month windows, so the projection carries a direction.
+ * `flat` — 12 to 23 complete months, so the latest window is carried forward
+ * with no trend claimed.
+ *
+ * **It travels with the figure and every surface must render it**, which is the
+ * whole reason it is a stored column on `target_alert` rather than something the
+ * email recomputes: a flat projection and a trending one are different claims
+ * about the future, and showing them identically presents the weaker as the
+ * stronger. `lib/domain/targets.ts` derives its `ProjectionBasis` from this
+ * constant, so the union is declared exactly once (AGENTS.md 9.2 rule 2).
+ */
+export const PROJECTION_BASES = ["trend", "flat"] as const;
+
+export const PROJECTION_BASIS_LABELS: Record<
+  (typeof PROJECTION_BASES)[number],
+  string
+> = {
+  trend: "Trend of the last two 12-month windows",
+  flat: "Latest 12 months carried forward flat",
+};
+
 /* -------------------------------------------------------------------------- */
 /*  Bounds                                                                     */
 /* -------------------------------------------------------------------------- */

@@ -56,18 +56,11 @@ import { toFixed, type Decimal } from "./decimal";
 import { dashboardWindows } from "./dashboard";
 import {
   ENGINE_VERSION,
-  monthOf,
   toTonnes,
-  totalsByPeriod,
   totalsOf,
   type RecordEmission,
 } from "./emissions";
-import {
-  projectTargetYear,
-  readingAgainstTarget,
-  targetFigure,
-  totalsForCoverage,
-} from "./targets";
+import { assessTarget } from "./targets";
 
 /* -------------------------------------------------------------------------- */
 /*  The period                                                                 */
@@ -201,21 +194,19 @@ function buildTargetEvidence(
   emissions: readonly RecordEmission[],
   asOf: string,
 ): ReportTargetEvidence {
-  const figure = targetFigure(target.baselineKgCo2e, target.reductionPercent);
-  const projection = projectTargetYear({
-    monthly: totalsByPeriod(emissions, monthOf).map((period) => ({
-      month: period.period,
-      kgCo2e: totalsForCoverage(period.totals, target.coverage),
-    })),
-    asOf,
+  /* **The composition lives in `lib/domain/targets.ts` and is shared with build
+     step 14's alert evaluator** — including the scales, which are named
+     constants there rather than the bare `3` and `1` this call used to restate.
+     A report and an alert disagreeing about the same target's reading is the
+     failure that arrangement exists to make impossible. */
+  const { figure, projection, reading } = assessTarget({
+    coverage: target.coverage,
     targetYear: target.targetYear,
-    scale: 3,
-    mode: "half-even",
+    baselineKgCo2e: target.baselineKgCo2e,
+    reductionPercent: target.reductionPercent,
+    emissions,
+    asOf,
   });
-
-  const reading = projection.ok
-    ? readingAgainstTarget(projection.projection.kgCo2e, figure, 1, "half-even")
-    : null;
 
   return {
     name: target.name,

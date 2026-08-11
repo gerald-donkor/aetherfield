@@ -11,7 +11,13 @@ import {
   emissionFactorSet,
 } from "./schema";
 import type { ActivityCategory, ActivityUnit } from "../validation/activity";
-import type { ActivityInput, FactorInput } from "../domain/emissions";
+import { DEFAULT_FACTOR_MAPPINGS } from "../domain/defra";
+import {
+  aggregate,
+  toStoredKgCo2e,
+  type ActivityInput,
+  type FactorInput,
+} from "../domain/emissions";
 
 /**
  * Every read and write of the four factor and emission tables — build step 10.
@@ -338,6 +344,83 @@ export async function replaceEmissions(
 
     return { written: emissions.length };
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The recalculation seam                                                     */
+/* -------------------------------------------------------------------------- */
+
+export type RecalculationOutcome = {
+  /** Committed records the run covered. Zero means there was nothing to
+      calculate — a state the caller describes, not a failure this reports. */
+  records: number;
+  /** Computed emissions written for them. */
+  written: number;
+};
+
+/**
+ * One recalculation, from seeding the default mappings to writing the figures —
+ * **the definition of what a recalculation is, in one place.**
+ *
+ * Build step 10 inlined this orchestration in `app/activity/actions.ts`'s
+ * `recalculate`; build step 14 added a second caller, the nightly sweep in
+ * `app/api/cron/recalculate/route.ts`, and **two implementations would be two
+ * definitions of a disclosure figure**. So the action calls this and the cron
+ * calls this, and neither restates the chain.
+ *
+ * **A query module composing a pure domain function is the established idiom
+ * here, not a new smear**: `target-queries.ts`'s `readTargetEvidence` and
+ * `dashboard-queries.ts`'s `readDashboardEvidence` already compose a
+ * tenant-predicated read with `totalsByPeriod`. `lib/domain/` stays free of
+ * every database handle, which is the boundary AGENTS.md 6.2 actually names —
+ * `aggregate()` below is handed pure values and hands back pure values.
+ *
+ * **The behaviour is step 10's, unchanged.** `replaceEmissions` keeps its
+ * delete-then-insert semantics bounded by the covered record set, for the reason
+ * its own docblock records: a record whose mapping was removed must lose its
+ * figure rather than keep a stale one.
+ *
+ * @param importId `null` recalculates the whole organisation; an id scopes the
+ * run to one import. It is an additional predicate, never a replacement for the
+ * tenant one.
+ */
+export async function recalculateOrganization(
+  organizationId: string,
+  importId: string | null,
+): Promise<RecalculationOutcome> {
+  /* A new organisation starts with the default `(category, unit)` mappings so
+     its first calculation produces a total rather than a blank screen. It runs
+     only when the organisation has none — a reporter's own choice is never
+     overwritten (see `seedDefaultMappings`). */
+  await seedDefaultMappings(organizationId, DEFAULT_FACTOR_MAPPINGS);
+
+  const [records, mappings] = await Promise.all([
+    listRecordsForCalculation(organizationId, importId),
+    listFactorMappings(organizationId),
+  ]);
+
+  if (records.length === 0) return { records: 0, written: 0 };
+
+  const { emissions } = aggregate(records, buildFactorResolver(mappings));
+
+  const { written } = await replaceEmissions(
+    organizationId,
+    records.map((record) => record.id),
+    emissions.map((emission) => ({
+      activityRecordId: emission.recordId,
+      factorId: emission.factorId,
+      kgCo2e: toStoredKgCo2e(emission.kgCo2e),
+      scope: emission.scope,
+      scope3Category: emission.scope3Category,
+      scope2Method: emission.scope2Method,
+      gwpSet: emission.gwpSet,
+      biogenic: emission.biogenic,
+      outsideOfScopes: emission.outsideOfScopes,
+      engineVersion: emission.engineVersion,
+    })),
+  );
+
+  return { records: records.length, written };
 }
 
 /* -------------------------------------------------------------------------- */
