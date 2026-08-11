@@ -421,11 +421,23 @@ failure this product can have.
 
 ### Choosing a provider
 
-**Not now.** It is resolved at step 9 via §7.4, through the **`vercel:ai-sdk`**
-skill and AI Gateway — which is where model routing, fallback and cost tracking
-belong. Model IDs, prices and limits move fast enough that anything written here
-today would be wrong by then (§12, rule 7). **Do not install an AI SDK, name a
-model, or scaffold a prompt before step 9.**
+**Resolved at build step 13**, through **Vercel AI Gateway** and the **`ai`**
+package — which is where model routing, fallback and cost tracking belong.
+Authentication is the project's Vercel-managed OIDC token, so **no AI
+environment variable and no provider API key exists**; a direct provider SDK
+(`@ai-sdk/anthropic`, `openai`, …) stays out of bounds.
+
+This line previously predicted resolution at step 9 through the `vercel:ai-sdk`
+skill. Neither happened, and it is corrected here rather than left predicting
+something that did not occur (§12 rule 8): steps 9 and 10 shipped deterministic
+matchers and needed no model, and that skill is **not installed** in this
+environment — step 13 verified the APIs against live docs and `node_modules/`
+instead. **The chosen model, its price, the verification sources and their date
+live in `docs/backend.md`, step 13, not here** — model IDs and prices move fast
+enough that anything written in this file would go stale (§12 rule 7).
+
+**Nothing before step 13's sanctioned surfaces may call a model**, and §5.3's
+hard rule binds every one that does.
 
 ---
 

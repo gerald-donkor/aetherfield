@@ -3673,6 +3673,404 @@ at all.
 | a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
 
+## Step 13 — ESG report generation and export
+
+Built from `prompts/61-esg-report-generation-and-export.md`. This is the
+authenticated reporting workspace: a tenant builds an immutable snapshot of the
+latest 12 complete months from stored emissions, reviews it with its provenance
+and caveats, optionally has a **draft** narrative written over those already
+computed figures, and exports a deterministic HTML document.
+
+**This is the first and only AI in the product** (AGENTS.md §5.3, "sanctioned,
+not scheduled"). It is also the step where AGENTS.md §5.3's hard rule — *an LLM
+never produces a number that appears in a disclosure* — stops being a policy and
+becomes a mechanism. Read "The narrative allowlist" below before changing
+anything under `lib/domain/reports.ts` or `lib/reporting/`.
+
+### AI Gateway — verification, and one live blocker
+
+**Nothing here was recalled.** AGENTS.md §7.4 names `vercel:ai-sdk` as the skill
+that owns this decision and the Neon overview names `neon-ai-gateway`; **neither
+is installed in this environment** (`ls .agents/skills` shows no AI skill). The
+prompt's fallback was taken: current official docs were fetched during
+execution, and every API was then checked against `node_modules/`.
+
+| what | source | date |
+| --- | --- | --- |
+| authentication modes, `AI_GATEWAY_API_KEY`, OIDC fallback | `https://vercel.com/docs/ai-gateway/authentication-and-byok` | 11 Aug 2026 |
+| OIDC setup, 12-hour token life, `vercel env pull` refresh | `https://vercel.com/docs/ai-gateway/authentication-and-byok/oidc` | 11 Aug 2026 |
+| `generateText`, plain `creator/model` strings, install | `https://vercel.com/docs/ai-gateway/getting-started/text` | 11 Aug 2026 |
+| model/provider routing, `creator/model` format, model list API | `https://vercel.com/docs/ai-gateway/models-and-providers` | 11 Aug 2026 |
+| live model IDs and pricing | `https://ai-gateway.vercel.sh/v1/models` (no auth required) | 11 Aug 2026 |
+| `generateText` signature, `LanguageModel = GlobalProviderModelId \| …` | `node_modules/ai` **7.0.59** | 11 Aug 2026 |
+| OIDC fallback via `getVercelOidcToken()` from `@vercel/oidc` | `node_modules/@ai-sdk/gateway` **4.0.47** | 11 Aug 2026 |
+
+**The package is `ai` (7.0.59), added as a dependency.** `@ai-sdk/gateway` and
+`@vercel/oidc` arrive as its transitive dependencies; neither is imported
+directly, and **no provider SDK** (`@ai-sdk/anthropic`, `openai`, …) was
+installed. A plain string model routes through AI Gateway by the SDK's own
+default, which is the documented path.
+
+**No new environment variable, and none is expected.** `@ai-sdk/gateway` reads
+`AI_GATEWAY_API_KEY` and, when it is unset, falls back to
+`getVercelOidcToken()` — read from `node_modules/@ai-sdk/gateway/dist/index.js`,
+not assumed. `VERCEL_OIDC_TOKEN` is Vercel-managed, is already present in
+`.env.local` from `vercel env pull`, and is **not** added to `.env.example`.
+`.env.example` is unchanged by this step. The prompt required stopping to ask
+before introducing `AI_GATEWAY_API_KEY`; it was not needed and was not added.
+
+#### The model
+
+**`anthropic/claude-haiku-4.5`**, chosen 11 Aug 2026 from the gateway's live
+model list rather than from memory (AGENTS.md §12 rule 7). At that reading:
+**$1.00 per million input tokens, $5.00 per million output tokens, 200,000-token
+context**.
+
+**The choice is a judgement, not a measurement.** The task is bounded prose over
+a small, fully supplied evidence package under a hard instruction not to produce
+figures — constrained writing, not reasoning — and the frontier models on the
+same list cost five times as much for it. The context window is an order of
+magnitude larger than the ~12,000-character prompt cap needs. A wrong choice is
+cheap and reversible: the allowlist rejects a bad draft whatever produced it, so
+a weaker model's failure mode is a rejected draft, never a wrong number.
+
+#### The live blocker — reported, not routed around (AGENTS.md §12 rule 9)
+
+A single controlled smoke test was run against the real gateway after the docs,
+the auth mechanism and the pricing had been verified. It returned:
+
+```text
+statusCode: 403
+type: 'customer_verification_required'
+"AI Gateway requires a valid credit card on file to service requests."
+```
+
+**This is a billing prerequisite on the Vercel team, not a code fault, and the
+distinction is visible in the status.** A 403 `customer_verification_required`
+means the OIDC credential **authenticated successfully** and the model id was
+accepted — an invalid credential returns 401 with
+`GatewayAuthenticationError`. The request reached
+`https://ai-gateway.vercel.sh/v4/ai/language-model` and was refused on account
+standing.
+
+So **the integration is complete and unverified end to end at the same time**,
+and both halves are stated plainly:
+
+- *verified* — package APIs against `node_modules`, OIDC authentication against
+  the live endpoint, model id accepted, request/response shape, and the handled
+  failure path;
+- *not verified* — that a real completion passes `validateNarrative`. No draft
+  has ever been generated by this code.
+
+The failure path **was** verified against that real 403: a scratch replica of
+`draftNarrative`'s `try`/`catch` returned
+`{"ok":false,"reason":"The narrative service could not be reached."}` and threw
+nothing. In the product that becomes `narrative_status = failed`, a handled
+`{ ok: false }` result, and a report whose figures and export are untouched —
+confirmed in the browser matrix below.
+
+**To unblock:** add a card to the Vercel team at
+`https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card`,
+then draft a narrative from `/reports/<id>`. Nothing in the code needs to change.
+If the OIDC token has since expired (12 hours), `vercel env pull .env.local`
+refreshes it.
+
+### The narrative allowlist — how the hard rule is enforced
+
+The instruction in the system prompt tells the model not to invent figures.
+**The instruction is not the control.** A system prompt is a request; the
+allowlist is the enforcement, and AGENTS.md §5.3 survives a model that ignores
+every word of the prompt.
+
+1. `buildReportEvidence()` computes every figure deterministically, from stored
+   `activity_emission` rows, through the existing step-10/11 engine, and
+   **rounds once** into strings (three decimal places, `half-even` — a kilogram;
+   a judgement, matching what `/targets` already shows).
+2. `allowedNumberTokens()` returns the **closed set** of numeric tokens those
+   strings contain, plus exactly two stated structural additions: `1`/`2`/`3`
+   (prose must be able to say "Scope 1") and `12` (the window's own length).
+   Scope 3 category numbers are admitted **only for categories the report
+   actually contains**.
+3. `validateNarrative()` tokenises the draft and rejects on the **first** token
+   outside that set. The default is refusal.
+4. A rejected draft is **discarded, never stored** — only the status, the
+   timestamp and the reason are written.
+
+Two tokeniser details are load-bearing and are covered by tests:
+
+- The pattern is
+  `/(?<![A-Za-z0-9.])\d[\d,]*(?:\.\d+)?%?(?![A-Za-z0-9])/g`. The lookarounds are
+  what stop `tCO2e`, `kgCO2e` and `AR5` from reading as the numbers 2 and 5.
+- Thousands separators are normalised away, so `1,984.000` matches `1984.000`;
+  a **trailing `%` is kept**, so a percentage can never satisfy a count and a
+  count can never satisfy a percentage. Trailing zeroes are optional
+  (`1984` matches `1984.000`) because they are equal under `compare`.
+
+**No `Number` appears on any value path.** Every figure in a snapshot is a
+decimal string produced by `lib/domain/decimal.ts`; the only `number`s in the
+evidence object are record counts and calendar years.
+
+### Definitions carried by a report
+
+- The period is the **latest 12 complete UTC calendar months**, ending before the
+  month containing `asOf` — the same `dashboardWindows()` derivation step 12
+  established, **reused rather than restated**, because a report and the overview
+  disagreeing about "the latest complete year" would be two definitions of the
+  reporting period. The current partial month is excluded.
+- The Server Action captures **one** `YYYY-MM-DD` clock value and passes it into
+  the pure layer. No domain module reads a clock.
+- The period is stored as explicit `period_start` / `period_end`, so a later
+  recalculation cannot move an existing report's window.
+- **The snapshot is immutable.** The detail page and the export route render
+  `evidence` and never recalculate — verified in the matrix by mutating
+  `activity_emission` underneath a built report and re-exporting byte-identically.
+- Biogenic and outside-of-scopes are carried separately and are in no scope total.
+- **Missing evidence is a refusal, never a zero.** Building a report over a
+  period with zero calculated records is rejected with a field error telling the
+  reporter to import and calculate first, rather than producing a document full
+  of `0.000`.
+- Coverage counts are **period-scoped**, from a new single-statement read; the
+  organisation-wide gap figure `/dashboard` shows would have over- or understated
+  the gap inside a particular twelve months.
+- Factor attribution comes from the sets the period's stored emissions **actually
+  used**, reached through `activity_emission.factor_id` — not from
+  `listFactorSets()`, which answers "what can this tenant see". A superseded set
+  still appears, correctly.
+
+### What was built, and where
+
+| file | what |
+| --- | --- |
+| `lib/validation/reports.ts` | the narrative-status enum (declared once), the create/id schemas, the evidence Zod schema and `parseReportEvidence()`, the error register, `REPORT_FORMAT_VERSION`, the tonnes/prompt/output caps |
+| `lib/domain/reports.ts` | pure: report period, one-time rounding, `buildReportEvidence()`, `allowedNumberTokens()`, `validateNarrative()`, `reportSections()` |
+| `lib/domain/reports.test.ts` | 46 focused tests — period boundaries, scope separation, caveats, determinism, and the full allowlist/rejection matrix |
+| `lib/db/schema.ts` | the `report` table and `report_narrative_status` enum, built from the validation constant |
+| `lib/db/report-queries.ts` | tenant-predicated list / get / create / narrative transition / soft delete |
+| `lib/db/report-evidence.ts` | the **named evidence seam**: composes existing reads, plus the period record counts and the period's factor-set attribution |
+| `lib/reporting/narrative.ts` | `server-only`; the one model call, its prompt, its caps and its typed refusal |
+| `lib/rate-limit/index.ts` | `checkReportWriteLimit`, `checkReportNarrativeLimit` |
+| `app/reports/actions.ts` | create / generate narrative / soft delete, in §10 stage order |
+| `app/reports/page.tsx` | authenticated list and create surface |
+| `app/reports/[reportId]/page.tsx` | authenticated detail — sections, provenance, caveats, narrative state |
+| `app/reports/[reportId]/export/route.ts` | authorised deterministic HTML export |
+| `app/reports/loading.tsx`, `error.tsx` | route states; the error state reveals no partial figure |
+| `app/_components/reports/*` | two client leaves — the create form, and the shared draft/remove control |
+| `app/_components/workspace-nav.tsx` | Reports added to the workspace navigation |
+| `proxy.ts` | exactly `/reports/:path*` added to the enumerated optimistic matcher |
+| `e2e/home.spec.ts` | signed-out `/reports` and `/reports/<id>/export` redirects with the encoded callback |
+
+The reports routes import nothing from `home/` or `motion/`, add no chart
+package, use no GSAP and add no root provider.
+
+### The `report` table, as applied
+
+Migration **`lib/db/migrations/0007_bouncy_alex_wilder.sql`** — one enum and one
+table, nothing else. Read back over the **direct** connection
+(`DATABASE_URL_UNPOOLED`), not assumed:
+
+| column | type | null | default |
+| --- | --- | --- | --- |
+| `id` | uuid | no | `gen_random_uuid()` |
+| `organization_id` | text | no | — |
+| `created_by` | text | yes | — |
+| `title` | text | no | — |
+| `period_start` | date | no | — |
+| `period_end` | date | no | — |
+| `generated_as_of` | date | no | — |
+| `evidence` | text | no | — |
+| `engine_version` | text | no | — |
+| `format_version` | text | no | — |
+| `narrative_status` | `report_narrative_status` | no | `'not_generated'` |
+| `narrative` | text | yes | — |
+| `narrative_model` | text | yes | — |
+| `narrative_error` | text | yes | — |
+| `created_at` | timestamptz | no | `now()` |
+| `narrative_generated_at` | timestamptz | yes | — |
+| `narrative_attempted_at` | timestamptz | yes | — |
+| `deleted_at` | timestamptz | yes | — |
+
+- **enum `report_narrative_status`**: `not_generated`, `generated`, `rejected`,
+  `failed` — in that order.
+- **indexes**: `report_pkey` (unique, `id`),
+  `report_organization_created_at_idx` (`organization_id, created_at`),
+  `report_organization_id_idx` (`organization_id, id`).
+- **foreign keys**: `organization_id → organization.id` **CASCADE**;
+  `created_by → user.id` **SET NULL**.
+
+**`evidence` is `text`, not `jsonb`, deliberately** — matching
+`activity_import.header_row` and `column_mapping`. Nothing queries inside it,
+`parseReportEvidence()` is the schema-owned parser standing between the column
+and any render, and a `jsonb` column would invite a query that bypassed it.
+
+**There is no second `report_status` column, and that is not an omission.** The
+snapshot is immutable once written — it is what the report *is* — and the only
+other lifecycle a report has is removal, which `deleted_at` carries (§9.2
+rule 5). A `draft`/`final` pair would be a publishing state for a step whose
+whole contract is that nothing auto-publishes.
+
+**Strictly tenant-scoped, `not null`.** §9.2 rule 6's reference-data exception
+covers a third party's published dataset and nothing else; there is no
+`IS NULL OR` anywhere in `report-queries.ts`.
+
+### Rate limits — judgements, not measurements
+
+Neither is fitted; the flow has never shipped, so there is no traffic to fit
+against (AGENTS.md §12 rule 4). Both are keyed by **user id**, for the reason the
+organisation limiter records: the path is authenticated and tenant-scoped, so an
+IP key would throttle a whole office behind one NAT.
+
+| limiter | window | reasoning |
+| --- | --- | --- |
+| `report-write` | **20 / user / hour** | Named rather than sharing `target-write`, because building a report reads every stored emission the organisation holds and writes a JSON snapshot — materially heavier than a target row, and an afternoon of target edits must not exhaust the allowance for a disclosure someone is trying to file. |
+| `report-narrative` | **10 / user / hour** | Deliberately **tighter** than the write limiter beside it, and the asymmetry is the point: this is the only limiter in the file guarding a **paid third-party call**. It is consumed *after* the report is known to be this tenant's and *before* a single token is paid for, so a rejected request costs one select and nothing at the provider. |
+
+### Trust boundary
+
+| | |
+| --- | --- |
+| **crosses from the browser** | a report title (create), a uuid (draft, remove). Nothing else. |
+| **never crosses** | organisation id, period dates, totals, evidence payload, target id, model id, narrative to trust, provider credentials |
+| **pages** | `requireOrganization("/reports")` before any tenant read |
+| **actions** | `resolveTenant()`, then a user-keyed limiter, then the shared Zod schema, then tenant-predicated statements |
+| **export route** | `getCurrentMembership()` re-reads the membership row from Postgres before a byte of tenant data is returned |
+| **rejections** | 401 signed out, 404 for both another tenant's id and a nonexistent one — **no existence oracle**, verified byte-for-byte in the matrix |
+
+**The model boundary.** Only the **rendered deterministic sections** — the labels
+and already-rounded strings the reporter can already see — plus the title and
+period cross to the provider. The prompt is assembled from `reportSections()`
+and nothing else, and it is capped at 12,000 characters. No raw activity row, no
+uploaded CSV body, no site name, no personal name, no email address, no session,
+no organisation or user identifier, no secret. A tenant's aggregate emissions
+figures **are** customer commercial data, and sending them is this recorded
+decision rather than an incidental one (AGENTS.md §5.3, last bullet).
+
+**The caught provider error is never inspected, forwarded or logged** — a
+provider error object carries the request body, and the request body is a
+tenant's figures (§8.3 rule 2). The smoke test above printed one to a terminal
+deliberately and it is not in any code path.
+
+### Route table, prerender and CSS
+
+**No prerender impact. Verified, not assumed.** Isolated parent (`f16e86f`) and
+implementation copies both excluded `.agents/` and `.claude/`, shared one
+unprinted Server Actions encryption key, and each produced 21 prerendered HTML
+files. After normalising build id plus CSS/JS chunk names and stripping RSC
+flight scripts, **0 of 21 differed**, with no file present on one side only.
+
+The parent route table had 29 routes; the implementation has the same table plus
+Dynamic `/reports`, `/reports/[reportId]` and `/reports/[reportId]/export`, for
+**32**. Every Static, SSG and existing Dynamic classification is unchanged.
+
+CSS was **66,526 → 66,815 bytes, +289**, with **3 rules added and 0 removed**:
+`gap-y-1` (the detail page's definition rows), `max-w-[46rem]` (narrative and
+note measure) and `space-y-5` (narrative paragraphs). All three trace to
+authenticated report markup.
+
+**The first CSS run reproduced `docs/automation.md`'s prose-scanner trap** and is
+recorded rather than quietly fixed: it showed **4** added rules, the fourth being
+`.ordinal` — Tailwind v4's `font-variant-numeric` utility, matched from the bare
+English word used as a variable name and in comments and test names in the
+report domain module. Renaming it to `categoryNumber` and rewording the prose
+removed the dead rule from every page of the site. The numbers above are the
+rerun. The HTML result was 0/21 on both runs.
+
+### Disposable authenticated browser matrix
+
+`agent-browser` is still not installed, so the step-12 fallback was used again:
+Playwright 1.62.1 from the repository, driving the production build on port 3200.
+A temporary helper created a uniquely named synthetic account, one organisation
+with twelve complete months of stored emissions plus one deliberately
+uncalculated committed record, and a **second, unjoined sentinel tenant holding
+its own report**. It exercised 33 checks:
+
+- signed in with no organisation → `/account`; signed out → the exact
+  `%2Freports` callback;
+- a member builds a report; exactly one row is written; the snapshot carries
+  `1200.000` tCO2e, `calculated=12 uncalculated=1`, and the DESNZ attribution;
+- the detail page shows the stored total, the coverage caveat, the narrative
+  state and the export affordance;
+- the export returns 200 `text/html`, is **byte-identical across two requests**,
+  is `attachment` + `no-store`, and **embeds no external resource**;
+- **the export does not recalculate**: `activity_emission` was mutated
+  underneath and the re-export was byte-identical;
+- the sentinel tenant's report is 404 on export, not found on detail, and absent
+  from the listing — and a **nonexistent id returns the identical status and
+  body**, so neither answer leaks the other;
+- a forged session cookie never authorises tenant data and cannot export (401);
+- a failed draft is recorded as a state rather than thrown, **stores no prose**,
+  **leaves the snapshot untouched**, and the report still exports byte-identically;
+- no document overflow at 375×812, 800×1000 or 1280×960.
+
+```text
+authenticated reports matrix: 33/33 passed
+cleanup verified: {"users":0,"orgs":0,"reports":0}
+```
+
+Cleanup removed only the exact UUIDs the run created, cross-checked against its
+run-specific slugs, and the helper was deleted after inspection. No credential,
+session token, environment value, personal datum or tenant figure was printed
+beyond the counters above.
+
+### Checks run
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean; ESLint printed no findings |
+| `npm run typecheck` | clean; TypeScript printed no findings |
+| `npm test` | **156 passed, 7 files** (110 → 156; 46 new) |
+| `npm run db:generate` | wrote `0007_bouncy_alex_wilder.sql` — one enum, one table |
+| `npm run db:migrate` | applied; **see the trap below** |
+| database readback | 18 columns, 4 enum values, 3 indexes, 2 foreign keys with the delete rules above, over the direct connection |
+| `npm run build` | compiled, typechecked and generated **32 routes**; the three `/reports` routes Dynamic; prior classifications unchanged |
+| prerender comparison | **0 of 21 differed** |
+| CSS comparison | **+289 bytes; 3 added rules; 0 removed** (after the `.ordinal` fix) |
+| AI Gateway smoke test | OIDC **authenticated**; refused 403 `customer_verification_required` — billing, not code |
+| narrative failure path | returned a typed refusal against the real 403 and threw nothing |
+| authenticated Playwright matrix | **33/33**; cleanup 0/0/0 |
+| `npm run test:e2e` | Chromium and Firefox **10/10 passed**; then the known environment gap: `Podman is required for WebKit on Arch Linux.` |
+
+**`npm run db:migrate` can report success while applying nothing, and it did
+once here.** The command printed its spinner and exited 0, but the readback found
+`relation "report" does not exist` — the same IPv6 happy-eyeballs trap prompt 46
+recorded for the app's own pool, which `lib/db/client.ts` fixes with
+`net.setDefaultAutoSelectFamilyAttemptTimeout` but which `drizzle-kit` does not.
+Re-running as `NODE_OPTIONS="--dns-result-order=ipv4first" npm run db:migrate`
+applied it. **Always read the schema back after a migration on this machine;
+a clean exit is not evidence.** Added to `docs/automation.md`.
+
+### Secrets and data
+
+- **No new environment variable and no `NEXT_PUBLIC_*`.** `.env.example` is
+  unchanged.
+- Server-only variables read on this path: `DATABASE_URL` (runtime),
+  `DATABASE_URL_UNPOOLED` (migration and readback), `KV_REST_API_URL` /
+  `KV_REST_API_TOKEN` (limiters), and the Vercel-managed `VERCEL_OIDC_TOKEN`
+  for the gateway.
+- `lib/db/report-queries.ts`, `lib/db/report-evidence.ts` and
+  `lib/reporting/narrative.ts` all carry `import "server-only"`. The two pure
+  modules and `lib/validation/reports.ts` deliberately do not.
+- A report's title, snapshot, figures and narrative are tenant commercial data
+  and render only after current membership resolution. `created_by` is
+  attribution, not a public display identity.
+- **Nothing on any path logs** an organisation, a title, a figure, a factor, a
+  target or a line of generated prose.
+- No email is sent, no Blob is written and no public or permanent URL is minted.
+
+### What step 13 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| PDF export | needs a verified platform-safe renderer and would change the runtime/storage shape; deterministic HTML was the approved scope, and it prints |
+| automatic filing, publishing, emailing or sharing | this step creates reviewed drafts and exports only |
+| scheduled reports, thresholds or alerts | step 14 |
+| a browser-chosen reporting period, or any period but the latest 12 complete months | a browser-supplied period would let a caller frame a disclosure over a window of its choosing; a period picker is a surface of its own |
+| letting a model select, round, forecast or compute any figure | AGENTS.md §5.3's hard rule — the allowlist is the enforcement |
+| storing a rejected draft | a discarded draft is discarded; only its status, timestamp and reason persist |
+| changing the emissions engine, factor mappings or target formulas | steps 10–12 own those definitions; reports consume stored evidence |
+| market-based scope 2, SBTi validation or framework-specific filing rules | no verified methodology was read for this step |
+| a second design system, chart dependency, GSAP or any `home/` import | settled bundle and design constraints |
+| staff/admin access to tenant reports | tenant membership remains the only tenant-data authority |
+
 ## Step 12 — authenticated dashboard routes
 
 Built from `prompts/60-dashboard-routes.md`. This is the authenticated

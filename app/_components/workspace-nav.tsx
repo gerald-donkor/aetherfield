@@ -4,6 +4,7 @@ const ITEMS = [
   { key: "dashboard", label: "Overview", href: "/dashboard" },
   { key: "activity", label: "Activity", href: "/activity" },
   { key: "targets", label: "Targets", href: "/targets" },
+  { key: "reports", label: "Reports", href: "/reports" },
 ] as const;
 
 export function WorkspaceNav({

@@ -32,6 +32,7 @@ import {
   SCOPE2_METHODS,
   SCOPE3_CATEGORIES,
 } from "../validation/emissions";
+import { REPORT_NARRATIVE_STATUSES } from "../validation/reports";
 import {
   TARGET_BASELINE_SOURCES,
   TARGET_COVERAGES,
@@ -934,6 +935,129 @@ export const emissionTarget = pgTable(
      */
   ],
 );
+
+/* -------------------------------------------------------------------------- */
+/*  Phase two — ESG report generation and export (build step 13)               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The narrative's lifecycle, **built from `lib/validation/reports.ts` rather
+ * than restated** — the arrangement the fifteen enums above already use, and for
+ * the same bundling reason (AGENTS.md 9.2 rule 2).
+ */
+export const reportNarrativeStatus = pgEnum("report_narrative_status", [
+  ...REPORT_NARRATIVE_STATUSES,
+]);
+
+/**
+ * One ESG report — a **snapshot**, not a query saved under a name.
+ *
+ * **Strictly tenant-scoped, `not null`.** §9.2 rule 6's reference-data exception
+ * covers a third party's *published* dataset and nothing else; a report is a
+ * customer's own disclosure about its own emissions, so the rule applies
+ * unchanged and every query in `report-queries.ts` filters on `organization_id`.
+ *
+ * ---
+ *
+ * **`evidence` is the whole disclosure, and it is immutable.** Every figure the
+ * report shows or exports is computed once, by `lib/domain/reports.ts` over
+ * stored `activity_emission` rows, rounded once, and written here as JSON. The
+ * detail page and the export route read it and **never recalculate**: a filed
+ * figure is a thing that was computed at a moment against a named factor set and
+ * a named engine version, and re-deriving it on every view would make "what did
+ * we file" unanswerable — the reasoning `listEmissions` already records for
+ * stored emissions, applied to the document built on them.
+ *
+ * `text` rather than `jsonb` deliberately, matching `activity_import.header_row`
+ * and `column_mapping`: nothing queries inside this column, `parseReportEvidence`
+ * in `lib/validation/reports.ts` is the schema-owned parser that stands between
+ * the column and any render, and a `jsonb` column would invite a query that
+ * bypassed it.
+ *
+ * **`period_start` / `period_end` are explicit and stored**, so a later
+ * recalculation cannot silently move an existing report's period.
+ *
+ * **The narrative is the only mutable part, and it is never a figure.** A model
+ * drafts prose over the already-computed snapshot; `validateNarrative` rejects
+ * any draft containing a number the snapshot does not carry, and a rejected
+ * draft is **not stored** — only its status, its timestamp and the reason. The
+ * report exports completely with `narrative_status = not_generated`.
+ *
+ * **`narrative_model` is provenance, never a credential.** It holds the AI
+ * Gateway model identifier — `anthropic/claude-haiku-4.5` — so a reviewer can
+ * see what drafted the prose. No key, token or provider credential is stored
+ * here or anywhere else in this table.
+ */
+export const report = pgTable(
+  "report",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /** Who built it, for the provenance line. A deleted account clears the
+        attribution rather than cascading away the organisation's disclosure. */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /** The reporter's own name for it — "FY2026 operational inventory". */
+    title: text("title").notNull(),
+
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    periodEnd: date("period_end", { mode: "string" }).notNull(),
+    /** The single clock value the action captured. Kept so the snapshot's
+        derivation is reproducible from the row alone. */
+    generatedAsOf: date("generated_as_of", { mode: "string" }).notNull(),
+
+    /** The deterministic snapshot, as JSON — see the docblock. */
+    evidence: text("evidence").notNull(),
+    /** `ENGINE_VERSION` at the time of the run, denormalised out of the
+        snapshot so a re-derivation question can be answered without parsing it. */
+    engineVersion: text("engine_version").notNull(),
+    /** `REPORT_FORMAT_VERSION` — which shape `evidence` was written in. */
+    formatVersion: text("format_version").notNull(),
+
+    narrativeStatus: reportNarrativeStatus("narrative_status")
+      .notNull()
+      .default("not_generated"),
+    /** The accepted draft. Null in every other state, including `rejected`: a
+        draft that failed validation is discarded, never persisted. */
+    narrative: text("narrative"),
+    /** The AI Gateway model identifier. Provenance, never a credential. */
+    narrativeModel: text("narrative_model"),
+    /** Why the last attempt was rejected or failed — the sentence the surface
+        shows. Null once a draft is accepted. */
+    narrativeError: text("narrative_error"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** A timestamp per transition, not just a current-state column (§9.2
+        rule 3). */
+    narrativeGeneratedAt: timestamp("narrative_generated_at", {
+      withTimezone: true,
+    }),
+    narrativeAttemptedAt: timestamp("narrative_attempted_at", {
+      withTimezone: true,
+    }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    /** The surface lists newest first, the same read idiom `/targets` and
+        `/activity` use. Tenant-first, so the listing is one index scan. */
+    index("report_organization_created_at_idx").on(
+      t.organizationId,
+      t.createdAt,
+    ),
+    /** Id lookup is tenant-predicated too — `getReport` filters on both, so the
+        index carries both and another tenant's id is never an existence
+        oracle. */
+    index("report_organization_id_idx").on(t.organizationId, t.id),
+  ],
+);
+
+export type Report = typeof report.$inferSelect;
+export type NewReport = typeof report.$inferInsert;
 
 export type EmissionTarget = typeof emissionTarget.$inferSelect;
 export type NewEmissionTarget = typeof emissionTarget.$inferInsert;

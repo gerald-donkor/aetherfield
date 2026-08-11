@@ -189,6 +189,49 @@ const ACTIVITY_COMMIT_WINDOW = "1 h" as const;
 const TARGET_WRITE_LIMIT = 30;
 const TARGET_WRITE_WINDOW = "1 h" as const;
 
+/**
+ * Building and removing a report snapshot, **keyed by user id** — build
+ * step 13.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
+ * as every window above it. Nothing here is fitted: the flow has never shipped,
+ * so there is no traffic to fit against.
+ *
+ * **Keyed by user id for the reason the organisation limiter records** — the
+ * path is authenticated and tenant-scoped, so an IP key would throttle a whole
+ * office behind one NAT while leaving the abusable surface unbounded.
+ *
+ * **A named limiter rather than a reuse of `checkTargetWriteLimit`**, because
+ * the two bound different work. Building a report reads every stored emission
+ * the organisation holds, aggregates it and writes a JSON snapshot; that is a
+ * materially heavier read than writing a target row, and sharing a bucket would
+ * let an afternoon of target edits exhaust the allowance for a disclosure a
+ * reporter is trying to file. 20 an hour is deliberately loose against honest
+ * use: a reporter iterating on a title, or rebuilding after committing a late
+ * import, consumes one slot per attempt.
+ */
+const REPORT_WRITE_LIMIT = 20;
+const REPORT_WRITE_WINDOW = "1 h" as const;
+
+/**
+ * AI narrative generations, **keyed by user id** — build step 13, and the only
+ * limiter in this file guarding a **paid third-party call**.
+ *
+ * **A judgement, not a measurement**, like every window above it — but unlike
+ * them it is deliberately *tighter* than the write limiter it sits beside, and
+ * the asymmetry is the point. Building a snapshot costs a database read; asking
+ * for a draft costs a model invocation, and a rejected draft (a figure not in
+ * the report) is a state a reporter will reasonably retry from. Ten an hour
+ * leaves room for several retries per report while bounding what one account can
+ * spend, which is the thing that can actually be abused here.
+ *
+ * It is consumed **before** the model is called and after the report has been
+ * read, so a rejected request costs one tenant-predicated select and nothing at
+ * the provider.
+ */
+const REPORT_NARRATIVE_LIMIT = 10;
+const REPORT_NARRATIVE_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -403,6 +446,39 @@ export async function checkTargetWriteLimit(
     "target-write",
     TARGET_WRITE_LIMIT,
     TARGET_WRITE_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Building and removing a report snapshot, keyed by the **user id**. Stage b of
+ * AGENTS.md 10 — see the constant's docblock for why it is not keyed by IP, why
+ * it is not `checkTargetWriteLimit`, and why the number is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkReportWriteLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "report-write",
+    REPORT_WRITE_LIMIT,
+    REPORT_WRITE_WINDOW,
+    userId,
+  );
+}
+
+/** AI narrative generations, keyed by the **user id** — the only limiter here
+    guarding a paid third-party call. See the constant's docblock for why it is
+    tighter than the report write limiter beside it, and why it is a judgement. */
+export async function checkReportNarrativeLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "report-narrative",
+    REPORT_NARRATIVE_LIMIT,
+    REPORT_NARRATIVE_WINDOW,
     userId,
   );
 }

@@ -50,6 +50,13 @@
       "when": 1786395185121,
       "tag": "0006_simple_clint_barton",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786470762664,
+      "tag": "0007_bouncy_alex_wilder",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,7 @@
     "@upstash/redis": "^1.38.2",
     "@vercel/blob": "^2.7.0",
     "@vercel/functions": "^3.8.0",
+    "ai": "^7.0.59",
     "better-auth": "^1.6.26",
     "botid": "^1.5.11",
     "drizzle-orm": "^0.45.2",

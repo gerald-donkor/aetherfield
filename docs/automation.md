@@ -865,6 +865,34 @@ not supported with the cjs output format". Name the file `.mts` — already in
 project**, not in the scratchpad, or `pg` and every other dependency fails to
 resolve.
 
+### `npm run db:migrate` can exit 0 having applied nothing
+
+Found at step 13. The command printed its spinner and exited cleanly; the
+readback then found `relation "report" does not exist`.
+
+It is the **IPv6 happy-eyeballs trap prompt 46 already recorded** for the app's
+own pool, in a place the earlier fix does not reach. `lib/db/client.ts` calls
+`net.setDefaultAutoSelectFamilyAttemptTimeout(2500)` before constructing the
+`Pool`; `drizzle-kit` constructs its own connection and does no such thing, so
+against a Neon host that resolves to unreachable IPv6 addresses it stalls and
+gives up quietly. The same trap hits any one-off `tsx` script.
+
+```bash
+NODE_OPTIONS="--dns-result-order=ipv4first" npm run db:migrate
+```
+
+For a throwaway script, the in-process equivalent — and it must come before the
+`pg` import, which is why the import order below is not accidental:
+
+```ts
+import net from "node:net";
+net.setDefaultAutoSelectFamilyAttemptTimeout(2500);
+import { Client } from "pg";
+```
+
+**Always read the schema back from `information_schema` after a migration on
+this machine. A clean exit is not evidence.**
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.
