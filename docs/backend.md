@@ -4403,6 +4403,370 @@ provider, no model call. Nothing on any path logs.
 | recalculating every organisation | the cron sweep does it on its schedule; a mass recalculation is an operational act |
 | a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work, as prompts 63–67 were |
 
+## The DEFRA 2025 factor set, prompt 69
+
+Implemented on 12 Aug 2026. **A second published set is loaded**, so activity
+data dated in 2025 is costed instead of refused — closing the accepted caveat
+prompt 68 recorded one section above.
+
+Post-sequence work, as prompts 63–68 were. Not a step 15.
+
+**No code outside the seeder changed.** `lib/domain/factor-selection.ts`,
+`lib/domain/emissions.ts`, `lib/db/emission-queries.ts` and
+`lib/domain/defra.ts` are untouched, `ENGINE_VERSION` stays `1.1.0`, and there
+is no schema change and no migration. Prompt 68 built the resolution path for
+exactly this case; this prompt exercised it and it needed nothing.
+
+### Obtaining the workbook — discovered, not guessed
+
+`curl` the collection page named in the seeder's `sourceUrl`, read the 2025
+edition's page out of it, then read the flat-format asset link out of that. The
+prompt's own warning was earned: a guessed `assets.publishing.service.gov.uk`
+media path 404s, because the media id is opaque.
+
+| what | value |
+| --- | --- |
+| collection page | `https://www.gov.uk/government/collections/government-conversion-factors-for-company-reporting` → **200** (this is the correction to step 10's WebFetch line, below) |
+| edition page | `https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2025` → **200** |
+| **flat-format workbook** | `https://assets.publishing.service.gov.uk/media/6846b6ea57f3515d9611f0dd/ghg-conversion-factors-2025-flat-format.xlsx` |
+| size | **505,634 bytes** |
+| SHA-256 | `8bfdb45b81ec4a88e3bdf4584637330f62e6bd09ce1940e654c5d7b7f736de94` |
+| methodology report | `https://assets.publishing.service.gov.uk/media/6846b0870392ed9b784c0187/2025-GHG-CF-methodology-paper.pdf`, 1,853,848 bytes |
+| retrieved | **12 Aug 2026** — which is what `retrieved_at` records, not the run date |
+
+The workbook is **not committed**, as step 10 decided, and no spreadsheet
+dependency was added. The derived CSV is:
+`lib/db/seed/defra-2025-factors.csv`, 8,741 lines (header + 8,740 data rows).
+
+The workbook's own front page: **Status Final, Version 1, Year 2025, updated
+2025-06-10** (Excel serial 45818). That is where `dataset_version` `2025 v1`
+comes from — the same convention that produced `2026 v1.2`.
+
+### The script's two measured constants, re-established against 2025
+
+Neither moved, and both were **read from the 2025 file** rather than assumed.
+`scripts/defra-xlsx-to-csv.py` is unchanged — one script, no fork, no new
+parameter, because nothing needed parameterising.
+
+| constant | 2026 | 2025, read back | verdict |
+| --- | --- | --- | --- |
+| sheet name | `Factors by Category` | `Factors by Category` (workbook has two sheets: `Front page`, `Factors by Category`) | unchanged |
+| `FIRST_DATA_ROW` | 7, from `_FilterDatabase` = `'Factors by Category'!$A$6:$J$8746` | `_FilterDatabase` = **`'Factors by Category'!$A$6:$J$8746`**, byte-identical | unchanged |
+| header row | row 6: `ID, Scope, Level 1…Level 4, Column Text, UOM, GHG/Unit, GHG Conversion Factor 2026` | row 6, same ten columns, last one reading `GHG Conversion Factor 2025` | column order unchanged |
+| `SIGNIFICANT_DIGITS` = 12 | 7,007 rows ≤ 10 sig. digits, **none at 11–15**, 28 at 16–17 | see below | **still inside a measured gap** |
+
+**The significant-digit distribution over the 2025 valued rows**, measured the
+same way (shortest round-trip decimal of the stored double, digits counted after
+normalising):
+
+| sig. digits | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11–15 | 16 | 17 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| rows | 747 | 1,277 | 1,000 | 1,246 | 1,861 | 721 | 24 | 56 | 68 | 1 | **0** | 12 | 16 |
+
+**7,001 at ≤ 10, nothing at 11–15, 28 at 16–17** — the same shape as 2026, so
+rounding to 12 collapses exactly the 28 float-noise rows and leaves the rest
+bit-identical. `--report`'s `noise rounded` count agrees: **28**.
+
+### `--report`, beside 2026's
+
+Produced by
+`python3 scripts/defra-xlsx-to-csv.py <workbook> lib/db/seed/defra-2025-factors.csv --report`.
+
+| measurement | 2025 | 2026 |
+| --- | --- | --- |
+| data rows in the flat sheet | **8,740** | 8,740 |
+| Scope 1 / Scope 2 / Scope 3 / Outside of Scopes | **3,059 / 392 / 5,231 / 58** | 3,059 / 392 / 5,231 / 58 |
+| rows carrying a published value | **7,029** | 7,035 |
+| rows with **no** value | **1,711** | 1,705 |
+| rows whose value was Excel float noise | **28** | 28 |
+| rows seeded | **7,029** | 7,035 |
+
+The per-scope counts are identical between the two years; the six-row difference
+is entirely in which rows carry a number.
+
+### Sibling continuity — the measurement the whole prompt rested on
+
+Prompt 68 resolves a mapped pair into another year through
+`(source, source_row_id)` siblings, on the **assumption** that DEFRA reuses the
+same row id for the same activity across publication years. It stated the
+assumption and did not test it. Tested here, from the two committed CSVs:
+
+| measurement | result |
+| --- | --- |
+| ids present in both files | **8,740 — every one** |
+| ids in 2026 only | **0** |
+| ids in 2025 only | **0** |
+| the eleven `DEFAULT_FACTOR_MAPPINGS` targets (nine distinct ids) | **all nine present in 2025** |
+| shared ids whose `level_1`–`level_4` / `uom` / `ghg_unit` differ | 1,962 of 8,740 — **all label rewordings, no reassignment** |
+
+**The dangerous case — an id reused for a different activity — does not occur.**
+Every one of the 1,962 differences is one of eight relabelings, and each keeps
+the same activity:
+
+| field | rows | 2025 → 2026 |
+| --- | --- | --- |
+| `level_2` | 736 | `HGV (all diesel)` → `HGV (non-refrigerated, all diesel)` |
+| `level_2` | 480 | `HGV refrigerated (all diesel)` → `HGV (refrigerated, all diesel)` |
+| `level_2` | 256 | `HGVs refrigerated (all diesel)` → `HGV (refrigerated, all diesel)` |
+| `level_2` | 128 | `Managed HGV (all diesel)` → `Managed HGV (non-refrigerated, all diesel)` |
+| `level_2` | 128 | `Managed HGV refrigerated (all diesel)` → `Managed HGV (refrigerated, all diesel)` |
+| `level_2` | 96 + 96 | the same two, on the `WTT- HGV` families |
+| `level_3` | 720 | `All rigids` / `All artics` / `All HGVs` → `Average [non-]refrigerated rigids` / `artics` / `HGVs` |
+| `column_text` | 42 | `Incineration with Energy Recovery` → `Combustion` |
+
+`scope`, `level_1`, `level_4`, `uom` and `ghg_unit` differ on **zero** rows.
+DEFRA clarified the HGV refrigeration wording in 2026 and left the ids alone,
+which is exactly the behaviour prompt 68's design needs.
+
+One mapping target is in that set: `27_304_3140_14_1` (freight, tkm) reads
+`HGV (all diesel)` / `All HGVs` in 2025 and `HGV (non-refrigerated, all diesel)`
+/ `Average non-refrigerated HGVs` in 2026. Same activity, clearer label.
+
+### The publisher's vocabulary did not change
+
+Compared as distinct-value sets across the two CSVs, all four identical:
+**`scope` 4, `level_1` 33, `uom` 15, `ghg_unit` 6.** So `ACTIVITY_UNITS`,
+`RESULT_UNITS`, `SCOPES` and `SCOPE3_CATEGORIES`' keys in `lib/domain/defra.ts`
+all already cover 2025, and the seeder's fatal vocabulary refusal never fired.
+Nothing was widened to make the seed pass, which was the explicit bound.
+
+### The GWP basis, re-read from the 2025 report — checked, not assumed
+
+Table 1 of the 2025 methodology paper ("summary of conversion factors that are
+in AR4 or/and AR5 basis GWPs") was read by **tick column position**, the same
+method step 10 used, since the glyphs do not survive text extraction.
+
+**It is identical to 2026's**: AR4 for **Bioenergy, WTT Bioenergy and Material
+Use**; AR5 for every other family; **Hotel Stay ticked in both columns** with
+the same footnote ("different countries could be in either AR4 or AR5 basis"),
+and refrigerants AR5 "where AR5 values were available, AR6 otherwise". So
+`AR4_FAMILIES` stays a module-level constant and does **not** become
+per-publication input to `normaliseDefraRow`.
+
+Paragraph numbering moved between editions and is recorded per set rather than
+carried forward: the CO₂e-basis statement is **1.7** in the 2025 report and 1.9
+in the 2026 one; the applicability sentence is **1.8** in 2025 and 1.10 in 2026.
+
+`SCOPE3_CATEGORIES` is unchanged for the same reason the vocabulary is: it is
+keyed on `Level 1`, and the 33 `Level 1` values are the same 33.
+
+Neither table moves a number — every DEFRA value is already CO₂e and `gwp_set`
+is never applied to one. It is provenance, and it was checked as such.
+
+### The effective window, quoted rather than assumed
+
+From the 2025 methodology paper, paragraph **1.8**, read from the PDF this
+session:
+
+> The 2025 GHG Conversion Factors are for use with activity data that falls
+> entirely or mostly within 2025.
+
+Hence `effective_from` `2025-01-01`, `effective_to` `2025-12-31`. **The two
+published windows do not overlap**, so prompt 68's tie-break is never reached
+between them — a date resolves to at most one published set.
+
+### Attribution, confirmed in the 2025 publication
+
+Read from the 2025 methodology paper's own front matter, verbatim:
+
+> This publication is licensed under the terms of the Open Government Licence
+> v3.0 except where otherwise stated.
+
+The same notice the 2026 report carries. `licence`, `licence_url` and
+`source_url` are stored on the set row and rendered from it, which is what makes
+a second dataset safe to add.
+
+### The seeder, now a registry
+
+`lib/db/seed/seed-emission-factors.ts` held one `PUBLICATION` object and one
+`SEED_CSV` constant. It now holds `PUBLICATIONS`, a list of descriptors each
+carrying its own CSV path, and `main()` iterates it through a new
+`seedPublication(db, publication)`.
+
+- **The idempotence check is unchanged in substance**, per descriptor — keyed on
+  `(organization_id is null, source, dataset_version)`. It moved *before* the
+  CSV read, so an already-seeded publication does not parse 8,740 rows to
+  discover it has nothing to do.
+- **A factor row is still never updated in place.** A revision is still a new
+  `dataset_version` inserted alongside; the docblock's argument is unchanged.
+- **The vocabulary refusal is still fatal** and now names the publication in its
+  message, so a two-set run says which one refused.
+- `npm run db:seed:factors` keeps its name and its `dotenv -e .env.local --`
+  prefix. An optional argument selects one entry —
+  `npm run db:seed:factors -- "2025 v1"` — and an unknown version is an error
+  listing the known ones. **No second npm script.**
+- `INSERT_BATCH` = 500, one transaction per set, and `DATABASE_URL_UNPOOLED` are
+  all unchanged (§7.3's session-state reason).
+- `gasBasis` is typed from the schema's own enum rather than `string`, which is
+  what caught the descriptor type at compile time.
+
+### Measurements
+
+Against the development database over `DATABASE_URL_UNPOOLED`. **Warm** — the
+connection was established by the harness in the same session, so no
+scale-to-zero cold start is included (§7.3).
+
+**1. Baseline, before anything was written.** 1 organisation, 0
+`activity_record`, 0 `activity_emission`, 11 factor mappings, 7,035 factor rows,
+**1** `emission_factor_set`.
+
+**2. Seed runtime: 31.8 s, warm**, for the 2025 set's 7,029 rows; the 2026 entry
+reported "already seeded (set `560dadb5-…`). Nothing written." A second full run
+took **2.4 s** and wrote nothing for either set.
+
+**3. The two windows, read back:**
+
+| source | dataset_version | publication_year | effective_from | effective_to | organization_id | superseded_by_set_id | rows |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| DESNZ | 2025 v1 | 2025 | 2025-01-01 | 2025-12-31 | **null** | null | 7,029 |
+| DESNZ | 2026 v1.2 | 2026 | 2026-01-01 | 2026-12-31 | **null** | null | 7,035 |
+
+`retrieved_at` `2026-08-12` and `2026-08-10`; `licence` `Open Government Licence
+v3.0` and `gas_basis` `combined_co2e` on both. **All 7,029 new
+`emission_factor` rows carry `organization_id = null`** — published and shared,
+§9.2 rule 6's narrow exception — confirmed by a `count(*) filter (where
+organization_id is null)` equal to the row count.
+
+**4. Seeded distribution for the 2025 set, read back from the database**, in the
+shape step 10 recorded for 2026:
+
+| dimension | 2025 v1 | 2026 v1.2, for comparison |
+| --- | --- | --- |
+| scope | scope_1 **2,531** · scope_2 **352** · scope_3 **4,090** · outside_of_scopes **56** | 2,531 · 352 · 4,096 · 56 |
+| result unit | `kg_co2e` **6,578** · `kwh` **451** | 6,584 · 451 |
+| GWP set | AR5 **6,861** · AR4 **168** | 6,866 · 169 |
+| scope 3 category | c4 **1,445** · c6 **1,034** · unassigned **952** · c3 **448** · c5 **134** · c1 **74** · c7 **3** | 1,445 · 1,034 · 952 · 448 · 139 · 75 · 3 |
+
+The six-row gap sits in scope 3 — five in c5 and one in c1 — and is the six rows
+that carry a value in 2026 and none in 2025.
+
+**5. The end-to-end case, before and after, driven through the real seam.** The
+development database holds no activity data, so the case was produced as prompt
+68 produced its: a temporary organisation, five 1,000 kWh electricity records
+dated 2026-03-15, 2026-07-01, 2025-03-15, 2025-09-30 and 2024-06-01, driven
+through `recalculateOrganization`, then deleted. Its mappings were seeded by
+`seedDefaultMappings` **before** the 2025 set existed, so all eleven point at
+2026 rows — the realistic case, and the one that actually tests the sibling path.
+
+| | before seeding 2025 | after |
+| --- | --- | --- |
+| `recalculateOrganization` | `{ records: 5, written: 2 }` | `{ records: 5, written: 4 }` |
+| total | **261.92 kg = 0.26192 tCO₂e** | **615.92 kg = 0.61592 tCO₂e** |
+| matched / total records | 2 / 5 | **4 / 5** |
+| `outOfPeriodYears` | `2025: 2`, `2024: 1` | **`2024: 1`** |
+| `unmatchedPairs` | empty | empty |
+| pool queries | 3 | 3 |
+
+**Which factor row each emission used**, which is the proof the resolution went
+where it should:
+
+| activity_date | kg CO₂e | source_row_id | factor_id | set |
+| --- | --- | --- | --- | --- |
+| 2025-03-15 | 177.000000 | `7_400_4000_5_1` | `d52d03fe-8ccf-4bc6-9e08-8de6657eaa3c` | **2025 v1** |
+| 2025-09-30 | 177.000000 | `7_400_4000_5_1` | `d52d03fe-8ccf-4bc6-9e08-8de6657eaa3c` | **2025 v1** |
+| 2026-03-15 | 130.960000 | `7_400_4000_5_1` | `8e43e43d-1f18-472c-8e0b-a5256114a15d` | 2026 v1.2 |
+| 2026-07-01 | 130.960000 | `7_400_4000_5_1` | `8e43e43d-1f18-472c-8e0b-a5256114a15d` | 2026 v1.2 |
+
+`2 × 0.177 + 2 × 0.13096 = 0.61592` tonnes exactly. **The 2026 records did not
+move** — same `factor_id` before and after — and **the 2024 record stayed
+refused**: no set covers 2024, and no nearest-year fallback appeared. That
+refusal is the control on this whole measurement.
+
+`engine_version` is `1.1.0` on every row, before and after.
+
+**6. No N+1, and a second set adds none.** `pg.Pool.prototype.query` counted
+around `recalculateOrganization`, exactly as prompt 68 counted it: **3 pool-level
+queries at 5 records and 3 at 205 records**, with two sets visible — the same 3
+prompt 68 measured with one. The sibling lookup is one query whatever the number
+of sets.
+
+**7. Teardown confirmed back at baseline**: 0 `activity_record`, 0
+`activity_emission`, 1 organisation, 0 sites, 11 mappings — and 14,064 factor
+rows across 2 sets, which is the intended residue.
+
+### A finding, reported rather than fixed
+
+**`seedDefaultMappings` picks its factor row non-deterministically now that two
+sets are visible.** Its query selects by `source_row_id` across
+`visibleFactorScope` with **no `ORDER BY`**, and `new Map(factors.map(…))` takes
+the last row wins. With two published sets carrying the same nine ids, a *new*
+organisation's default mappings may land on either year's row, unpredictably.
+
+**No figure moves either way**, which is why it is reported and not changed here:
+prompt 68's stage 2 uses the mapped row's own set when it covers the date and
+stage 3 follows the siblings when it does not, so a mapping pointing at 2025 and
+one pointing at 2026 resolve every record identically. But "which row is the
+mapping" is visible on `/activity/mappings`, and a surface that shows a
+different year on two otherwise identical organisations is a defect of
+presentation. `lib/db/emission-queries.ts` was out of scope for this prompt
+(§6 of `prompts/69-defra-2025-factor-set.md`), so it is recorded for a later one:
+the fix is an `ORDER BY` making the choice deterministic — newest publication
+year, presumably — not a change to resolution.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **9 files, 197 tests passed** (558 ms) — the baseline, unchanged. `lib/domain/defra.ts` was not modified, so no test was owed |
+| `npm run db:seed:factors` | 7,029 factors for 2025 in **31.8 s warm**; 2026 already seeded, nothing written. Re-run: nothing written for either, 2.4 s |
+| database readback | the tables above |
+| `npm run build` | route table below |
+| prerender diff | **21 files, 21 identical, 0 differ**; CSS **byte-identical at 68,208 bytes and the same chunk name on both sides** (`2c7p8i7-arsrn.css`), so no utility was added by the prose in this change |
+| `npm run test:e2e` | chromium + firefox: **10 passed** (38.2 s). **WebKit did not run** — `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux", which is not installed on this machine. Not reported as passed |
+
+**The route table, quoted — and a correction to the prompt's prediction.**
+`prompts/69-defra-2025-factor-set.md` predicted "27/27, 11 Static, 2 SSG, 9
+Dynamic, plus Proxy". The build produces **31 routes: 11 `○ Static`, 2 `● SSG`,
+18 `ƒ Dynamic`, plus `ƒ Proxy (Middleware)`** — identical on both sides of the
+diff. The prompt's Static and SSG counts are right and its Dynamic count was a
+stale figure; recorded rather than adjusted away (§12 rule 8).
+
+- `○ Static` — `/`, `/_not-found`, `/about`, `/careers`, `/design-system`,
+  `/forgot-password`, `/journal`, `/reset-password`, `/sign-in`, `/sign-up`,
+  `/verify-email`
+- `● SSG` — `/article/[slug]` (6), `/job-listing/[slug]` (3)
+- `ƒ Dynamic` — `/account`, `/activity`, `/activity/[importId]`,
+  `/activity/factors`, `/activity/mappings`, `/api/auth/[...all]`,
+  `/api/cron/recalculate`, `/api/newsletter/unsubscribe`, `/dashboard`,
+  `/invitation/[id]`, `/newsletter/confirm`, `/newsletter/unsubscribe`,
+  `/reports`, `/reports/[reportId]`, `/reports/[reportId]/export`,
+  `/submissions`, `/submissions/applications/[id]/cv`, `/targets`
+
+**Prerender impact: none, verified rather than assumed**, by the two-build method
+in `docs/automation.md` with both sides excluding `.claude/` and `.agents/`,
+normalising `.next/BUILD_ID` and both the `.js` and `.css` chunk patterns, and
+stripping the `self.__next_f.push` payloads.
+
+**Trust boundary: no new request path.** The seeder is a developer-run script
+with no route, no action and no HTTP surface. The two already-authorised paths
+whose *data* changed — the `recalculate` Server Action and the cron sweep — gain
+no stage, and no tenant-scoped query was widened: every read still carries
+`visibleFactorScope(organizationId)`, and the new rows are `organization_id =
+null`, which that predicate admits as published.
+
+**Secrets and data.** No new environment variable, no `NEXT_PUBLIC_*`, no
+`.env.example` line. No personal data: emission factors are public reference data
+under the OGL v3.0, and the seeder logs counts and set ids only. Nothing reached
+a third party and no model was called.
+
+### What prompt 69 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| any schema change or migration | none was needed; the columns have carried the windows since step 10 |
+| touching `factor-selection.ts`, `emissions.ts`, `emission-queries.ts` or `defra.ts` | prompt 68 built them for this case and they needed nothing. The `seedDefaultMappings` ordering finding above is the one place a later change is owed |
+| bumping `ENGINE_VERSION` | the engine is unchanged; the data is not the engine. Figures moved because new data became visible, which the `emission_factor_set` rows record |
+| 2024 or any earlier year | one year at a time — and the 2024 record staying refused is what proves refusals still refuse |
+| EPA Hub, eGRID, a second publisher, IEA factors | step 10's decisions, unchanged; IEA remains licence-blocked |
+| AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65 and 68 and still deferred |
+| the custom-factor-set sibling gap | `createTenantFactor` still hashes its own `source_row_id`, so a tenant row can never be a sibling of a published one. Prompt 68's open gap, still open |
+| market-based scope 2, set-metadata editing, retiring a set, bulk CSV import | untouched prior deferrals |
+| an xlsx parser in the application | the workbook is converted once by the committed script; the app reads the derived CSV with the pure `parseCsv` |
+| adding an out-of-period figure to `ReportEvidence` | prompt 68's reasoning is unchanged |
+| a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
+
 ## Step 9 — activity-data ingestion
 
 Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation
@@ -6438,8 +6802,18 @@ and `gwp_set` is never applied to one.
 
 ### What could not be verified this session
 
-`ghgprotocol.org` and `www.gov.uk` are **unreachable from this build
-environment** — WebFetch reports the domain cannot be verified as safe to fetch.
+`ghgprotocol.org` and `www.gov.uk` are **unreachable through WebFetch**, which
+reports that the domain cannot be verified as safe to fetch.
+
+> **Narrowed by prompt 69 (§12 rule 8).** This paragraph originally said the two
+> domains were unreachable *from this build environment*. That is a stronger
+> claim than the evidence, and as written it would stop a later session even
+> trying: `curl` to
+> `https://www.gov.uk/government/collections/government-conversion-factors-for-company-reporting`
+> returned **200** on 12 Aug 2026, and that is how prompt 69 discovered the 2025
+> edition's page. The limitation is WebFetch's, not the environment's.
+> `ghgprotocol.org` was not re-tested and stays unverified either way.
+
 Two consequences, stated as unverified rather than as checked (§12 rule 2):
 
 - **The GWP values in `lib/domain/gwp.ts` are reproduced from `prompts/58`**,
