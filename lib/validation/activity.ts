@@ -254,3 +254,49 @@ export type StageImportResult =
 export type ActivityMappingResult = SubmitResult<ActivityField>;
 
 export type ActivityImportActionResult = SubmitResult;
+
+/* -------------------------------------------------------------------------- */
+/*  The factor mapping — prompt 65                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Choosing the emission factor for one `(category, unit)` pair.
+ *
+ * **The category and the unit parse against the unions above, never as free
+ * strings.** They are the two halves of `activity_factor_mapping_key`, so a
+ * value outside the vocabulary would either fail the enum cast at the database
+ * or, worse, write a mapping no record can ever match.
+ *
+ * **The factor id is a uuid here and a *claim* everywhere else.** Shape is all
+ * this schema can check; whether the row exists, whether this tenant may see it,
+ * and whether the engine can calculate with it are three server-side checks the
+ * action performs afterwards, at stage e. A non-uuid is a forged request rather
+ * than a typo and gets the same handled failure a missing factor gets.
+ */
+export const factorMappingSchema = z.object({
+  category: z.enum(ACTIVITY_CATEGORIES, {
+    error: "Choose a category.",
+  }),
+  unit: z.enum(ACTIVITY_UNITS, { error: "Choose a unit." }),
+  factorId: z.uuid({ error: "Choose a factor from the list." }),
+});
+
+export type FactorMappingInput = z.infer<typeof factorMappingSchema>;
+
+export type FactorMappingField = keyof FactorMappingInput;
+
+export type FactorMappingResult = SubmitResult<FactorMappingField>;
+
+/**
+ * The mapping surface's copy, in the site's measured, operational register
+ * (AGENTS.md 5): what is wrong and what to do about it. Written here rather than
+ * in the action because the client leaf renders the same sentences for its own
+ * courtesy check (AGENTS.md 10 rule 1).
+ */
+export const FACTOR_MAPPING_ERRORS = {
+  invalid: "Check the marked fields and try again.",
+  notFound:
+    "That factor is not available. It may have been superseded since the list was loaded.",
+  notOwner:
+    "Only an owner can change an emission factor. A factor choice moves every figure in a disclosure.",
+} as const;

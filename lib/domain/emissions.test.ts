@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { decimal, toDecimalString } from "./decimal";
+import { ACTIVITY_UNITS } from "../validation/activity";
+import { FACTOR_ACTIVITY_UNITS } from "../validation/emissions";
 import {
   ENGINE_VERSION,
+  admissibleFactorUnits,
   aggregate,
   calculateRecordEmission,
   convertQuantity,
+  factorEligibility,
   monthOf,
   toTonnes,
   totalsByPeriod,
@@ -159,6 +163,88 @@ describe("calculateRecordEmission", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.emission.outsideOfScopes).toBe(true);
+  });
+});
+
+describe("factorEligibility", () => {
+  /* The rule the mapping surface offers factors under. It has to agree with
+     `calculateRecordEmission` exactly, or an owner can choose a row that
+     "fixes" a gap and changes nothing but the refusal reason. */
+
+  it("admits a factor whose denominator converts from the pair's unit", () => {
+    expect(factorEligibility(factor({ activityUnit: "kwh" }), "MWh").ok).toBe(
+      true,
+    );
+  });
+
+  it("admits a matching denominator unchanged", () => {
+    expect(
+      factorEligibility(factor({ activityUnit: "tonnes" }), "kg").ok,
+    ).toBe(true);
+  });
+
+  it("refuses a cross-dimensional pair", () => {
+    // `km` measures distance and `tonne.km` measures freight — a different
+    // physical quantity, not a unit mismatch to paper over.
+    const result = factorEligibility(factor({ activityUnit: "tonne_km" }), "km");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.refusal).toBe("unit_mismatch");
+      expect(result.reason).toMatch(/different quantities/i);
+    }
+  });
+
+  it("refuses a factor that produces kWh rather than emissions", () => {
+    const result = factorEligibility(
+      factor({ activityUnit: "km", resultUnit: "kwh" }),
+      "km",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("factor_is_not_an_emission");
+  });
+
+  it("refuses a denominator the activity model cannot measure", () => {
+    const result = factorEligibility(
+      factor({ activityUnit: "unknown_unit" }),
+      "km",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("unit_mismatch");
+  });
+
+  it("agrees with the engine on every unit pair it admits", () => {
+    /* The property that matters: a factor this predicate offers must never be
+       one `calculateRecordEmission` then refuses for a unit reason. Checked
+       across the whole cross product rather than on a sampled pair. */
+    for (const unit of ACTIVITY_UNITS) {
+      for (const activityUnit of FACTOR_ACTIVITY_UNITS) {
+        const eligible = factorEligibility({ activityUnit, resultUnit: "kg_co2e" }, unit);
+        const computed = calculateRecordEmission(
+          record({ unit, quantity: "1.000000" }),
+          factor({ activityUnit }),
+        );
+        expect(computed.ok).toBe(eligible.ok);
+      }
+    }
+  });
+});
+
+describe("admissibleFactorUnits", () => {
+  it("lists exactly the denominators the predicate admits", () => {
+    for (const unit of ACTIVITY_UNITS) {
+      const admissible = admissibleFactorUnits(unit);
+      for (const activityUnit of FACTOR_ACTIVITY_UNITS) {
+        expect(admissible.includes(activityUnit)).toBe(
+          factorEligibility({ activityUnit, resultUnit: "kg_co2e" }, unit).ok,
+        );
+      }
+    }
+  });
+
+  it("never offers the unmeasurable denominator for any unit", () => {
+    for (const unit of ACTIVITY_UNITS) {
+      expect(admissibleFactorUnits(unit)).not.toContain("unknown_unit");
+    }
   });
 });
 

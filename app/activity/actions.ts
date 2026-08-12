@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import * as z from "zod";
 
+import { getCurrentMembership } from "../../lib/auth/organization";
+import { getCurrentAccount } from "../../lib/auth/server";
 import { resolveTenant as resolveTenantFor } from "../../lib/auth/tenant";
 import {
   commitImport as commitImportRows,
@@ -13,9 +15,14 @@ import {
   restageImport,
   type StagedRow,
 } from "../../lib/db/activity-queries";
-import { recalculateOrganization } from "../../lib/db/emission-queries";
+import {
+  getVisibleFactor,
+  recalculateOrganization,
+  setFactorMapping as setFactorMappingRow,
+} from "../../lib/db/emission-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
+import { factorEligibility } from "../../lib/domain/emissions";
 import {
   recalculateInputSchema,
   type RecalculateResult,
@@ -23,6 +30,7 @@ import {
 import {
   checkActivityCommitLimit,
   checkActivityImportLimit,
+  checkFactorMappingLimit,
   formatRetry,
 } from "../../lib/rate-limit";
 import {
@@ -33,12 +41,15 @@ import {
 import {
   activityMappingSchema,
   ACTIVITY_FIELDS,
+  FACTOR_MAPPING_ERRORS,
   type ActivityImportActionResult,
   type ActivityMapping,
   type ActivityMappingResult,
   CSV_ERRORS,
   CSV_MAX_BYTES,
   CSV_MAX_ROWS,
+  type FactorMappingResult,
+  factorMappingSchema,
   importIdSchema,
   type StageImportResult,
 } from "../../lib/validation/activity";
@@ -93,11 +104,20 @@ import {
 const GENERIC_FAILURE =
   "We couldn't process that import just now. Please try again in a moment.";
 
+const FACTOR_MAPPING_FAILURE =
+  "We couldn't change that factor just now. Please try again in a moment.";
+
 const SIGNED_OUT =
   "Your session has expired. Sign in again to import activity data.";
 
+const FACTOR_MAPPING_SIGNED_OUT =
+  "Your session has expired. Sign in again to change emission factors.";
+
 const NO_ORGANIZATION =
   "This account belongs to no organisation. Create one before importing data.";
+
+const FACTOR_MAPPING_NO_ORGANIZATION =
+  "This account belongs to no organisation. Create one before changing emission factors.";
 
 const NOT_FOUND =
   "That import is not available. It may have been discarded or removed.";
@@ -537,6 +557,163 @@ export async function recalculate(
 
   revalidatePath("/activity");
   if (importId) revalidatePath(`/activity/${importId}`);
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  setFactorMapping                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Choose the emission factor for one `(category, unit)` pair — prompt 65, and
+ * the action that closes the loop `EmissionsSummary`'s coverage line opens.
+ *
+ * **The same stage order as every action above it**, in AGENTS.md 10's letters,
+ * with two differences from its neighbours and both are named where they happen:
+ * stage **d** refuses a non-owner, and stage **f** recalculates.
+ *
+ * **Owner-only, and this is where it is enforced.** Hiding the picker from a
+ * member is presentation and never enforcement (AGENTS.md 6.2, 11.2 rule 2). The
+ * choice is owner-only because a factor moves every figure in a disclosure,
+ * which puts it with `inviteMember` rather than with importing data —
+ * `app/account/actions.ts` performs the identical check at the identical stage.
+ * Aetherfield's own `staff` and `admin` grant nothing here (AGENTS.md 11.1).
+ *
+ * **A factor id from the browser is a claim, not a capability.** Stage e
+ * re-resolves it under the tenant's own visibility and re-asks the engine's
+ * eligibility rule; one belonging to another tenant's private set answers
+ * exactly as one that does not exist. No existence oracle.
+ *
+ * **It recalculates inline rather than leaving a "your figures are stale"
+ * notice.** The alternative leaves an already-calculated record showing a figure
+ * derived from a factor that is no longer mapped, with nothing on screen saying
+ * so — and a stale disclosure figure that looks current is the failure this
+ * whole area is shaped against. The cost is a slower action on a large tenant;
+ * it is bounded by `checkFactorMappingLimit` and by the platform's function
+ * timeout. `recalculateOrganization` is called rather than restated: it is **the
+ * one definition of what a recalculation is**, and this is now its third caller.
+ */
+export async function setFactorMapping(
+  input: unknown,
+): Promise<FactorMappingResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
+
+  // -- b. Session, tenant and role, then the rate limit --------------------
+  /* `getCurrentMembership()` rather than `resolveTenant()`, which returns ids
+     only: stage d needs the role, and the role is re-read from Postgres on
+     every call rather than trusted from the session payload (AGENTS.md 11.2
+     rule 5). No argument is taken, so no organisation id can be supplied. */
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: FACTOR_MAPPING_FAILURE };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account
+        ? FACTOR_MAPPING_NO_ORGANIZATION
+        : FACTOR_MAPPING_SIGNED_OUT,
+    };
+  }
+
+  const userId = membership.account.user.id;
+  const organizationId = membership.organization.id;
+
+  try {
+    const limit = await checkFactorMappingLimit(userId);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many changes. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    // Fails closed, as every path beside it does.
+    return { ok: false, error: FACTOR_MAPPING_FAILURE };
+  }
+
+  // -- c. Parse, with the same schema the leaf ran -------------------------
+  const parsed = factorMappingSchema.safeParse(input);
+  if (!parsed.success) {
+    const { fieldErrors } = z.flattenError(parsed.error);
+    return {
+      ok: false,
+      error: FACTOR_MAPPING_ERRORS.invalid,
+      fieldErrors: {
+        category: fieldErrors.category?.[0],
+        unit: fieldErrors.unit?.[0],
+        factorId: fieldErrors.factorId?.[0],
+      },
+    };
+  }
+  const { category, unit, factorId } = parsed.data;
+
+  // -- d. Authorise --------------------------------------------------------
+  if (membership.role !== "owner") {
+    return { ok: false, error: FACTOR_MAPPING_ERRORS.notOwner };
+  }
+
+  // -- e. Re-resolve the factor, re-check the engine's rule, then write ----
+  try {
+    const factor = await getVisibleFactor(organizationId, factorId);
+    if (!factor) {
+      return {
+        ok: false,
+        error: FACTOR_MAPPING_ERRORS.invalid,
+        fieldErrors: { factorId: FACTOR_MAPPING_ERRORS.notFound },
+      };
+    }
+
+    /* The picker only offers eligible rows, and this asks again anyway: the
+       list the browser rendered is a claim about what was offered, not a check.
+       The refusal is the engine's own sentence, so a person is told the same
+       thing here that the coverage surface would have told them later. */
+    const eligibility = factorEligibility(factor, unit);
+    if (!eligibility.ok) {
+      return {
+        ok: false,
+        error: FACTOR_MAPPING_ERRORS.invalid,
+        fieldErrors: { factorId: eligibility.reason },
+      };
+    }
+
+    await setFactorMappingRow({
+      organizationId,
+      category,
+      unit,
+      factorId: factor.id,
+      userId,
+    });
+  } catch {
+    return { ok: false, error: FACTOR_MAPPING_FAILURE };
+  }
+
+  // -- f. No email. Recalculate, so no stale figure survives the change. ---
+  try {
+    await recalculateOrganization(organizationId, null);
+  } catch {
+    /* **The mapping is already written and stays written.** A failed
+       recalculation is the same shape as AGENTS.md 10 rule 4's failed email:
+       the durable write succeeded, and reporting the whole thing as a failure
+       would invite a retry of a change that already landed. The figures are
+       stale until the next run, and the sentence below says so rather than
+       claiming a clean success. Nothing is logged (8.3 rule 2). */
+    revalidatePath("/activity");
+    revalidatePath("/activity/mappings");
+    return {
+      ok: false,
+      error:
+        "The factor was saved, but the figures could not be recalculated just now. Run a recalculation from the activity page.",
+    };
+  }
+
+  revalidatePath("/activity");
+  revalidatePath("/activity/mappings");
   return { ok: true };
 }
 

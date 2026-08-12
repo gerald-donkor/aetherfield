@@ -3636,6 +3636,152 @@ email, blob or AI provider involved.
 | touching `getMembership()`'s `.limit(1)` | with the index it is exact. Changing it would hide the invariant rather than assert it |
 | a members-UI or organisation-surface change | prompt 63 shipped those and they are unaffected |
 
+## Factor-mapping surface, prompt 65
+
+Implemented on 12 Aug 2026. **No new §5.2 build step** — the ordered sequence
+is exhausted. This closes an existing product loop instead: `/activity` already
+told a tenant when committed records were outside the calculated total, while
+`DEFAULT_FACTOR_MAPPINGS` deliberately covered only the known-safe starting
+pairs and no reporter could override or fill a missing `(category, unit)`
+mapping.
+
+### What was verified before building
+
+- `app/_components/activity/emissions-summary.tsx` rendered an incomplete-total
+  line, but its copy over-claimed: `countUncalculatedRecords()` counts every
+  committed record with no `activity_emission` row, not only records with no
+  mapped factor.
+- `lib/domain/defra.ts` seeds 11 default mappings and explicitly leaves the
+  rest unmapped rather than guessing. A wrong default would be invisible; an
+  unmapped pair is a legible gap.
+- `activity_factor_mapping.created_by` already existed for the provenance line,
+  but all rows were seeded defaults because there was no user-facing writer.
+- `hasAnyFactorMapping()` had no caller, and its docblock claimed a surface used
+  it. Prompt 65 corrected the docblock rather than leaving the prediction in
+  place (§12 rule 8).
+
+### Decisions
+
+All five are judgements, not measurements.
+
+| decision | result |
+| --- | --- |
+| Owner-only writes | Any member may read `/activity/mappings`; `setFactorMapping` refuses `membership.role !== "owner"` at stage d. Aetherfield `staff` and `admin` grant nothing on the tenant side. |
+| Recalculate inline | After a mapping write, the action calls `recalculateOrganization(organizationId, null)` and revalidates `/activity` and `/activity/mappings`, so a stale disclosure figure is not left looking current. |
+| Set and change only | There is no unmap control. `activity_factor_mapping_key` is a plain unique index, so the upsert clears `deleted_at` when changing a soft-deleted row. |
+| Server-rendered search | The picker uses `?category=&unit=&q=` and a Server Component query, not a client data-fetching path over thousands of factors. |
+| Activity sub-flow | `/activity/mappings` is not a top-level workspace tab. It is linked from the Activity coverage line and sits under the existing `/activity/:path*` proxy matcher, which did not widen. |
+
+### Domain and query layer
+
+`lib/domain/emissions.ts` now exports `factorEligibility()` and
+`admissibleFactorUnits()`. They are pure, tested, and built from the same
+`result_unit` check and `convertQuantity()` path that `calculateRecordEmission`
+uses, so the picker cannot offer a factor the engine would refuse for unit or
+result-unit reasons.
+
+`lib/db/emission-queries.ts` gained the mapping-surface queries:
+
+- `listFactorCoverage(organizationId)` groups committed, non-deleted activity
+  records by `(category, unit)` and left-joins the organisation's live mapping.
+  Pairs with no records are deliberately absent.
+- `searchFactorsForPair(organizationId, unit, query)` searches visible,
+  non-deleted, non-superseded factors, restricted to `result_unit = 'kg_co2e'`
+  and `activity_unit in admissibleFactorUnits(unit)`. The result limit is 50.
+- `getVisibleFactor(organizationId, factorId)` re-resolves a submitted factor id
+  under the tenant's visibility. A foreign private factor and a nonexistent id
+  both return `null`.
+- `setFactorMapping()` upserts on
+  `(organization_id, category, unit)`, setting `factor_id`, `created_by`,
+  `updated_at` and `deleted_at = null`.
+
+The query module also had one interrupted-edit artefact removed: a NUL byte in
+`buildFactorResolver()`'s pair key. A Perl NUL scan returned no output after
+the fix.
+
+### Action and surface
+
+`app/activity/actions.ts` gained `setFactorMapping(input)`, following the
+existing lettered action order: no BotID on an authenticated path, membership
+and user-id rate limit, shared Zod parse, owner authorisation, factor
+re-resolution and eligibility check, upsert, recalculation, revalidation, typed
+result. It adds `checkFactorMappingLimit(userId)`, 30 changes per hour, because
+the write can recalculate the whole organisation and should not share the import
+commit bucket.
+
+`lib/validation/activity.ts` owns the shared `factorMappingSchema`, result type
+and user-facing error constants. The category and unit parse against the
+existing vocabularies; `factorId` is a UUID shape check only. Existence,
+visibility and eligibility remain server-side checks.
+
+`app/activity/mappings/page.tsx` is a Server Component gated by
+`requireOrganization("/activity/mappings")`. It lists the committed pairs in
+use, unmapped first, shows mapped factor provenance and OGL attribution from
+the factor set rows, and renders the search form for the selected pair.
+`app/_components/activity/factor-picker.tsx` is the only client leaf: it takes
+server-read rows, runs the courtesy Zod check, calls the action, announces the
+typed result, and refreshes the route on success. It imports no server-only
+module.
+
+`app/_components/activity/emissions-summary.tsx` now says records have "no
+calculated emission yet" rather than "no emission factor mapped", and links to
+`/activity/mappings`.
+
+### Prerender impact and verification, prompt 65
+
+**Expected none, and verified rather than assumed.** The new route is dynamic
+(`ƒ /activity/mappings`) and the marketing routes remain static/SSG. The normal
+`npm run build` generated 31 static pages after the change; the base tree, with
+the change stashed, generated 30 because the new dynamic route did not exist.
+
+The two-build method from prompt 64 was used again in the same working tree.
+After normalising the embedded build id and generated `/_next/static/chunks/*`
+JS/CSS filenames in the server app HTML, the comparison found:
+
+```
+base_html=21
+changed_html=21
+common_html=21
+normalized_diffs=none
+```
+
+### Checks run, prompt 65
+
+- `npm run lint` — exit 0, no diagnostics beyond npm notice lines.
+- `npm run typecheck` — exit 0, `tsc --noEmit`.
+- `npm test` — `Test Files 8 passed (8)`, `Tests 178 passed (178)`.
+- `npm run build` — exit 0, Next 16.2.12 Turbopack, compiled successfully,
+  31/31 static pages, route table includes `ƒ /activity/mappings`.
+- `npm run test:e2e:local` — failed before tests ran:
+  `Error: Process from config.webServer was not able to start. Exit code: 1`.
+  Starting the configured server directly showed why: `next start -p 3100`
+  reported `Could not find a production build in the '.next' directory` because
+  the current `next build` output contains no `.next/BUILD_ID`. No tests ran.
+- `node_modules/.bin/next build --webpack --debug` — also failed, but Next did
+  not print a specific webpack diagnostic beyond `Build failed because of
+  webpack errors`. It was used only to diagnose the E2E startup blocker, not as
+  a replacement for `npm run build`.
+- `npm run test:e2e:webkit` — did not run: the script reports `Podman is
+  required for WebKit on Arch Linux. Install it with: sudo pacman -S --needed
+  podman`. `which podman` returned `podman not found`.
+
+### Secrets and data, prompt 65
+
+No new environment variable and no `NEXT_PUBLIC_*`. No new provider, email,
+blob or AI call. The change stores one new fact in an existing column: the user
+id that chose a factor for a pair. Nothing is logged on any path.
+
+### What prompt 65 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| a step 15 | §5.2 remains the ordered plan; this is a new approved feature after the sequence |
+| unmap / clear | what a removed mapping means needs a separate data-model decision |
+| custom customer-supplied factors | needs provenance, licence and validation for tenant-owned factor sets |
+| AI factor matching | deterministic surface first; §5.3's model suggestion remains unbuilt |
+| per-record factor overrides | the data model maps by `(category, unit)` |
+| E2E coverage for this surface | not part of the approved candidate; the existing E2E command is currently blocked before tests |
+
 ## Step 9 — activity-data ingestion
 
 Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation

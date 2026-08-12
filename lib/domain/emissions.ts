@@ -5,7 +5,10 @@
  * **Pure** (AGENTS.md 6.2): no database handle, no `fetch`, no implicit
  * `Date.now()`. Every input is a parameter and every call is reproducible from
  * its arguments alone, which is what makes it independently testable — see
- * `lib/domain/__tests__/emissions.test.ts`.
+ * `lib/domain/emissions.test.ts`, beside this file. (This line named
+ * `lib/domain/__tests__/emissions.test.ts` from build step 10 until prompt 65;
+ * there is no such directory, so it is corrected rather than left pointing at
+ * nothing — AGENTS.md 12 rules 1 and 8.)
  *
  * **All arithmetic is deterministic and exact.** Nothing here is a model,
  * nothing here is heuristic, and no `Number` appears on the value path:
@@ -51,6 +54,7 @@ import type {
   ActivityUnit,
 } from "../validation/activity";
 import {
+  FACTOR_ACTIVITY_UNITS,
   type Ch4Variant,
   type EmissionScope,
   type FactorActivityUnit,
@@ -234,6 +238,12 @@ export type EmissionRefusal =
   | "unit_mismatch"
   | "gas_not_priceable";
 
+/** Stated once and read by both {@link calculateRecordEmission} and
+    {@link factorEligibility}, so the picker's rejection and the engine's are
+    literally the same sentence rather than two that can drift apart. */
+const NOT_AN_EMISSION =
+  "This factor converts an activity into kWh, not into emissions. It cannot contribute to a tCO2e total.";
+
 export type RecordEmission = {
   recordId: string;
   activityDate: string;
@@ -273,8 +283,7 @@ export function calculateRecordEmission(
     return {
       ok: false,
       refusal: "factor_is_not_an_emission",
-      reason:
-        "This factor converts an activity into kWh, not into emissions. It cannot contribute to a tCO2e total.",
+      reason: NOT_AN_EMISSION,
     };
   }
 
@@ -319,6 +328,84 @@ export function calculateRecordEmission(
       engineVersion: ENGINE_VERSION,
     },
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Which factors may be offered for a pair                                    */
+/* -------------------------------------------------------------------------- */
+
+/** The two ways a factor can be ineligible for a `(category, unit)` pair
+    *before* any quantity exists. Both are members of {@link EmissionRefusal}
+    rather than a second vocabulary — they are the same two refusals
+    {@link calculateRecordEmission} would produce, asked in advance. */
+export type FactorIneligibility = Extract<
+  EmissionRefusal,
+  "factor_is_not_an_emission" | "unit_mismatch"
+>;
+
+export type FactorEligibility =
+  | { ok: true }
+  | { ok: false; refusal: FactorIneligibility; reason: string };
+
+/**
+ * Can this factor produce a figure for activity measured in `unit`?
+ *
+ * **The engine's own rule, asked before a record exists**, so the mapping
+ * surface can offer a reporter only the rows that would actually calculate.
+ * Without it an owner can "fix" an unmapped pair and change nothing but the
+ * refusal reason: the records stay outside the total, and the coverage line
+ * still says the total is incomplete — a dead end that looks like an action.
+ *
+ * **Built on `convertQuantity` and the same `result_unit` check, not a second
+ * copy of either.** The two checks below are the first two
+ * {@link calculateRecordEmission} performs, in its order, reading the same
+ * table and returning the same sentences. A third copy of the unit rule is
+ * exactly how a picker starts offering rows the engine refuses.
+ *
+ * The quantity is `ZERO` because a conversion's *possibility* is a property of
+ * the two units and nothing else — `convertQuantity` refuses on dimension and
+ * on representability, never on a value. The three refusals
+ * {@link calculateRecordEmission} can still produce afterwards
+ * (`unreadable_quantity`, `unreadable_factor`, `gas_not_priceable`) depend on
+ * data this function is not given, and are deliberately not guessed at here.
+ */
+export function factorEligibility(
+  factor: Pick<FactorInput, "activityUnit" | "resultUnit">,
+  unit: ActivityUnit,
+): FactorEligibility {
+  if (factor.resultUnit !== "kg_co2e") {
+    return {
+      ok: false,
+      refusal: "factor_is_not_an_emission",
+      reason: NOT_AN_EMISSION,
+    };
+  }
+
+  const converted = convertQuantity(ZERO, unit, factor.activityUnit);
+  if (!converted.ok) {
+    return { ok: false, refusal: "unit_mismatch", reason: converted.reason };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Every published denominator an activity in `unit` can be calculated against.
+ *
+ * **Derived from {@link factorEligibility}, never enumerated by hand.** It is
+ * what lets `lib/db/emission-queries.ts` narrow a factor search in SQL without
+ * restating the engine's unit rule: the query filters `activity_unit` to this
+ * list, and the action re-checks the chosen row against the predicate itself.
+ * A hand-written list here would be a second definition of the same rule and
+ * would drift the first time a unit is added.
+ */
+export function admissibleFactorUnits(
+  unit: ActivityUnit,
+): FactorActivityUnit[] {
+  return FACTOR_ACTIVITY_UNITS.filter(
+    (activityUnit) =>
+      factorEligibility({ activityUnit, resultUnit: "kg_co2e" }, unit).ok,
+  );
 }
 
 /* -------------------------------------------------------------------------- */

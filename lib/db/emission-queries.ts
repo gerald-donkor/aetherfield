@@ -1,7 +1,8 @@
 import "server-only";
 
-import { and, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 
+import { user } from "./auth-schema";
 import { getDb, type Db } from "./client";
 import {
   activityEmission,
@@ -13,6 +14,7 @@ import {
 import type { ActivityCategory, ActivityUnit } from "../validation/activity";
 import { DEFAULT_FACTOR_MAPPINGS } from "../domain/defra";
 import {
+  admissibleFactorUnits,
   aggregate,
   toStoredKgCo2e,
   type ActivityInput,
@@ -232,10 +234,10 @@ export async function listFactorMappings(
 export function buildFactorResolver(mappings: readonly ResolvedMapping[]) {
   const byPair = new Map<string, FactorInput>();
   for (const mapping of mappings) {
-    byPair.set(`${mapping.category} ${mapping.unit}`, mapping.factor);
+    byPair.set(`${mapping.category}.${mapping.unit}`, mapping.factor);
   }
   return (record: ActivityInput): FactorInput | null =>
-    byPair.get(`${record.category} ${record.unit}`) ?? null;
+    byPair.get(`${record.category}.${record.unit}`) ?? null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -508,10 +510,18 @@ export async function countUncalculatedRecords(
 /**
  * Whether this organisation has any factor mapping at all.
  *
- * The surface uses it to tell the difference between "nothing is mapped yet",
- * which is the state a new organisation is in and needs explaining, and "these
- * particular records did not match", which is a gap in an otherwise working
- * setup. Both are honest failures; they are not the same message.
+ * **It has no caller, and this docblock used to claim otherwise.** Build step 10
+ * wrote that "the surface uses it to tell the difference between 'nothing is
+ * mapped yet' … and 'these particular records did not match'". No surface ever
+ * did, and prompt 65 — which built the surface that would have — does not
+ * either: {@link listFactorCoverage} answers the same question *per pair* and
+ * from the same round trip, which is strictly more than this can say. Corrected
+ * rather than left predicting something that did not happen (AGENTS.md 12
+ * rule 8).
+ *
+ * Kept rather than deleted because the question is a real one for a caller that
+ * holds no coverage list — the nightly sweep would have to ask it to distinguish
+ * an unseeded organisation from an idle one. It is not called today.
  */
 export async function hasAnyFactorMapping(
   organizationId: string,
@@ -527,6 +537,355 @@ export async function hasAnyFactorMapping(
     )
     .limit(1);
   return Boolean(row);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The mapping surface — prompt 65                                            */
+/* -------------------------------------------------------------------------- */
+
+/** The publisher's own description of a factor row, assembled the one way
+    `listFactorMappings` already assembles it, so the picker, the coverage list
+    and the calculation seam all name a row identically. */
+function factorLabelOf(
+  parts: readonly (string | null)[],
+): string {
+  return parts.filter(Boolean).join(" · ");
+}
+
+export type FactorCoveragePair = {
+  category: ActivityCategory;
+  unit: ActivityUnit;
+  /** Committed records sitting behind this pair. */
+  recordCount: number;
+  /** `null` is the gap the surface exists to close. */
+  mapping: {
+    factorId: string;
+    factorLabel: string;
+    publishedUom: string;
+    source: string;
+    datasetVersion: string;
+    chosenAt: Date;
+    /** The person who chose it, or `null` for a seeded default — which no
+        person chose, exactly as the column's own docblock says. */
+    chosenBy: string | null;
+  } | null;
+};
+
+/**
+ * Every `(category, unit)` the organisation's committed records actually use,
+ * with the factor mapped to it or nothing.
+ *
+ * **The gap, without running the engine.** `aggregate()` already computes an
+ * identical shape in `CoverageReport.unmatchedPairs`, but obtaining it means a
+ * full recalculation, and a page render must not recompute a disclosure input
+ * (`listEmissions`' docblock says why). This is the same question asked of the
+ * rows themselves.
+ *
+ * **Pairs with no records are deliberately absent.** All 64 are possible and
+ * eight are seeded by default; listing the 53 a tenant has never recorded
+ * against would bury the handful that matter. What a reporter is owed is the
+ * shape of their own data.
+ *
+ * Predicated on `organization_id = $1` throughout — on the records, and again on
+ * the mapping join, so a pair can never pick up another tenant's choice.
+ */
+export async function listFactorCoverage(
+  organizationId: string,
+): Promise<FactorCoveragePair[]> {
+  const rows = await getDb()
+    .select({
+      category: activityRecord.category,
+      unit: activityRecord.unit,
+      recordCount: sql<number>`count(*)::int`,
+      factorId: activityFactorMapping.factorId,
+      chosenAt: activityFactorMapping.updatedAt,
+      chosenBy: user.name,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+      publishedUom: emissionFactor.publishedUom,
+      source: emissionFactorSet.source,
+      datasetVersion: emissionFactorSet.datasetVersion,
+    })
+    .from(activityRecord)
+    .leftJoin(
+      activityFactorMapping,
+      and(
+        eq(activityFactorMapping.organizationId, organizationId),
+        eq(activityFactorMapping.category, activityRecord.category),
+        eq(activityFactorMapping.unit, activityRecord.unit),
+        isNull(activityFactorMapping.deletedAt),
+      ),
+    )
+    .leftJoin(
+      emissionFactor,
+      and(
+        eq(emissionFactor.id, activityFactorMapping.factorId),
+        isNull(emissionFactor.deletedAt),
+      ),
+    )
+    .leftJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .leftJoin(user, eq(user.id, activityFactorMapping.createdBy))
+    .where(
+      and(
+        eq(activityRecord.organizationId, organizationId),
+        isNull(activityRecord.deletedAt),
+      ),
+    )
+    /* Every non-aggregated column, listed rather than leaning on Postgres's
+       functional-dependency rule: that rule is stated for a grouped primary
+       key, and three of these tables sit on the nullable side of an outer
+       join. Explicit is one line longer and cannot surprise us. */
+    .groupBy(
+      activityRecord.category,
+      activityRecord.unit,
+      activityFactorMapping.factorId,
+      activityFactorMapping.updatedAt,
+      user.name,
+      emissionFactor.level2,
+      emissionFactor.level3,
+      emissionFactor.columnText,
+      emissionFactor.publishedUom,
+      emissionFactorSet.source,
+      emissionFactorSet.datasetVersion,
+    )
+    /* Unmapped first, then the biggest gap — the same reading order
+       `aggregate()` sorts `unmatchedPairs` into, so the two agree on which gap
+       is the one to look at. */
+    .orderBy(
+      sql`(${activityFactorMapping.factorId} is not null)`,
+      sql`count(*) desc`,
+      asc(activityRecord.category),
+      asc(activityRecord.unit),
+    );
+
+  return rows.map((row) => ({
+    category: row.category,
+    unit: row.unit,
+    recordCount: row.recordCount,
+    mapping:
+      row.factorId && row.source && row.datasetVersion
+        ? {
+            factorId: row.factorId,
+            factorLabel: factorLabelOf([
+              row.level2,
+              row.level3,
+              row.columnText,
+            ]),
+            publishedUom: row.publishedUom ?? "",
+            source: row.source,
+            datasetVersion: row.datasetVersion,
+            chosenAt: row.chosenAt ?? new Date(0),
+            chosenBy: row.chosenBy,
+          }
+        : null,
+  }));
+}
+
+/**
+ * How many rows a search returns.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4). The 2026 set holds
+ * 7,035 rows and a reporter scanning a list to choose one factor is doing
+ * careful work, not browsing: 50 is more than a screen and far short of a page
+ * nobody reads to the end of. Narrowing the search is the way to see a
+ * different fifty.
+ */
+export const FACTOR_SEARCH_LIMIT = 50;
+
+export type FactorSearchRow = {
+  id: string;
+  label: string;
+  publishedUom: string;
+  scope: FactorInput["scope"];
+  gas: FactorInput["gas"];
+  value: string;
+  source: string;
+  datasetVersion: string;
+};
+
+/** Postgres reads `%` and `_` as wildcards and `\` as the default escape, so a
+    reporter typing "Diesel_100%" would otherwise run a much broader search than
+    they asked for. Escaping is a correctness fix, not a safety one — the
+    pattern is a bound parameter either way. */
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * The factors that can be offered for one `(category, unit)` pair.
+ *
+ * **Narrowed by the engine's own rule, not by a second copy of it.**
+ * `admissibleFactorUnits` derives the admissible denominators from
+ * `factorEligibility`, and `result_unit = 'kg_co2e'` is the same check
+ * `calculateRecordEmission` performs first. Offering a row the engine would
+ * refuse lets an owner "fix" a gap and change nothing but the refusal reason.
+ *
+ * Visible reference data only (`organization_id is null or = $1`), non-deleted,
+ * and from a set that has not been superseded — the same three predicates
+ * `seedDefaultMappings` applies, so nothing can be chosen here that the seeder
+ * would not have chosen.
+ *
+ * The match is over the publisher's own description columns, which are the three
+ * `listFactorMappings` already joins into `factorLabel`.
+ */
+export async function searchFactorsForPair(
+  organizationId: string,
+  unit: ActivityUnit,
+  query: string,
+): Promise<FactorSearchRow[]> {
+  const admissible = admissibleFactorUnits(unit);
+  if (admissible.length === 0) return [];
+
+  const trimmed = query.trim();
+  const pattern = trimmed === "" ? null : `%${escapeLike(trimmed)}%`;
+
+  const rows = await getDb()
+    .select({
+      id: emissionFactor.id,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+      publishedUom: emissionFactor.publishedUom,
+      scope: emissionFactor.scope,
+      gas: emissionFactor.gas,
+      value: emissionFactor.value,
+      source: emissionFactorSet.source,
+      datasetVersion: emissionFactorSet.datasetVersion,
+    })
+    .from(emissionFactor)
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        visibleFactorScope(organizationId),
+        isNull(emissionFactor.deletedAt),
+        isNull(emissionFactorSet.deletedAt),
+        isNull(emissionFactorSet.supersededBySetId),
+        eq(emissionFactor.resultUnit, "kg_co2e"),
+        inArray(emissionFactor.activityUnit, admissible),
+        pattern
+          ? or(
+              ilike(emissionFactor.level2, pattern),
+              ilike(emissionFactor.level3, pattern),
+              ilike(emissionFactor.columnText, pattern),
+            )
+          : undefined,
+      ),
+    )
+    .orderBy(
+      asc(emissionFactor.level2),
+      asc(emissionFactor.level3),
+      asc(emissionFactor.columnText),
+    )
+    .limit(FACTOR_SEARCH_LIMIT);
+
+  return rows.map((row) => ({
+    id: row.id,
+    label: factorLabelOf([row.level2, row.level3, row.columnText]),
+    publishedUom: row.publishedUom,
+    scope: row.scope,
+    gas: row.gas,
+    value: row.value,
+    source: row.source,
+    datasetVersion: row.datasetVersion,
+  }));
+}
+
+export type VisibleFactor = {
+  id: string;
+  label: string;
+  activityUnit: FactorInput["activityUnit"];
+  resultUnit: FactorInput["resultUnit"];
+};
+
+/**
+ * One factor, re-resolved under the tenant's own visibility.
+ *
+ * **A factor id arriving from the browser is a claim, not a capability.** One
+ * belonging to another tenant's private set answers `null`, which is
+ * indistinguishable from one that does not exist — the same stance `getImport`
+ * takes on a foreign `importId`. No existence oracle.
+ */
+export async function getVisibleFactor(
+  organizationId: string,
+  factorId: string,
+): Promise<VisibleFactor | null> {
+  const [row] = await getDb()
+    .select({
+      id: emissionFactor.id,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+      activityUnit: emissionFactor.activityUnit,
+      resultUnit: emissionFactor.resultUnit,
+    })
+    .from(emissionFactor)
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        eq(emissionFactor.id, factorId),
+        visibleFactorScope(organizationId),
+        isNull(emissionFactor.deletedAt),
+        isNull(emissionFactorSet.deletedAt),
+        isNull(emissionFactorSet.supersededBySetId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    label: factorLabelOf([row.level2, row.level3, row.columnText]),
+    activityUnit: row.activityUnit,
+    resultUnit: row.resultUnit,
+  };
+}
+
+/**
+ * Sets the organisation's factor for one `(category, unit)` pair.
+ *
+ * **`deleted_at` is cleared, and that is required for correctness rather than
+ * tidiness.** `activity_factor_mapping_key` is a plain unique index, not a
+ * partial one (`lib/db/schema.ts`), so a soft-deleted row still occupies its
+ * `(organization_id, category, unit)` slot: an upsert that left `deleted_at`
+ * set would resurrect nothing and re-mapping the pair would keep failing the
+ * conflict silently. Prompt 65 sets and changes a mapping and deliberately
+ * offers no unmap — what a removed mapping means is a decision of its own.
+ *
+ * **This is a `set`, not a `seed`.** `seedDefaultMappings` refuses to overwrite
+ * a reporter's own choice, for the reason its docblock records; this *is* the
+ * reporter's own choice, made deliberately, so it overwrites.
+ */
+export async function setFactorMapping(input: {
+  organizationId: string;
+  category: ActivityCategory;
+  unit: ActivityUnit;
+  factorId: string;
+  /** The person who chose it, for the provenance line. */
+  userId: string;
+}): Promise<void> {
+  await getDb()
+    .insert(activityFactorMapping)
+    .values({
+      organizationId: input.organizationId,
+      category: input.category,
+      unit: input.unit,
+      factorId: input.factorId,
+      createdBy: input.userId,
+    })
+    .onConflictDoUpdate({
+      target: [
+        activityFactorMapping.organizationId,
+        activityFactorMapping.category,
+        activityFactorMapping.unit,
+      ],
+      set: {
+        factorId: input.factorId,
+        createdBy: input.userId,
+        updatedAt: new Date(),
+        deletedAt: null,
+      },
+    });
 }
 
 /**

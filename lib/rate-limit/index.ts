@@ -165,6 +165,31 @@ const ACTIVITY_COMMIT_LIMIT = 60;
 const ACTIVITY_COMMIT_WINDOW = "1 h" as const;
 
 /**
+ * Choosing the emission factor for a `(category, unit)` pair, **keyed by user
+ * id** — prompt 65.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
+ * as every window above it: the flow has never shipped, so there is nothing to
+ * fit against.
+ *
+ * **A named limiter rather than a reuse of `checkActivityCommitLimit`**, for the
+ * reason the target and report limiters each record, and here the asymmetry is
+ * larger than either. That limiter's 60 an hour is sized for "one transaction
+ * over rows that are already staged"; this write recalculates the **whole
+ * organisation** afterwards — every committed record, through the engine — which
+ * is the heaviest operation a person can trigger from a form in this codebase.
+ * Sharing a bucket would also let an afternoon of import work exhaust the
+ * allowance for closing a coverage gap, which is the thing a reporter is trying
+ * to do before filing.
+ *
+ * 30 an hour is deliberately loose against honest use: an owner working through
+ * a list of unmapped pairs sets one factor per attempt, and a tenant has at most
+ * 64 pairs in total.
+ */
+const FACTOR_MAPPING_LIMIT = 30;
+const FACTOR_MAPPING_WINDOW = "1 h" as const;
+
+/**
  * Setting and retiring a target, **keyed by user id** — build step 11.
  *
  * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
@@ -499,6 +524,25 @@ export async function checkActivityCommitLimit(
     "activity-commit",
     ACTIVITY_COMMIT_LIMIT,
     ACTIVITY_COMMIT_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Choosing the emission factor for a `(category, unit)` pair, keyed by the
+ * **user id**. Stage b of AGENTS.md 10 — see the constant's docblock for why it
+ * is not `checkActivityCommitLimit`, and why the number is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkFactorMappingLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "factor-mapping",
+    FACTOR_MAPPING_LIMIT,
+    FACTOR_MAPPING_WINDOW,
     userId,
   );
 }

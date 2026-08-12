@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   listEmissions,
   countUncalculatedRecords,
@@ -150,8 +152,18 @@ export async function EmissionsSummary({
                     "en-GB",
                   )} ${
                     uncalculated === 1 ? "record has" : "records have"
-                  } no emission factor mapped and contribute nothing to the figures below — this total is not complete.`}
+                  } no calculated emission yet and contribute nothing to the figures below — this total is not complete.`}
             </p>
+            {!complete ? (
+              <p className="mt-3 font-sans text-nav font-bold">
+                <Link
+                  href="/activity/mappings"
+                  className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  Review factor mappings
+                </Link>
+              </p>
+            ) : null}
           </div>
 
           <dl className="mt-8 grid gap-6 border-y border-border py-7 md:grid-cols-4">
