@@ -3784,6 +3784,14 @@ id that chose a factor for a pair. Nothing is logged on any path.
 
 ## Custom factor sets, prompt 66
 
+> **Seven parts of this section were corrected by prompt 67 on 12 Aug 2026 and
+> are marked inline below.** The set is no longer found-or-created from the
+> typed source and version, `retireTenantFactor` no longer returns a bare
+> boolean, `source_row_id` no longer hashes the set's columns, and the client
+> leaf no longer renders the row list. Read
+> [Custom factor set corrections, prompt 67](#custom-factor-set-corrections-prompt-67)
+> for what is current.
+
 Implemented on 12 Aug 2026. **No new §5.2 build step** — the ordered sequence
 is exhausted. This closes prompt 65's named non-goal: an owner can now add a
 tenant-owned, customer-supplied factor with provenance when the correct supplier
@@ -3824,6 +3832,11 @@ rows continue to carry both URLs.
 `retireCustomFactorSchema`. They are shared by the `/activity/factors` client
 leaf and by the Server Actions.
 
+**Corrected by prompt 67.** `customFactorSetSchema` no longer exists:
+`newFactorSetSchema`, `existingFactorSetSchema` and `factorSetChoiceSchema`
+replace it, and the two cross-field rules moved onto `createCustomFactorSchema`'s
+wrapper.
+
 Important rules enforced before any write:
 
 - factor values are positive decimal strings bounded to 5 integer digits and
@@ -3833,8 +3846,9 @@ Important rules enforced before any write:
 - scope 3 category is required only for scope 3;
 - scope 2 method is required only for scope 2;
 - CH4 variant is required only for CH4;
-- effective end date cannot precede effective start date;
-- a source URL or internal source reference is required;
+- effective end date cannot precede effective start date — **prompt 67: only
+  when a new set is being created**, since an existing set does not restate it;
+- a source URL or internal source reference is required — **same guard**;
 - strings are trimmed and bounded, with empty required strings rejected.
 
 The value precision remains **measured** from step 10's DEFRA seed. The
@@ -3852,9 +3866,12 @@ Added helpers:
   `listTenantFactors(organizationId)` read only rows with
   `organization_id = $1`;
 - `createTenantFactor()` wraps set find-or-create and factor insertion in one
-  Drizzle transaction;
+  Drizzle transaction — **corrected by prompt 67: there is no find-or-create.
+  The set is the submitter's explicit choice and the function returns a typed
+  outcome, not a bare `{ factorId }`**;
 - `retireTenantFactor()` soft-retires only a factor row whose
-  `organization_id = $1`;
+  `organization_id = $1` — **corrected by prompt 67: it returns the count of
+  active mappings it unmapped, not a boolean**;
 - `searchFactorsForPair()` and `listFactorCoverage()` now include
   `customerSupplied` and set provenance, so UI attribution is data-driven.
 
@@ -3872,7 +3889,9 @@ organization_id = $1
 
 The deterministic tenant-owned `source_row_id` is a SHA-256 hash over the
 organisation id, normalised set identity and factor identity, prefixed with
-`custom:`. It is stable enough for duplicate form submissions and includes the
+`custom:`. **Corrected by prompt 67: it hashes the resolved `set_id` rather than
+the typed source and version**, which do not exist on a submission that chooses
+an existing set. It is stable enough for duplicate form submissions and includes the
 tenant id, so it is not a cross-tenant identifier.
 
 ### Actions and surface
@@ -3896,6 +3915,12 @@ and factor rows, renders a compact manual-entry form, and links back to
 `app/_components/activity/custom-factor-form.tsx`; it performs courtesy
 validation, pending state, focus management, result announcement and retire
 clicks. It does no data fetching and exports no constants or types.
+
+**Corrected by prompt 67.** The leaf ran to 619 lines and included the whole row
+table, against its own brief that it owns "only pending state, courtesy
+validation, focus management and the announced result". The rows are now
+rendered by the Server Component, and
+retirement moved to `app/_components/activity/retire-factor-button.tsx`.
 
 `/activity/mappings` now links to `/activity/factors` and labels tenant-owned
 search results or current mappings as customer-supplied. Attribution no longer
@@ -3945,6 +3970,10 @@ diff_html=0
 - prerender diff — `diff_html=0` across 21 shared prerendered HTML files.
 - `npm run test:e2e:local` — failed before tests ran:
   `Error: Process from config.webServer was not able to start. Exit code: 1`.
+  **This did not reproduce at prompt 67**, which ran the same command to
+  `10 passed (29.4s)`. The failure was environmental, not a harness defect, and
+  the "E2E harness repair" non-goal carried by prompts 66 and 67 has no repair
+  to do beyond WebKit's missing `podman`.
 - `npm run test:e2e:webkit` — not run because `podman` is not installed.
   `scripts/playwright-webkit.sh` says: `Podman is required for WebKit on Arch
   Linux. Install it with: sudo pacman -S --needed podman`.
@@ -3974,6 +4003,197 @@ existing prompt 65 flow.
 | AI factor matching | no model belongs in this deterministic data-entry flow |
 | top-level workspace navigation | this is an Activity sub-flow |
 | E2E harness repair | the existing local runner still fails before tests start |
+
+## Custom factor set corrections, prompt 67
+
+Implemented on 12 Aug 2026. **No new §5.2 build step and no new product
+surface** — a correction pass on prompt 66, whose review found seven defects.
+One of them wrote wrong provenance into disclosure evidence, which is why
+nothing further was built on `/activity/factors` before it landed.
+
+### The seven findings, and what each became
+
+| # | finding | fix |
+| --- | --- | --- |
+| 1 | set metadata silently discarded after the first row | the set became an explicit choice; see below |
+| 2 | retiring gave no in-use signal | the row states its mapping count and retirement is armed, confirmed and announced |
+| 3 | retired rows still counted in `listTenantFactorSets` | `and deleted_at is null` added, matching `listFactorSets` |
+| 4 | non-owners saw the whole form | `membership.role` read on the page; presentation only |
+| 5 | `<dt>`/`<dd>` with no `<dl>` ancestor in `Detail` | the set-detail grid is a `<dl>` |
+| 6 | `gas_basis` hard-coded `combined_co2e` | derived from the chosen gas |
+| 7 | the client leaf rendered the factor list | rows moved to the Server Component |
+
+### Finding 1, which is the load-bearing one
+
+`createTenantFactor` inserted the set with `onConflictDoNothing` and re-selected
+it, so the second and every later row under one `(source, dataset_version)`
+threw away the licence, effective range, source URL, reference and notes the
+form had just collected. The owner saw "Customer-supplied factor saved" and no
+indication. That licence is rendered as disclosure evidence by `reportSections`'
+provenance notes, on `/dashboard` and in `EmissionsSummary`, so a corrected
+licence never landed and a wrong one persisted.
+
+**The fix is that the set is chosen, not inferred.** `createCustomFactorSchema`'s
+`set` is a `z.discriminatedUnion("mode", …)` over `newFactorSetSchema` and
+`existingFactorSetSchema`, and the form's metadata fields appear only for
+`mode: "new"`. Validating resubmitted metadata against the stored set was
+rejected as the alternative: it makes the owner retype it on every row and turns
+a harmless repeat into an error.
+
+Both union members are **plain object schemas**, because `z.discriminatedUnion`
+requires it — the two cross-field rules that belonged to the set
+(`effectiveTo` not before `effectiveFrom`; a source URL or an internal
+reference) moved to a `superRefine` on the wrapping object, guarded by
+`set.mode === "new"` and emitting two-segment `["set", …]` paths so the existing
+field-error mapping in both the action and the leaf is unchanged.
+
+### What the query layer now answers
+
+`createTenantFactor` returns a typed outcome rather than throwing for an
+expected refusal:
+
+```
+{ ok: true, factorId }
+| { ok: false, reason: "set_exists" }
+| { ok: false, reason: "set_not_found" }
+| { ok: false, reason: "gas_basis_mismatch", setGasBasis }
+```
+
+- **`mode: "existing"`** re-reads the set under `id = $1 and organization_id =
+  $2 and deleted_at is null`. Missing, retired and foreign are one
+  indistinguishable `set_not_found` — a submitted set id is a claim, not a
+  capability, exactly as `getVisibleFactor` treats a foreign factor id.
+- **`mode: "new"`** inserts with the existing `onConflictDoNothing` target and
+  predicate and takes the `returning()` row. Nothing inserted means the set
+  exists, which is `set_exists` — and the race where a concurrent submission
+  created it a moment earlier gets the same answer, so two submissions cannot
+  diverge.
+- **`gas_basis` is derived, not asked**: `co2e` writes `combined_co2e`, every
+  other gas writes `per_gas`. No new form field appeared. A set holds one basis
+  (the column is per-set), so a row of the other kind into an existing set is
+  `gas_basis_mismatch` rather than a mislabelled row. Making the basis per-row
+  is a schema change and belongs to whoever needs it.
+
+`retireTenantFactor` returns `{ retired: false }` or
+`{ retired: true, mappingCount }`, counting the active
+`activity_factor_mapping` rows **inside the same transaction as the update**, so
+the announced number is the number that was true at the write. The mapping rows
+are left in place — not soft-deleted, not repointed. The pair degrades to
+unmapped, which the coverage surface already renders as a visible gap, and the
+historical `activity_emission` rows stay re-derivable.
+
+`listTenantFactors` gained `mappingCount` as one correlated subquery, not an
+N+1. `listTenantFactorSets` gained `gasBasis` and `deletedAt`, so a retired set
+is not offered as a target for a new row.
+
+**No schema change and no migration.** `npm run db:generate` reported
+`No schema changes, nothing to migrate`.
+
+### Actions
+
+Stage order, typed results and the silent-log rule are unchanged; only stage e
+moved. `createCustomFactor` maps the three refusals onto field errors —
+`set.datasetVersion` for `set_exists`, `set.setId` for `set_not_found`,
+`factor.gas` for `gas_basis_mismatch`, with the copy chosen from the set's own
+basis. A thrown error from `createTenantFactor` is now a bug and keeps the
+generic failure.
+
+`retireCustomFactor` returns `RetireCustomFactorResult` — a sibling of
+`SubmitResult` carrying `mappingCount` on success, since it is the only success
+in phase two with a payload. Still a typed result, never a thrown string
+(§10 rule 2). Nothing is logged on any path.
+
+### Surface
+
+`app/activity/factors/page.tsx` reads `membership.role` and renders the factor
+rows itself: label, scope, activity unit, gas, value, region, state and the
+mapping count. The set-detail grid is a `<dl>`, and the set rows now show the
+set's gas basis and an **active** row count.
+
+Two client leaves, both component-only:
+
+- `custom-factor-form.tsx` — the set selector, the metadata fields for a new set
+  only, the chosen set's provenance and basis otherwise, courtesy validation
+  with the shared schema, pending state, focus management, announced result;
+- `retire-factor-button.tsx` — arm, cancel, confirm, pending, announce. The arm
+  state is **announced, not only styled**: it names how many mapped pairs the
+  retirement will leave unmapped. No `window.confirm` and no dialog — a browser
+  modal blocks the page and this codebase has no confirm primitive.
+
+A member sees the sets and rows read-only, with one line of copy where the form
+was. The action's owner check is untouched; this is presentation, and §11.2
+rule 2 says so.
+
+### Tests, prompt 67
+
+**No test was added, and the Vitest scope was not widened.** `vitest.config.mts`
+includes `lib/domain/**/*.test.ts` only, and there is no precedent in this
+repository for testing `lib/validation/` — all eight existing test files are
+under `lib/domain/`. The prompt asked for that to be checked and said so rather
+than widened, which is what happened. The discriminated union and its guarded
+cross-field rules are pure and would be testable; adding them means changing the
+scope that §2 deliberately pins to the disclosure-bearing domain layer, and that
+is its own decision.
+
+### Prerender impact and verification, prompt 67
+
+**Expected none, and verified rather than assumed.** The route table is
+unchanged from prompt 66's, `/activity/factors` is still `ƒ`, and no marketing
+route was touched. The two-build comparison used the same repository-local
+scratch method — hard-linked `node_modules`, `.agents` and `.claude` excluded
+from both sides, one pinned `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, build id and
+both generated chunk patterns normalised, RSC flight scripts stripped:
+
+```
+base_html=21
+impl_html=21
+only_base=0
+only_impl=0
+diff_html=0
+```
+
+The CSS chunk grew from 68,069 to 68,208 bytes — 139 bytes of new utilities for
+the reworked page and the two leaves. It is normalised out of the HTML
+comparison and changes no prerendered markup.
+
+### Checks run, prompt 67
+
+- `npm run lint` — exit 0, no diagnostics beyond npm notice lines.
+- `npm run typecheck` — exit 0, `tsc --noEmit`.
+- `npm test` — `Test Files 8 passed (8)`, `Tests 178 passed (178)`.
+- `npm run db:generate` — `No schema changes, nothing to migrate`. Run only to
+  confirm nothing was pending; nothing was applied.
+- `npm run build` — exit 0, compiled in 9.2s, `32/32` static pages, route table
+  unchanged from prompt 66's.
+- prerender diff — `diff_html=0` across 21 shared prerendered HTML files.
+- `npm run test:e2e:local` — `10 passed (29.4s)` across Chromium and Firefox.
+  Prompt 66 recorded this failing before tests started; it did not reproduce.
+- `npm run test:e2e:webkit` — not run: `podman` is not installed
+  (`command -v podman` returns nothing), and `scripts/playwright-webkit.sh`
+  requires it on Arch Linux.
+
+### Secrets and data, prompt 67
+
+No new environment variables and no `NEXT_PUBLIC_*`. Reads existing
+`DATABASE_URL` through `lib/db/client.ts` and the existing Upstash limiter
+(`KV_REST_API_URL` / `KV_REST_API_TOKEN`). No email, Blob, AI or third-party
+model call. The same tenant commercial data as prompt 66 is stored and read;
+nothing new is collected and nothing is logged. The mapping count returned on
+retirement is the organisation's own data and names no pair and no factor of
+another tenant.
+
+### What prompt 67 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| bulk factor-set CSV import | unchanged from prompt 66 — needs a parser, staging surface and rollback |
+| editing a stored set's metadata after creation | a real gap this narrows but does not close; a set whose licence changes may need superseding rather than editing |
+| retiring a whole set from the UI | the query layer already refuses to add rows to a retired set; the button needs the same in-use accounting per set |
+| repointing or soft-deleting mappings on retirement | the visible gap is the correct failure |
+| per-row `gas_basis` | a schema change |
+| date-based factor selection by `effective_from` / `effective_to` | not built for published sets either; its own prompt |
+| a `window.confirm` or a modal | a browser modal blocks the page |
+| widening the Vitest scope to `lib/validation/` | no precedent; see "Tests, prompt 67" |
 
 ## Step 9 — activity-data ingestion
 

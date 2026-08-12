@@ -283,40 +283,53 @@ const factorDecimal = z
       "Enter a positive decimal with at most 5 digits before the point and 17 after it.",
   });
 
-export const customFactorSetSchema = z
-  .object({
-    source: boundedText(120),
-    datasetVersion: boundedText(120),
-    publicationYear: z
-      .number({ error: "Enter a publication year." })
-      .int({ error: "Enter a whole year." })
-      .min(1990, { error: "Enter a year from 1990 onward." })
-      .max(2100, { error: "Enter a year no later than 2100." }),
-    effectiveFrom: dateText,
-    effectiveTo: dateText,
-    licence: boundedText(240),
-    licenceUrl: optionalUrl,
-    sourceUrl: optionalUrl,
-    sourceReference: optionalText(240),
-    notes: optionalText(1000),
-  })
-  .superRefine((value, ctx) => {
-    if (value.effectiveTo < value.effectiveFrom) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["effectiveTo"],
-        message: "The end date cannot be before the start date.",
-      });
-    }
+/**
+ * Which set a new factor row goes into — **an explicit choice, never an
+ * inferred one** (prompt 67 decision 1).
+ *
+ * Prompt 66 inferred the set from the `(source, dataset_version)` typed beside
+ * every row and inserted it with `onConflictDoNothing`, which silently threw
+ * away the licence, effective range, source URL, reference and notes of every
+ * row after the first. That licence is rendered as disclosure evidence, so a
+ * correction never landed and a wrong one persisted.
+ *
+ * The two members are **plain object schemas** because
+ * `z.discriminatedUnion` requires it — a `superRefine` produces a
+ * `ZodEffects`-like wrapper and cannot be a member, so the cross-field rules
+ * that belonged to the set moved onto {@link createCustomFactorSchema}'s
+ * wrapper, guarded by `mode` and emitting two-segment `["set", …]` paths so the
+ * existing field-error mapping is unchanged.
+ */
+export const newFactorSetSchema = z.object({
+  mode: z.literal("new"),
+  source: boundedText(120),
+  datasetVersion: boundedText(120),
+  publicationYear: z
+    .number({ error: "Enter a publication year." })
+    .int({ error: "Enter a whole year." })
+    .min(1990, { error: "Enter a year from 1990 onward." })
+    .max(2100, { error: "Enter a year no later than 2100." }),
+  effectiveFrom: dateText,
+  effectiveTo: dateText,
+  licence: boundedText(240),
+  licenceUrl: optionalUrl,
+  sourceUrl: optionalUrl,
+  sourceReference: optionalText(240),
+  notes: optionalText(1000),
+});
 
-    if (!value.sourceUrl && !value.sourceReference) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["sourceReference"],
-        message: "Enter a source URL or an internal source reference.",
-      });
-    }
-  });
+/** A set the organisation already owns. **The id is a claim, not a
+    capability** — `lib/db/emission-queries.ts` re-reads it under the tenant
+    predicate before a row is written into it. */
+export const existingFactorSetSchema = z.object({
+  mode: z.literal("existing"),
+  setId: z.uuid({ error: "Choose a factor set." }),
+});
+
+export const factorSetChoiceSchema = z.discriminatedUnion("mode", [
+  newFactorSetSchema,
+  existingFactorSetSchema,
+]);
 
 export const customFactorSchema = z
   .object({
@@ -387,10 +400,30 @@ export const customFactorSchema = z
     }
   });
 
-export const createCustomFactorSchema = z.object({
-  set: customFactorSetSchema,
-  factor: customFactorSchema,
-});
+export const createCustomFactorSchema = z
+  .object({
+    set: factorSetChoiceSchema,
+    factor: customFactorSchema,
+  })
+  .superRefine((value, ctx) => {
+    if (value.set.mode !== "new") return;
+
+    if (value.set.effectiveTo < value.set.effectiveFrom) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["set", "effectiveTo"],
+        message: "The end date cannot be before the start date.",
+      });
+    }
+
+    if (!value.set.sourceUrl && !value.set.sourceReference) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["set", "sourceReference"],
+        message: "Enter a source URL or an internal source reference.",
+      });
+    }
+  });
 
 export const retireCustomFactorSchema = z.object({
   factorId: z.uuid({ error: "Choose a customer-supplied factor." }),
@@ -398,11 +431,30 @@ export const retireCustomFactorSchema = z.object({
 
 export type CreateCustomFactorInput = z.infer<typeof createCustomFactorSchema>;
 
+/** Distributes over the union, so `set.setId` and `set.mode` are covered
+    alongside a new set's fields without restating a field list. */
+type UnionKeys<T> = T extends unknown ? keyof T : never;
+
 export type CustomFactorField =
-  | `set.${keyof z.infer<typeof customFactorSetSchema> & string}`
+  | `set.${UnionKeys<z.infer<typeof factorSetChoiceSchema>> & string}`
   | `factor.${keyof z.infer<typeof customFactorSchema> & string}`;
 
 export type CustomFactorResult = SubmitResult<CustomFactorField | "factorId">;
+
+/**
+ * Retirement answers with the consequence it caused — the number of active
+ * `(category, unit)` mappings that pointed at the row and are now unmapped.
+ * A sibling of {@link SubmitResult } rather than a widening of it, because it is
+ * the only success in phase two that carries a payload (AGENTS.md 10 rule 2:
+ * still a typed result, never a thrown string).
+ */
+export type RetireCustomFactorResult =
+  | { ok: true; mappingCount: number }
+  | {
+      ok: false;
+      error: string;
+      fieldErrors?: Partial<Record<"factorId", string>>;
+    };
 
 export const CUSTOM_FACTOR_ERRORS = {
   invalid: "Check the marked fields and try again.",
@@ -410,6 +462,14 @@ export const CUSTOM_FACTOR_ERRORS = {
     "Only an owner can create or retire customer-supplied factors. A factor can move every figure in a disclosure.",
   notFound:
     "That customer-supplied factor is not available. It may already have been retired.",
+  setExists:
+    "Your organisation already has a set with this source and version. Choose it above instead of creating a second one.",
+  setNotFound:
+    "That factor set is not available. It may have been retired. Choose another, or create a new set.",
+  gasBasisCombined:
+    "This set holds combined CO2e rows. Choose CO2e, or create a new set for per-gas rows.",
+  gasBasisPerGas:
+    "This set holds per-gas rows. Choose a single gas, or create a new set for combined CO2e rows.",
 } as const;
 
 /**

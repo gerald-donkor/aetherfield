@@ -9,10 +9,7 @@ import {
   useState,
 } from "react";
 
-import {
-  createCustomFactor,
-  retireCustomFactor,
-} from "../../activity/actions";
+import { createCustomFactor } from "../../activity/actions";
 import {
   CH4_VARIANTS,
   CUSTOM_FACTOR_ERRORS,
@@ -32,24 +29,39 @@ import {
 } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
 
-type ExistingFactor = {
+/**
+ * Adds one customer-supplied factor row — prompt 66, corrected by prompt 67.
+ *
+ * **The set is chosen, not inferred** (prompt 67 decision 1). Prompt 66 typed
+ * the source and version beside every row and found-or-created the set from
+ * them, which silently discarded the licence, effective range and references of
+ * every row after the first — and that licence is rendered as disclosure
+ * evidence. Here an owner picks an existing set or explicitly creates one, and
+ * the metadata fields appear only in the second case.
+ *
+ * **Component-only** (the bundle rule, AGENTS.md front matter): no exported
+ * constant, no exported type, no data fetching. The row list this component
+ * used to render moved to the Server Component that renders it, and retirement
+ * is its own leaf.
+ */
+
+/** A set this organisation already owns, as far as the form needs it. Only
+    the fields rendered here cross the boundary (minimal serialized props). */
+type FormFactorSet = {
   id: string;
-  setId: string;
-  label: string;
-  publishedUom: string;
-  publishedGhgUnit: string;
-  scope: string;
-  scope3Category: string | null;
-  scope2Method: string | null;
-  activityUnit: string;
-  gas: string;
-  ch4Variant: string | null;
-  gwpSet: string;
-  region: string | null;
-  biogenic: boolean;
-  value: string;
-  deletedAt: Date | null;
+  source: string;
+  datasetVersion: string;
+  publicationYear: number;
+  effectiveFrom: string;
+  effectiveTo: string;
+  licence: string;
+  gasBasis: "combined_co2e" | "per_gas";
 };
+
+const GAS_BASIS_LABEL = {
+  combined_co2e: "combined CO2e rows",
+  per_gas: "per-gas rows",
+} as const;
 
 const NETWORK_ERROR =
   "We couldn't reach the server. Check your connection and try again.";
@@ -75,23 +87,27 @@ function optionLabel(value: string): string {
   return value.replaceAll("_", " ");
 }
 
-export function CustomFactorForm({
-  factors,
-}: {
-  factors: ExistingFactor[];
-}) {
+export function CustomFactorForm({ sets }: { sets: FormFactorSet[] }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
+  /* "new", or the id of a set this organisation already owns. */
+  const [setChoice, setSetChoice] = useState<string>(
+    sets.length > 0 ? sets[0].id : "new",
+  );
   const [scope, setScope] = useState<EmissionScope>("scope_1");
   const [gas, setGas] = useState<GhgGas>("co2e");
   const [biogenic, setBiogenic] = useState(false);
   const [pending, setPending] = useState(false);
-  const [retiringId, setRetiringId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<
-    Partial<Record<CustomFactorField | "factorId", string>>
+    Partial<Record<CustomFactorField, string>>
   >({});
+
+  const creatingSet = setChoice === "new";
+  const chosenSet = creatingSet
+    ? undefined
+    : sets.find((set) => set.id === setChoice);
 
   useEffect(() => {
     if (message) statusRef.current?.focus();
@@ -104,18 +120,21 @@ export function CustomFactorForm({
 
     const body = new FormData(event.currentTarget);
     const input = {
-      set: {
-        source: String(body.get("source") ?? ""),
-        datasetVersion: String(body.get("datasetVersion") ?? ""),
-        publicationYear: Number(body.get("publicationYear")),
-        effectiveFrom: String(body.get("effectiveFrom") ?? ""),
-        effectiveTo: String(body.get("effectiveTo") ?? ""),
-        licence: String(body.get("licence") ?? ""),
-        licenceUrl: String(body.get("licenceUrl") ?? ""),
-        sourceUrl: String(body.get("sourceUrl") ?? ""),
-        sourceReference: String(body.get("sourceReference") ?? ""),
-        notes: String(body.get("notes") ?? ""),
-      },
+      set: creatingSet
+        ? {
+            mode: "new" as const,
+            source: String(body.get("source") ?? ""),
+            datasetVersion: String(body.get("datasetVersion") ?? ""),
+            publicationYear: Number(body.get("publicationYear")),
+            effectiveFrom: String(body.get("effectiveFrom") ?? ""),
+            effectiveTo: String(body.get("effectiveTo") ?? ""),
+            licence: String(body.get("licence") ?? ""),
+            licenceUrl: String(body.get("licenceUrl") ?? ""),
+            sourceUrl: String(body.get("sourceUrl") ?? ""),
+            sourceReference: String(body.get("sourceReference") ?? ""),
+            notes: String(body.get("notes") ?? ""),
+          }
+        : { mode: "existing" as const, setId: setChoice },
       factor: {
         level1: String(body.get("level1") ?? ""),
         level2: String(body.get("level2") ?? ""),
@@ -172,26 +191,6 @@ export function CustomFactorForm({
     }
   }
 
-  async function retire(factorId: string) {
-    setMessage("");
-    setErrors({});
-    setRetiringId(factorId);
-    try {
-      const result = await retireCustomFactor({ factorId });
-      if (result.ok) {
-        setMessage("Customer-supplied factor retired.");
-        router.refresh();
-      } else {
-        setErrors(result.fieldErrors ?? {});
-        setMessage(result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setRetiringId(null);
-    }
-  }
-
   return (
     <>
       <p
@@ -204,11 +203,48 @@ export function CustomFactorForm({
         }`}
       >
         {message}
-        {errors.factorId ? <span className="mt-2 block">{errors.factorId}</span> : null}
       </p>
 
       <form ref={formRef} onSubmit={submit} noValidate>
         <div className="grid max-w-[980px] gap-6 md:grid-cols-2">
+          <SelectField
+            id="custom-factor-set"
+            label="Factor set"
+            error={errors["set.setId"]}
+          >
+            <select
+              id="custom-factor-set"
+              value={setChoice}
+              onChange={(event) => setSetChoice(event.target.value)}
+              disabled={pending}
+              className={SELECT_CLASS}
+            >
+              {sets.map((set) => (
+                <option key={set.id} value={set.id}>
+                  {set.source} — {set.datasetVersion}
+                </option>
+              ))}
+              <option value="new">Create a new set</option>
+            </select>
+          </SelectField>
+
+          {chosenSet ? (
+            <div className="font-serif text-[15px] leading-6 text-muted md:mt-[30px]">
+              {chosenSet.licence}. Effective {chosenSet.effectiveFrom} to{" "}
+              {chosenSet.effectiveTo}, published {chosenSet.publicationYear}.
+              This set holds {GAS_BASIS_LABEL[chosenSet.gasBasis]}.
+            </div>
+          ) : (
+            <p className="font-serif text-[15px] leading-6 text-muted md:mt-[30px]">
+              A new set records where these factors came from and under what
+              licence. That provenance is rendered as evidence beside the
+              figures they produce.
+            </p>
+          )}
+        </div>
+
+        {creatingSet ? (
+        <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
           <Field
             id="custom-factor-source"
             name="source"
@@ -297,6 +333,7 @@ export function CustomFactorForm({
             rows={3}
           />
         </div>
+        ) : null}
 
         <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
           <Field
@@ -531,43 +568,6 @@ export function CustomFactorForm({
         </Button>
       </form>
 
-      {factors.length > 0 ? (
-        <ul className="mt-12" aria-label="Customer-supplied factor rows">
-          {factors.map((factor) => {
-            const retired = factor.deletedAt !== null;
-            return (
-              <li
-                key={factor.id}
-                className="grid gap-5 border-b border-border py-5 first:border-t lg:grid-cols-[1fr_auto] lg:items-start"
-              >
-                <div className="min-w-0">
-                  <p className="wrap-anywhere font-sans text-[17px] leading-6 font-bold text-ink">
-                    {factor.label || "Untitled factor"}
-                  </p>
-                  <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                    <MiniDetail label="Unit">{factor.publishedUom}</MiniDetail>
-                    <MiniDetail label="Value">{factor.value}</MiniDetail>
-                    <MiniDetail label="Scope">{factor.scope}</MiniDetail>
-                    <MiniDetail label="Gas">{factor.gas}</MiniDetail>
-                    <MiniDetail label="State">
-                      {retired ? "Retired" : "Active"}
-                    </MiniDetail>
-                  </dl>
-                </div>
-                <Button
-                  type="button"
-                  size="secondary"
-                  bullet={false}
-                  disabled={pending || retiringId !== null || retired}
-                  onClick={() => void retire(factor.id)}
-                >
-                  {retiringId === factor.id ? "Retiring..." : "Retire"}
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
     </>
   );
 }
@@ -595,25 +595,6 @@ function SelectField({
           {error}
         </p>
       ) : null}
-    </div>
-  );
-}
-
-function MiniDetail({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="font-mono text-[11px] leading-[16px] text-muted uppercase">
-        {label}
-      </dt>
-      <dd className="mt-1 wrap-anywhere font-serif text-[15px] leading-5 text-ink">
-        {children}
-      </dd>
     </div>
   );
 }

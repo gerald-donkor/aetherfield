@@ -157,11 +157,15 @@ export async function listFactorSets(
     .orderBy(sql`${emissionFactorSet.publicationYear} desc`);
 }
 
+export type FactorGasBasis = (typeof emissionFactorSet.gasBasis)["_"]["data"];
+
 export type TenantFactorSet = ListedFactorSet & {
   effectiveFrom: string;
   effectiveTo: string;
   notes: string | null;
+  gasBasis: FactorGasBasis;
   createdAt: Date;
+  deletedAt: Date | null;
 };
 
 export type TenantFactorRow = {
@@ -181,6 +185,10 @@ export type TenantFactorRow = {
   region: string | null;
   biogenic: boolean;
   value: string;
+  /** Active `(category, unit)` mappings pointing at this row. Retiring it
+      leaves that many pairs unmapped, which is what the surface must say
+      before the click (prompt 67 finding 2). */
+  mappingCount: number;
   createdAt: Date;
   deletedAt: Date | null;
 };
@@ -201,10 +209,16 @@ export async function listTenantFactorSets(
       sourceUrl: emissionFactorSet.sourceUrl,
       sourceReference: emissionFactorSet.sourceReference,
       notes: emissionFactorSet.notes,
+      gasBasis: emissionFactorSet.gasBasis,
       createdAt: emissionFactorSet.createdAt,
+      deletedAt: emissionFactorSet.deletedAt,
+      /* `and deleted_at is null`, matching `listFactorSets` above. Without it
+         `/activity/factors` counted retired rows and `/activity/mappings` did
+         not, so the two surfaces disagreed about the same set. */
       factorCount: sql<number>`(
         select count(*)::int from ${emissionFactor}
         where ${emissionFactor.setId} = ${emissionFactorSet.id}
+          and ${emissionFactor.deletedAt} is null
       )`,
     })
     .from(emissionFactorSet)
@@ -235,6 +249,13 @@ export async function listTenantFactors(
       region: emissionFactor.region,
       biogenic: emissionFactor.biogenic,
       value: emissionFactor.value,
+      /* One correlated subquery rather than a second round trip per row. */
+      mappingCount: sql<number>`(
+        select count(*)::int from ${activityFactorMapping}
+        where ${activityFactorMapping.factorId} = ${emissionFactor.id}
+          and ${activityFactorMapping.organizationId} = ${organizationId}
+          and ${activityFactorMapping.deletedAt} is null
+      )`,
       createdAt: emissionFactor.createdAt,
       deletedAt: emissionFactor.deletedAt,
     })
@@ -265,6 +286,7 @@ export async function listTenantFactors(
     region: row.region,
     biogenic: row.biogenic,
     value: row.value,
+    mappingCount: row.mappingCount,
     createdAt: row.createdAt,
     deletedAt: row.deletedAt,
   }));
@@ -274,14 +296,24 @@ function normaliseHashPart(value: string | undefined | null): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+/**
+ * The row's identity inside its set, as a stable hash.
+ *
+ * **Keyed on the resolved `setId`, not on the typed source and version** —
+ * prompt 66 hashed the two set columns, which do not exist on a submission that
+ * chooses an existing set. The set is the same thing either way, and
+ * `(set_id, source_row_id)` is the unique index this backs, so the id is the
+ * honest key. It is what makes a double submission idempotent rather than a
+ * second identical row.
+ */
 function sourceRowIdForCustomFactor(
   organizationId: string,
+  setId: string,
   input: CreateCustomFactorInput,
 ): string {
   const identity = [
     organizationId,
-    input.set.source,
-    input.set.datasetVersion,
+    setId,
     input.factor.level1,
     input.factor.level2,
     input.factor.level3,
@@ -303,54 +335,112 @@ function sourceRowIdForCustomFactor(
   return `custom:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`;
 }
 
+/**
+ * What a create can answer with besides success.
+ *
+ * The three refusals are **expected outcomes, not exceptions** — the action
+ * turns each into a typed field error (AGENTS.md 10 rule 2), so a thrown error
+ * from here is a bug rather than a validation result.
+ */
+export type CreateTenantFactorOutcome =
+  | { ok: true; factorId: string }
+  | { ok: false; reason: "set_exists" }
+  | { ok: false; reason: "set_not_found" }
+  | { ok: false; reason: "gas_basis_mismatch"; setGasBasis: FactorGasBasis };
+
+/**
+ * Writes one tenant-owned factor row into a tenant-owned set.
+ *
+ * **The set is the submitter's explicit choice** (prompt 67 decision 1): an
+ * existing set is re-read under the tenant predicate — a missing, retired or
+ * foreign id is one indistinguishable `set_not_found`, exactly as
+ * {@link getVisibleFactor} treats a foreign factor id — and a new set is
+ * inserted, with the `(source, dataset_version)` collision answered as
+ * `set_exists` rather than silently reusing the stored set and discarding the
+ * licence, effective range and references the submission carried.
+ *
+ * **`gas_basis` is derived, never asked** (decision 6): `co2e` is a combined
+ * figure, every other gas is a per-gas sibling. A set holds one basis, so a row
+ * of the other kind cannot go into it and is refused rather than mislabelled
+ * (decision 7).
+ */
 export async function createTenantFactor(input: {
   organizationId: string;
   data: CreateCustomFactorInput;
-}): Promise<{ factorId: string }> {
+}): Promise<CreateTenantFactorOutcome> {
+  const setInput = input.data.set;
+  const factorInput = input.data.factor;
+  const derivedGasBasis: FactorGasBasis =
+    factorInput.gas === "co2e" ? "combined_co2e" : "per_gas";
+
   return getDb().transaction(async (tx) => {
-    const setInput = input.data.set;
-    await tx
-      .insert(emissionFactorSet)
-      .values({
-        organizationId: input.organizationId,
-        source: setInput.source,
-        datasetVersion: setInput.datasetVersion,
-        publicationYear: setInput.publicationYear,
-        effectiveFrom: setInput.effectiveFrom,
-        effectiveTo: setInput.effectiveTo,
-        licence: setInput.licence,
-        licenceUrl: setInput.licenceUrl ?? null,
-        sourceUrl: setInput.sourceUrl ?? null,
-        sourceReference: setInput.sourceReference ?? null,
-        retrievedAt: new Date(),
-        gasBasis: "combined_co2e",
-        notes: setInput.notes ?? null,
-      })
-      .onConflictDoNothing({
-        target: [
-          emissionFactorSet.organizationId,
-          emissionFactorSet.source,
-          emissionFactorSet.datasetVersion,
-        ],
-        where: sql`${emissionFactorSet.organizationId} is not null`,
-      });
+    let set: { id: string; gasBasis: FactorGasBasis } | undefined;
 
-    const [set] = await tx
-      .select({ id: emissionFactorSet.id })
-      .from(emissionFactorSet)
-      .where(
-        and(
-          eq(emissionFactorSet.organizationId, input.organizationId),
-          eq(emissionFactorSet.source, setInput.source),
-          eq(emissionFactorSet.datasetVersion, setInput.datasetVersion),
-        ),
-      )
-      .limit(1);
+    if (setInput.mode === "existing") {
+      /* A submitted set id is a claim, not a capability. */
+      [set] = await tx
+        .select({ id: emissionFactorSet.id, gasBasis: emissionFactorSet.gasBasis })
+        .from(emissionFactorSet)
+        .where(
+          and(
+            eq(emissionFactorSet.id, setInput.setId),
+            eq(emissionFactorSet.organizationId, input.organizationId),
+            isNull(emissionFactorSet.deletedAt),
+          ),
+        )
+        .limit(1);
 
-    if (!set) tx.rollback();
+      if (!set) return { ok: false, reason: "set_not_found" };
+    } else {
+      [set] = await tx
+        .insert(emissionFactorSet)
+        .values({
+          organizationId: input.organizationId,
+          source: setInput.source,
+          datasetVersion: setInput.datasetVersion,
+          publicationYear: setInput.publicationYear,
+          effectiveFrom: setInput.effectiveFrom,
+          effectiveTo: setInput.effectiveTo,
+          licence: setInput.licence,
+          licenceUrl: setInput.licenceUrl ?? null,
+          sourceUrl: setInput.sourceUrl ?? null,
+          sourceReference: setInput.sourceReference ?? null,
+          retrievedAt: new Date(),
+          gasBasis: derivedGasBasis,
+          notes: setInput.notes ?? null,
+        })
+        .onConflictDoNothing({
+          target: [
+            emissionFactorSet.organizationId,
+            emissionFactorSet.source,
+            emissionFactorSet.datasetVersion,
+          ],
+          where: sql`${emissionFactorSet.organizationId} is not null`,
+        })
+        .returning({
+          id: emissionFactorSet.id,
+          gasBasis: emissionFactorSet.gasBasis,
+        });
 
-    const factorInput = input.data.factor;
-    const sourceRowId = sourceRowIdForCustomFactor(input.organizationId, input.data);
+      /* Nothing inserted means the set already exists — including the race
+         where a concurrent submission created it a moment ago, which gets the
+         same answer rather than diverging. */
+      if (!set) return { ok: false, reason: "set_exists" };
+    }
+
+    if (set.gasBasis !== derivedGasBasis) {
+      return {
+        ok: false,
+        reason: "gas_basis_mismatch",
+        setGasBasis: set.gasBasis,
+      };
+    }
+
+    const sourceRowId = sourceRowIdForCustomFactor(
+      input.organizationId,
+      set.id,
+      input.data,
+    );
     const [inserted] = await tx
       .insert(emissionFactor)
       .values({
@@ -381,7 +471,7 @@ export async function createTenantFactor(input: {
       })
       .returning({ id: emissionFactor.id });
 
-    if (inserted) return { factorId: inserted.id };
+    if (inserted) return { ok: true, factorId: inserted.id };
 
     const [existing] = await tx
       .select({ id: emissionFactor.id })
@@ -396,27 +486,56 @@ export async function createTenantFactor(input: {
       .limit(1);
 
     if (!existing) tx.rollback();
-    return { factorId: existing.id };
+    return { ok: true, factorId: existing.id };
   });
 }
 
+/**
+ * Soft-retires one tenant-owned factor row and **reports what it cost**.
+ *
+ * Every join filters `deleted_at is null`, so a retired row's
+ * `(category, unit)` pairs become unmapped at the next recalculation. Degrading
+ * to a visible gap is the right failure mode; saying nothing is not, so the
+ * count of active mappings that pointed at the row is taken **inside the same
+ * transaction as the update** — a count read before it could be stale by the
+ * time the row is retired.
+ *
+ * The mapping rows themselves are left in place: not soft-deleted, not
+ * repointed (prompt 66 decision 6, prompt 67 decision 5). The coverage surface
+ * already renders the gap, and historical `activity_emission` rows stay
+ * re-derivable.
+ */
 export async function retireTenantFactor(input: {
   organizationId: string;
   factorId: string;
-}): Promise<boolean> {
-  const rows = await getDb()
-    .update(emissionFactor)
-    .set({ deletedAt: new Date() })
-    .where(
-      and(
-        eq(emissionFactor.id, input.factorId),
-        eq(emissionFactor.organizationId, input.organizationId),
-        isNull(emissionFactor.deletedAt),
-      ),
-    )
-    .returning({ id: emissionFactor.id });
+}): Promise<{ retired: false } | { retired: true; mappingCount: number }> {
+  return getDb().transaction(async (tx) => {
+    const [counted] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(activityFactorMapping)
+      .where(
+        and(
+          eq(activityFactorMapping.factorId, input.factorId),
+          eq(activityFactorMapping.organizationId, input.organizationId),
+          isNull(activityFactorMapping.deletedAt),
+        ),
+      );
 
-  return rows.length > 0;
+    const rows = await tx
+      .update(emissionFactor)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(emissionFactor.id, input.factorId),
+          eq(emissionFactor.organizationId, input.organizationId),
+          isNull(emissionFactor.deletedAt),
+        ),
+      )
+      .returning({ id: emissionFactor.id });
+
+    if (rows.length === 0) return { retired: false };
+    return { retired: true, mappingCount: counted?.count ?? 0 };
+  });
 }
 
 /* -------------------------------------------------------------------------- */

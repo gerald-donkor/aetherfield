@@ -33,6 +33,7 @@ import {
   type CustomFactorResult,
   recalculateInputSchema,
   type RecalculateResult,
+  type RetireCustomFactorResult,
 } from "../../lib/validation/emissions";
 import {
   checkActivityCommitLimit,
@@ -798,10 +799,40 @@ export async function createCustomFactor(
   }
 
   // -- e. Write ------------------------------------------------------------
+  /* The three refusals below are expected outcomes, not exceptions. A throw
+     from `createTenantFactor` is now a bug, and keeps the generic failure. */
+  let outcome: Awaited<ReturnType<typeof createTenantFactor>>;
   try {
-    await createTenantFactor({ organizationId, data: parsed.data });
+    outcome = await createTenantFactor({ organizationId, data: parsed.data });
   } catch {
     return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  if (!outcome.ok) {
+    if (outcome.reason === "set_exists") {
+      return {
+        ok: false,
+        error: CUSTOM_FACTOR_ERRORS.invalid,
+        fieldErrors: { "set.datasetVersion": CUSTOM_FACTOR_ERRORS.setExists },
+      };
+    }
+    if (outcome.reason === "set_not_found") {
+      return {
+        ok: false,
+        error: CUSTOM_FACTOR_ERRORS.invalid,
+        fieldErrors: { "set.setId": CUSTOM_FACTOR_ERRORS.setNotFound },
+      };
+    }
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: {
+        "factor.gas":
+          outcome.setGasBasis === "combined_co2e"
+            ? CUSTOM_FACTOR_ERRORS.gasBasisCombined
+            : CUSTOM_FACTOR_ERRORS.gasBasisPerGas,
+      },
+    };
   }
 
   // -- f. No email. Make the row visible on factor surfaces. ---------------
@@ -815,9 +846,16 @@ export async function createCustomFactor(
 /*  retireCustomFactor                                                        */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Soft-retires one tenant-owned factor row, and answers with the consequence:
+ * how many active `(category, unit)` mappings pointed at it and are now
+ * unmapped. The count comes from the server's own read inside the retiring
+ * transaction, so the announced number is the number that was true at the
+ * write.
+ */
 export async function retireCustomFactor(
   input: unknown,
-): Promise<CustomFactorResult> {
+): Promise<RetireCustomFactorResult> {
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
@@ -868,27 +906,29 @@ export async function retireCustomFactor(
   }
 
   // -- e. Tenant-owned soft retirement ------------------------------------
+  let outcome: Awaited<ReturnType<typeof retireTenantFactor>>;
   try {
-    const retired = await retireTenantFactor({
+    outcome = await retireTenantFactor({
       organizationId,
       factorId: parsed.data.factorId,
     });
-    if (!retired) {
-      return {
-        ok: false,
-        error: CUSTOM_FACTOR_ERRORS.invalid,
-        fieldErrors: { factorId: CUSTOM_FACTOR_ERRORS.notFound },
-      };
-    }
   } catch {
     return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  if (!outcome.retired) {
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: { factorId: CUSTOM_FACTOR_ERRORS.notFound },
+    };
   }
 
   // -- f. No email. Existing calculated emissions remain reproducible. -----
   revalidatePath("/activity/factors");
   revalidatePath("/activity/mappings");
   revalidatePath("/activity");
-  return { ok: true };
+  return { ok: true, mappingCount: outcome.mappingCount };
 }
 
 /* -------------------------------------------------------------------------- */

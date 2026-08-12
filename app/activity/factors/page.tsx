@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { CustomFactorForm } from "../../_components/activity/custom-factor-form";
+import { RetireFactorButton } from "../../_components/activity/retire-factor-button";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
@@ -27,6 +28,12 @@ export default async function ActivityFactorsPage() {
     listTenantFactorSets(membership.organization.id),
     listTenantFactors(membership.organization.id),
   ]);
+
+  /* Presentation only. The action's own owner check is what enforces this
+     (AGENTS.md 11.2 rule 2) and is untouched; without this a member filled
+     twenty fields before being refused. */
+  const canManage = membership.role === "owner";
+  const activeSets = sets.filter((set) => set.deletedAt === null);
 
   return (
     <>
@@ -77,15 +84,17 @@ export default async function ActivityFactorsPage() {
                 No customer-supplied sets yet.
               </h3>
               <p className="mt-3 max-w-[34rem] font-serif text-p2 text-muted">
-                Save a factor below. Its source and version will create the set
-                it belongs to.
+                Add a factor below and choose to create a set for it. The set
+                records the licence and source the rows were supplied under.
               </p>
             </div>
           ) : (
             <ul aria-label="Customer-supplied factor sets">
               {sets.map((set) => (
                 <li key={set.id} className="border-b border-border py-5 first:border-t">
-                  <div className="grid gap-5 lg:grid-cols-[1.1fr_0.8fr_1fr_0.6fr]">
+                  {/* A `<dl>`, because `Detail` emits `<dt>`/`<dd>` and those
+                      are only legal inside one. */}
+                  <dl className="grid gap-5 lg:grid-cols-[1.1fr_0.8fr_1fr_0.6fr]">
                     <Detail label="Source">
                       <span className="font-sans font-bold">{set.source}</span>
                       <br />
@@ -127,13 +136,84 @@ export default async function ActivityFactorsPage() {
                       ) : null}
                     </Detail>
                     <Detail label="Rows">
-                      {set.factorCount.toLocaleString("en-GB")}
+                      {set.factorCount.toLocaleString("en-GB")} active
+                      <br />
+                      {set.gasBasis === "combined_co2e"
+                        ? "Combined CO2e"
+                        : "Per gas"}
                       <br />
                       Added {DATE_FORMAT.format(set.createdAt)} UTC
                     </Detail>
-                  </div>
+                  </dl>
                 </li>
               ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-20" aria-labelledby="custom-factor-rows-heading">
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
+            <h2
+              id="custom-factor-rows-heading"
+              className="font-sans text-[28px] leading-8 font-bold"
+            >
+              Factor rows
+            </h2>
+            <p className="font-mono text-caption text-muted">Newest first</p>
+          </div>
+
+          {factors.length === 0 ? (
+            <div className="border-y border-border py-14">
+              <h3 className="font-sans text-[24px] leading-7 font-bold">
+                No customer-supplied rows yet.
+              </h3>
+              <p className="mt-3 max-w-[34rem] font-serif text-p2 text-muted">
+                A saved row becomes selectable in factor mapping. It changes no
+                figure until a category and unit is mapped to it.
+              </p>
+            </div>
+          ) : (
+            <ul aria-label="Customer-supplied factor rows">
+              {factors.map((factor) => {
+                const retired = factor.deletedAt !== null;
+                return (
+                  <li
+                    key={factor.id}
+                    className="grid gap-5 border-b border-border py-5 first:border-t lg:grid-cols-[1fr_auto] lg:items-start"
+                  >
+                    <div className="min-w-0">
+                      <p className="wrap-anywhere font-sans text-[17px] leading-6 font-bold text-ink">
+                        {factor.label || "Untitled factor"}
+                      </p>
+                      <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                        <MiniDetail label="Scope">{factor.scope}</MiniDetail>
+                        <MiniDetail label="Activity unit">
+                          {factor.activityUnit}
+                        </MiniDetail>
+                        <MiniDetail label="Gas">{factor.gas}</MiniDetail>
+                        <MiniDetail label="Value">
+                          {factor.value} kgCO2e
+                        </MiniDetail>
+                        <MiniDetail label="Region">
+                          {factor.region ?? "Not stated"}
+                        </MiniDetail>
+                        <MiniDetail label="State">
+                          {retired ? "Retired" : "Active"}
+                          <br />
+                          {factor.mappingCount.toLocaleString("en-GB")} mapped{" "}
+                          {factor.mappingCount === 1 ? "pair" : "pairs"}
+                        </MiniDetail>
+                      </dl>
+                    </div>
+                    {canManage && !retired ? (
+                      <RetireFactorButton
+                        factorId={factor.id}
+                        mappingCount={factor.mappingCount}
+                      />
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -145,14 +225,35 @@ export default async function ActivityFactorsPage() {
           >
             Add a factor
           </h2>
-          <p className="mt-4 max-w-[720px] font-serif text-p2 text-muted">
-            The value is stored as kgCO2e per activity unit. Creating a row does
-            not map it to existing activity data; use factor mapping after
-            saving.
-          </p>
-          <div className="mt-10 border-y border-border py-8">
-            <CustomFactorForm factors={factors} />
-          </div>
+          {canManage ? (
+            <>
+              <p className="mt-4 max-w-[720px] font-serif text-p2 text-muted">
+                The value is stored as kgCO2e per activity unit. Creating a row
+                does not map it to existing activity data; use factor mapping
+                after saving.
+              </p>
+              <div className="mt-10 border-y border-border py-8">
+                <CustomFactorForm
+                  sets={activeSets.map((set) => ({
+                    id: set.id,
+                    source: set.source,
+                    datasetVersion: set.datasetVersion,
+                    publicationYear: set.publicationYear,
+                    effectiveFrom: set.effectiveFrom,
+                    effectiveTo: set.effectiveTo,
+                    licence: set.licence,
+                    gasBasis: set.gasBasis,
+                  }))}
+                />
+              </div>
+            </>
+          ) : (
+            <p className="mt-4 max-w-[720px] font-serif text-p2 text-muted">
+              An owner maintains customer-supplied factors. A factor can move
+              every figure in a disclosure, so creating and retiring them is
+              theirs to do.
+            </p>
+          )}
         </section>
       </main>
       <SiteFooter />
@@ -173,6 +274,25 @@ function Detail({
         {label}
       </dt>
       <dd className="mt-1 wrap-anywhere font-serif text-[16px] leading-6 text-ink">
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function MiniDetail({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-mono text-[11px] leading-[16px] text-muted uppercase">
+        {label}
+      </dt>
+      <dd className="mt-1 wrap-anywhere font-serif text-[15px] leading-5 text-ink">
         {children}
       </dd>
     </div>
