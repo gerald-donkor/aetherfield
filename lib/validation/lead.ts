@@ -25,9 +25,17 @@ import type { SubmitResult as Result } from "./result";
  * missed `toLowerCase()` (AGENTS.md 9.2 rule 4).
  */
 
-/** Trimmed and lowercased *before* the format check, so a pasted address with a
-    trailing space is corrected rather than rejected. */
-const workEmail = z
+/**
+ * Trimmed and lowercased *before* the format check, so a pasted address with a
+ * trailing space is corrected rather than rejected.
+ *
+ * **Exported since prompt 63, rather than copied.** The organisation invite
+ * form needs exactly these rules — trim, lowercase, then validate, so
+ * AGENTS.md 9.2 rule 4's "stored lowercased and compared lowercased" is true at
+ * the schema rather than at each caller. Restating them in a second module is
+ * how two forms end up disagreeing about what an address is.
+ */
+export const workEmailSchema = z
   .string()
   .trim()
   .toLowerCase()
@@ -43,7 +51,7 @@ export const demoRequestFieldsSchema = z.object({
     .trim()
     .min(1, { error: "Enter your name." })
     .max(120, { error: "Use 120 characters or fewer." }),
-  email: workEmail,
+  email: workEmailSchema,
   company: z
     .string()
     .trim()

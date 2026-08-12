@@ -249,6 +249,41 @@ const ALERT_PREFERENCE_LIMIT = 30;
 const ALERT_PREFERENCE_WINDOW = "1 h" as const;
 
 /**
+ * Inviting, cancelling an invitation and removing a member, **keyed by user
+ * id** — prompt 63, closing what build step 8 deferred.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
+ * as every window above it: the flow has never shipped, so there is nothing to
+ * fit against.
+ *
+ * **A named limiter rather than a reuse**, for the reason each one above records
+ * — but this one has a cost the others do not: an invite **sends mail to an
+ * address the caller typed**, and that is the abusable surface. Nobody but an
+ * owner of an existing organisation can reach it, and the address goes into a
+ * row we own, so this is not an open relay; 20 an hour still bounds what one
+ * compromised owner account can put into other people's inboxes, while leaving
+ * an owner onboarding a team comfortable room — the three writes share the
+ * bucket, and inviting a ten-person department costs ten of the twenty.
+ */
+const INVITATION_WRITE_LIMIT = 20;
+const INVITATION_WRITE_WINDOW = "1 h" as const;
+
+/**
+ * Accepting and declining an invitation, **keyed by user id** — prompt 63.
+ *
+ * **A judgement, like every window above it.** Separate from the write limiter
+ * because the two are reached by different people: the write limiter bounds an
+ * owner, this bounds the person who was invited, and an invitee throttled by an
+ * owner's morning of invitations would be locked out of the one action they came
+ * to perform. It sends no mail and writes one `member` row, so it is deliberately
+ * loose — 30 an hour is far past honest use, where the whole flow is one click,
+ * and it exists to bound retries against a link that is being probed rather than
+ * to shape traffic.
+ */
+const INVITATION_RESPONSE_LIMIT = 30;
+const INVITATION_RESPONSE_WINDOW = "1 h" as const;
+
+/**
  * The nightly recalculation sweep, **keyed on a constant rather than an
  * identifier** — build step 14.
  *
@@ -533,6 +568,45 @@ export async function checkAlertPreferenceLimit(
     "alert-preference",
     ALERT_PREFERENCE_LIMIT,
     ALERT_PREFERENCE_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Inviting, cancelling an invitation and removing a member, keyed by the **user
+ * id**. Stage b of AGENTS.md 10 — see the constant's docblock for why the three
+ * writes share one bucket, and why the number is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkInvitationWriteLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "invitation-write",
+    INVITATION_WRITE_LIMIT,
+    INVITATION_WRITE_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Accepting or declining an invitation, keyed by the **user id** of the person
+ * responding. See the constant's docblock for why it is not the write limiter.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied, and never the invitation's id —
+ * that is a capability in a link, and keying on it would let one probed link
+ * exhaust a limit for the person who legitimately holds it.
+ */
+export async function checkInvitationResponseLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "invitation-response",
+    INVITATION_RESPONSE_LIMIT,
+    INVITATION_RESPONSE_WINDOW,
     userId,
   );
 }

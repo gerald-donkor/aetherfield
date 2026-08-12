@@ -15,6 +15,7 @@ import {
   sendAccountVerificationEmail,
   sendPasswordResetEmail,
 } from "../email/auth";
+import { sendOrganizationInvitation } from "../email/organization";
 import {
   organizationAccessControl,
   organizationRoles,
@@ -129,6 +130,59 @@ function createAuth() {
          * request is one reversible operation. Design the two together, later.
          */
         disableOrganizationDeletion: true,
+        /**
+         * **48 hours, the plugin's own default, kept rather than changed.**
+         * Stated explicitly instead of left implicit, because a link's lifetime
+         * is a security decision and an unwritten default is not a decision.
+         * The judgement (AGENTS.md 12 rule 4 — there is no traffic to fit
+         * against) is that two days spans a weekday and a weekend for a person
+         * who read the mail on a phone and acted on a laptop, while keeping a
+         * forwarded or leaked link short-lived. `/account` shows every pending
+         * invitation with its expiry and an owner can cancel and re-send, so a
+         * missed window costs one click rather than a support conversation.
+         */
+        invitationExpiresIn: 60 * 60 * 48,
+        /**
+         * **A bound against runaway pending invitations on a free Neon plan,
+         * not a product requirement** — the same footing as `organizationLimit`
+         * and `membershipLimit` above, and equally a judgement. It counts
+         * *pending* invitations only, so it is not a cap on how many people an
+         * organisation may ever have; that is `membershipLimit`. 50 against a
+         * membership limit of 100 leaves an organisation able to invite its
+         * whole roster in two passes.
+         */
+        invitationLimit: 50,
+        /**
+         * **On, and the alternative is worse.** Off, the endpoint answers a
+         * second invitation to an address that already has a pending one with
+         * `USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION`
+         * (`crud-invites.mjs:132`) — and re-inviting is exactly what an owner
+         * does when the first message did not arrive, which is the case they
+         * cannot see and we cannot diagnose for them. On, the stale row is
+         * moved to `canceled` and a fresh invitation with a fresh id and a fresh
+         * expiry is created, so the old link stops working the moment a new one
+         * is issued. That is the safer of the two: one live link per address at
+         * a time.
+         */
+        cancelPendingInvitationsOnReInvite: true,
+        /**
+         * The invitation email — the option this plugin block was configured
+         * without at step 8, and the reason invitations existed as a table and
+         * nothing else. Delegated whole to `lib/email/`, like every other send
+         * on this site; the sender returns rather than throws, and the plugin
+         * runs it as a background task, so a failed message can never fail the
+         * write (AGENTS.md 10 rule 4 — see that module for the verification).
+         */
+        sendInvitationEmail: async (data) => {
+          await sendOrganizationInvitation({
+            invitationId: data.id,
+            organizationName: data.organization.name,
+            inviterName: data.inviter.user.name,
+            role: data.role,
+            expiresAt: data.invitation.expiresAt,
+            to: data.email,
+          });
+        },
         /* Teams and dynamic access control stay off. Neither is in §5.2
            step 8, and §5.2's "do not overbuild" covers the temptation. */
       }),
