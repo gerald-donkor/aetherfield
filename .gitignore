@@ -65,3 +65,7 @@ next-env.d.ts
 # sync once.
 /.agents/skills/tailwind-4-docs/references/docs/
 /.agents/skills/tailwind-4-docs/references/docs-index.tsx
+
+# Playwright MCP scratch output — console logs and page accessibility dumps
+# written by the browser tooling during a session. Debris, never source.
+/.playwright-mcp/
