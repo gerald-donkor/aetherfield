@@ -626,6 +626,24 @@ on all 16 prerendered pages with only `.next/BUILD_ID` normalised** — the chun
 filenames match too, because Turbopack's names are deterministic for the same
 commit and the same `node_modules`. Anything less than that is a finding.
 
+**But a worktree base no longer works at all on this repository, and the symptom
+looks like a catastrophic regression.** Found in prompt 64. Tailwind v4 scans
+the project's files, and the main tree carries **gitignored** files a fresh
+worktree does not — above all the `drizzle-docs` skill's 484-file, ~4.5 MB
+markdown snapshot under `.claude/skills/`. So the two trees do not generate the
+same stylesheet: the worktree built **one 74 KB CSS chunk** where the main tree
+built **11 KB + 407 KB**, every page gained a second `<link rel="stylesheet">`,
+and 20 of 21 pages differed on a change that touched no markup. Confirm it with
+`ls -la */.next/static/chunks/*.css` before believing any large diff.
+
+**Use the two-build method instead, which is now the default here**: snapshot
+`.next/server/app` and `.next/BUILD_ID`, `git stash push <the changed files>`,
+rebuild, snapshot again, `git stash pop`, then diff the two snapshots
+normalising only the build id and the CSS chunk name. Same environment on both
+sides, two ~12 s builds, and it isolates exactly the change. **Leave the JS
+chunk names un-normalised** — they are deterministic across the two builds, so
+matching them for free is a stronger result than normalising them away.
+
 **A client component reached from a shared barrel lands in every page's
 `<script>` list.** After adding one, always check the chunk graph, not just the
 markup:

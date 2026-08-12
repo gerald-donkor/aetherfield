@@ -224,6 +224,9 @@ export const MEMBERSHIP_ERRORS = {
   LAST_OWNER:
     "You are the only owner. Invite another owner before leaving, so the organisation keeps one.",
   NOT_RECIPIENT: "This invitation was sent to a different address.",
+  /* Second person, unlike `ALREADY_MEMBER` above: that one is shown to an owner
+     inviting someone else, this one to the invitee reading their own link. */
+  ALREADY_JOINED: "You are already a member of this organisation.",
   VERIFY_EMAIL: "Verify your email address before responding to an invitation.",
 } as const;
 

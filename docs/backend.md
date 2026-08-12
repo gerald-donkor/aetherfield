@@ -3017,6 +3017,13 @@ it is left alone because the auth schema is generated and never hand-authored
 (§9). Worth revisiting with the library before step 9 relies on one row per
 pair.
 
+> **Closed by prompt 64 on 12 Aug 2026** — see "One membership row per
+> `(organisation, user)`" below. The constraint was hand-added after all, with
+> the precedent this file already records (`auth-schema.ts` is not purely
+> generated) and a comment that survives regeneration. This paragraph is left
+> standing as the question it was, rather than rewritten to look prescient
+> (§12 rule 8).
+
 `session` gained `active_organization_id text` (nullable), confirmed in the
 migration at line 30 and read back from `information_schema.columns` after the
 apply: `active_organization_id | text | YES`.
@@ -3475,6 +3482,160 @@ request's reads happen.
 | any staff bypass into tenant data | §11, explicitly |
 | an email preview script | none exists; §2 says do not reference one |
 
+## One membership row per `(organisation, user)`, prompt 64
+
+Implemented on 12 Aug 2026. **No new feature** — §5.2's sequence is exhausted
+(steps 1–14 committed, step 8's invitations closed by prompt 63), and this
+closes the open question the step 8 and step 9 records both left standing rather
+than inventing a step 15.
+
+### What the exposure actually was
+
+Stated honestly, because the two earlier notes overstated how reachable it is:
+**this was a race, not an ordinary path.** Every single-threaded sequence was
+already refused in the application layer. Verified this session by reading
+`node_modules/better-auth/dist/plugins/organization/routes/crud-invites.mjs`
+(Better Auth 1.6.26), cited by line:
+
+- `createInvitation` — the handler begins at **line 37**. At **line 127** it
+  throws `USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION` when the invitee is
+  already a member, and at **line 132** it refuses a second pending invitation
+  unless `resend` or `cancelPendingInvitationsOnReInvite` is set. The latter
+  **is** set here (prompt 63), so line 132 does not fire and **line 163**
+  cancels the prior pending invitations instead.
+- `acceptInvitation` — endpoint at **line 246**, handler from **line 264**. It
+  checks, in order: status and expiry (**268**), the recipient address
+  (**269**), verified email (**270–274**), the organisation's existence
+  (**278**) and the membership limit (**279**). It then flips the invitation
+  with `updateInvitation({ …, fromStatus: "pending" })` (**285–289**) and
+  creates the member row inside `runWithTransaction` (**291**).
+  **It performs no already-a-member check at all.** `fromStatus` guards one
+  invitation being accepted twice; it does not guard two invitations being
+  accepted once each.
+
+So a duplicate needed concurrency — two `createInvitation` calls interleaving
+around the pending read, or an accept interleaving with an invite. The argument
+for fixing it was never likelihood: `getMembership()` in
+`lib/db/organization-queries.ts` is documented in its own comment as "**This is
+the tenant check**", it reads one row with `.limit(1)` and no `ORDER BY`, and
+the role it reports was therefore arbitrary under a duplicate. That invariant
+belongs in the schema rather than in three call sites that happen to agree.
+
+### The pre-check, run before generating anything
+
+A unique index cannot be created over existing duplicates, so the live table was
+read first over the **direct** connection (`DATABASE_URL_UNPOOLED`), grouping
+`member` by the pair. Counts and ids only — no address, no name, no
+organisation name (§8.3 rule 2). Exact output:
+
+```
+member rows: 1
+duplicate (organization_id, user_id) pairs: 0
+```
+
+No duplicates, so no dedupe decision arose. Had any existed the work would have
+stopped there: choosing which of two membership rows survives is a decision
+about someone's role in a tenant and is the user's, not a migration written on
+our own judgement (§12 rule 9).
+
+### The constraint, and the migration
+
+`lib/db/auth-schema.ts`'s `member` gained, in the same third-argument array as
+its two existing hand-added `index()` calls:
+
+```ts
+uniqueIndex("member_organizationId_userId_unique").on(
+  table.organizationId,
+  table.userId,
+),
+```
+
+`uniqueIndex` is imported from `drizzle-orm/pg-core` alongside `index`. It
+carries a comment marking it hand-added, because
+`scripts/generate-auth-schema.py` does not emit it and a regeneration would drop
+it silently otherwise — the comment is what makes the next merge notice.
+
+`npm run db:generate` wrote **`lib/db/migrations/0009_groovy_virginia_dare.sql`**,
+whose entire contents are:
+
+```sql
+CREATE UNIQUE INDEX "member_organizationId_userId_unique" ON "member" USING btree ("organization_id","user_id");
+```
+
+`npm run db:migrate` ended `[✓] migrations applied successfully!`. Nothing was
+hand-written and `drizzle-kit push` was not used (§9).
+
+### The application-layer refusal
+
+`app/invitation/[id]/actions.ts` gained one check in stage **d**, after the
+recipient comparison and before the plugin call: an accept reads the caller's
+membership of `invitation.organizationId` through the existing `getMembership()`
+and returns `MEMBERSHIP_ERRORS.ALREADY_JOINED` if one exists. A typed result,
+never a throw (§10 rule 2); nothing personal logged; declining is unchanged.
+
+`ALREADY_JOINED` — "You are already a member of this organisation." — is new in
+`lib/validation/organization.ts`. It is second person, unlike the existing
+`ALREADY_MEMBER`, which is shown to an owner inviting someone else; this one is
+read by the invitee on their own link.
+
+**Both, not either.** The index closes the race; the check closes the ordinary
+path, so a second click reads as a sentence rather than a caught unique
+violation falling through to `GENERIC`.
+
+### Prerender impact and verification, prompt 64
+
+**Expected none, and verified rather than assumed** (§8.1). `npm run build`'s
+route table is unchanged — `/invitation/[id]` is still `ƒ`, the marketing routes
+still `○`/`●`, 30 static pages generated.
+
+**The parent-commit worktree comparison was confounded, and the two-build method
+replaced it.** A `git worktree` at `127fa8f` with hardlinked `node_modules`
+built **one 74 KB CSS chunk**, where the main tree built **11 KB + 407 KB**, and
+20 of 21 pages differed. That is not this change: the main tree carries
+gitignored files a fresh worktree does not — notably the `drizzle-docs` skill's
+484-file, ~4.5 MB markdown snapshot under `.claude/skills/` — and Tailwind v4
+scans them, so the two trees do not generate the same stylesheet at all. Any
+future prerender diff on this repository hits the same wall while that snapshot
+is present. `docs/automation.md`'s fallback was used instead: **build the
+working tree twice**, once with the change stashed, in an identical environment.
+
+Result, with only `.next/BUILD_ID` and the CSS chunk name normalised:
+**0 of 21 pages differed.** JS chunk names were deliberately *not* normalised
+and matched anyway, so no bundle moved either — which is the expected outcome
+for a change touching one schema file, one migration, one action and one
+validation constant.
+
+### Checks run, prompt 64
+
+- `npm run lint` — exit 0, no output beyond npm's notice lines.
+- `npm run typecheck` — exit 0, no diagnostics.
+- `npm test` — `Test Files 8 passed (8)`, `Tests 170 passed (170)`. The domain
+  suite is untouched by this change and stayed green.
+- `npm run build` — compiled in 12.3 s, 30/30 static pages, route table above.
+- `npm run test:e2e:local` — `10 passed (28.8s)`, Chromium and Firefox.
+- **`npm run test:e2e:webkit` did not run: `which podman` returns "podman not
+  found".** Stated plainly rather than omitted; the previous commit had the same
+  gap.
+
+### Secrets and data, prompt 64
+
+No new environment variable and no `NEXT_PUBLIC_*`. The migration and the
+pre-check used `DATABASE_URL_UNPOOLED` through `dotenv -e .env.local`; the app
+keeps the pooled `DATABASE_URL` (§7.3). No personal data stored, transmitted or
+logged — the pre-check printed counts only, and it found none to print. No
+email, blob or AI provider involved.
+
+### What prompt 64 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| a step 15, or any new product feature | §5.2 is exhausted and "do not overbuild" is explicit |
+| a unique constraint anywhere else in the auth schema | this one is the tenant check; speculative constraints on a generated schema are how it drifts |
+| regenerating `auth-schema.ts` | the generated output would not contain this index; regeneration is its own change |
+| a dedupe or merge migration | the pre-check found no duplicates, and the decision would have been the user's |
+| touching `getMembership()`'s `.limit(1)` | with the index it is exact. Changing it would hide the invariant rather than assert it |
+| a members-UI or organisation-surface change | prompt 63 shipped those and they are unaffected |
+
 ## Step 9 — activity-data ingestion
 
 Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation
@@ -3813,6 +3974,16 @@ never hand-authored (§9), and adding a unique index behind the library's back
 would make the next `auth generate` diff misleading. The fix belongs with the
 library — an upstream constraint, or an explicit decision recorded with the user
 to add one — and is flagged here for step 12 rather than taken silently.
+
+> **Superseded by prompt 64 on 12 Aug 2026** (§12 rule 8). The index was added,
+> under the second of the two options this paragraph itself allows: an explicit
+> decision, taken with the user, recorded in "One membership row per
+> `(organisation, user)`" below and carrying a comment so a regeneration cannot
+> drop it silently. Two claims here are also narrower than they read: this
+> section's `addMember` and `acceptInvitation` findings are correct, but every
+> single-threaded path is refused in the application layer, so the reachable
+> exposure was a race rather than the ordinary "accepting a second invitation"
+> described above. The line numbers behind that are in the prompt 64 section.
 
 ### Prerender impact and verification, prompt 57
 

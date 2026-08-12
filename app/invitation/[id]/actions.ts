@@ -5,7 +5,10 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
 import { getAuth, getCurrentAccount } from "../../../lib/auth/server";
-import { getInvitationForLink } from "../../../lib/db/organization-queries";
+import {
+  getInvitationForLink,
+  getMembership,
+} from "../../../lib/db/organization-queries";
 import {
   checkInvitationResponseLimit,
   formatRetry,
@@ -32,7 +35,9 @@ import type { SubmitResult } from "../../../lib/validation/result";
  * - **d.** the invited address is the only address that may respond — the
  *   plugin enforces it inside both endpoints (`crud-invites.mjs:269` and
  *   `:380`), and this action refuses first so a mismatch is a sentence rather
- *   than an exception.
+ *   than an exception. An accept additionally refuses when the caller is
+ *   already a member, which the plugin checks nowhere — see the comment there
+ *   and the unique index on `member` in `lib/db/auth-schema.ts`.
  * - **e.** the plugin's own endpoint does the write.
  *
  * **No redirect** (AGENTS.md 10 rule 5): the page swaps to its outcome in place
@@ -92,6 +97,24 @@ export async function respondToInvitation(
      either is still compared correctly (AGENTS.md 9.2 rule 4). */
   if (invitation.email.toLowerCase() !== account.user.email.toLowerCase()) {
     return { ok: false, error: MEMBERSHIP_ERRORS.NOT_RECIPIENT };
+  }
+  /* Accepting twice would write a second `member` row for one pair. The plugin
+     refuses this on the invite side but not on the accept side —
+     `acceptInvitation` checks status, expiry, recipient, verified email and the
+     membership limit, and no existing membership (`crud-invites.mjs:264-290`).
+     The unique index added alongside this closes the race; this closes the
+     ordinary path, so a second click reads as a sentence rather than a caught
+     exception. Declining is unaffected. */
+  if (decision === "accept") {
+    let existing: Awaited<ReturnType<typeof getMembership>>;
+    try {
+      existing = await getMembership(account.user.id, invitation.organizationId);
+    } catch {
+      return { ok: false, error: MEMBERSHIP_ERRORS.GENERIC };
+    }
+    if (existing) {
+      return { ok: false, error: MEMBERSHIP_ERRORS.ALREADY_JOINED };
+    }
   }
 
   // -- e. The write, through the plugin's own endpoint ----------------------

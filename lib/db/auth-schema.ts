@@ -7,6 +7,7 @@ import {
   boolean,
   integer,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -108,6 +109,24 @@ export const member = pgTable(
   (table) => [
     index("member_organizationId_idx").on(table.organizationId),
     index("member_userId_idx").on(table.userId),
+    /**
+     * Hand-added, like the two indexes above — `scripts/generate-auth-schema.py`
+     * does not emit it, so a regeneration drops it unless this survives the
+     * merge.
+     *
+     * `getMembership()` in `lib/db/organization-queries.ts` is the tenant check
+     * for every phase-two read and write, and it reads one row with `.limit(1)`.
+     * Without uniqueness the row it returns — and so the role it reports — is
+     * arbitrary. Better Auth guards the ordinary paths in the application layer
+     * (`createInvitation` refuses an existing member; `acceptInvitation` does
+     * not check at all), which leaves the duplicate reachable only by a race.
+     * The invariant belongs in the schema rather than in call sites that happen
+     * to agree.
+     */
+    uniqueIndex("member_organizationId_userId_unique").on(
+      table.organizationId,
+      table.userId,
+    ),
   ],
 );
 
