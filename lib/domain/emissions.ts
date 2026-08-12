@@ -20,7 +20,7 @@
  *
  * ---
  *
- * ## The four ways this module refuses
+ * ## The five ways this module refuses
  *
  * Every one of them is a **typed refusal that keeps the record out of the
  * total**, never a fallback, a zero or a guess. A record that cannot be
@@ -30,13 +30,20 @@
  *
  * 1. **No factor is mapped** to the record's `(category, unit)` pair. The
  *    mapping is organisation-scoped and seeded small; most pairs start empty.
- * 2. **The factor does not produce an emission.** 514 rows of the 2026 DEFRA
+ * 2. **No visible factor set covers the record's own date.** The pair is
+ *    mapped, but the activity falls outside every `effective_from` /
+ *    `effective_to` window the tenant can see — a 2025 restatement against a
+ *    2026-only library. Costing it at the wrong year's factor would be a wrong
+ *    number rather than a missing one, so the record is refused and the *year*
+ *    is reported, which is the thing a reporter can act on: load that year's
+ *    set. See {@link FactorResolution}.
+ * 3. **The factor does not produce an emission.** 514 rows of the 2026 DEFRA
  *    set convert an activity into `kWh`, not into kgCO2e. Summing one into a
  *    tCO2e total would inflate it silently.
- * 3. **The units do not convert.** `km` against `tonne.km` is not a unit
+ * 4. **The units do not convert.** `km` against `tonne.km` is not a unit
  *    mismatch to paper over, it is a different physical quantity. `miles` and
  *    `GJ` are refused too — see {@link convertQuantity}.
- * 4. **The gas cannot be priced** under the factor's own GWP set — AR4
+ * 5. **The gas cannot be priced** under the factor's own GWP set — AR4
  *    publishes no fossil-methane value, and this repository's GWP tables carry
  *    no halocarbons.
  *
@@ -84,8 +91,14 @@ import { lookupGwp } from "./gwp";
  * can be re-derived and a change in method is visible as a change in this
  * value. Bump it whenever a change here would move a number that a previous run
  * produced — not for a comment, a rename or a new refusal reason.
+ *
+ * **`1.1.0` — prompt 68, date-effective factor selection.** A record whose date
+ * no visible factor set covers now produces no figure, where 1.0.0 costed it at
+ * whichever factor the mapping happened to point at. That removes figures a
+ * previous run produced, and re-points others at a different year's factor row,
+ * so it moves numbers by construction — exactly the case this field exists for.
  */
-export const ENGINE_VERSION = "1.0.0";
+export const ENGINE_VERSION = "1.1.0";
 
 /* -------------------------------------------------------------------------- */
 /*  Inputs                                                                     */
@@ -421,13 +434,33 @@ export type UnmatchedPair = {
   recordCount: number;
 };
 
+/** A year whose records are mapped but fall outside every visible factor set's
+    window, with how many records sit in it.
+
+    **Keyed by year, not by pair, and that is the point.** The action a reporter
+    can take is to load that year's factor set; grouping by `(category, unit)`
+    would name the pairs and hide the one fact that resolves all of them. */
+export type OutOfPeriodYear = {
+  /** `"2025"` — the first four characters of the record's own `activityDate`,
+      sliced rather than parsed, for the reason {@link monthOf} records. */
+  year: string;
+  recordCount: number;
+};
+
 export type CoverageReport = {
   totalRecords: number;
   matchedRecords: number;
   unmatchedRecords: number;
   /** Sorted by `recordCount` descending, then by category and unit, so the
-      list is stable across runs and the biggest gap reads first. */
+      list is stable across runs and the biggest gap reads first.
+
+      **Only `no_mapping`.** A record refused as `out_of_period` is mapped, and
+      putting it here would make this list disagree with `listFactorCoverage`,
+      which mirrors the same question in SQL. */
   unmatchedPairs: UnmatchedPair[];
+  /** Mapped records no visible set's window covers, by year. Sorted the same
+      way `unmatchedPairs` is: `recordCount` descending, then the key. */
+  outOfPeriodYears: OutOfPeriodYear[];
   /** Records that had a factor but still produced no figure, by reason. */
   refusals: { refusal: EmissionRefusal; reason: string; recordCount: number }[];
 };
@@ -455,17 +488,32 @@ export type AggregateResult = {
   emissions: RecordEmission[];
 };
 
+/** Why a resolver produced no factor. **Two facts, not one.** Until prompt 68
+    the resolver returned `FactorInput | null` and `null` collapsed "this pair is
+    unmapped" into the same bucket as "this pair is mapped, but no visible set
+    covers the record's date" — two different gaps with two different fixes. */
+export type FactorGap = "no_mapping" | "out_of_period";
+
+export type FactorResolution =
+  | { ok: true; factor: FactorInput }
+  | { ok: false; gap: FactorGap };
+
 /**
  * How a caller resolves a record to a factor. **Deterministic in this step**:
  * `lib/db/emission-queries.ts` passes a lookup over the organisation's
- * `activity_factor_mapping`, keyed on `(category, unit)`.
+ * `activity_factor_mapping`, keyed on `(category, unit)`, which then selects
+ * among that mapping's siblings by the record's own `activityDate`.
+ *
+ * **The whole record is the input, and always was** — which is what let date
+ * selection arrive without changing this signature's input side. The engine
+ * hands over everything it knows and takes back a tagged answer.
  *
  * It is a parameter rather than a table inside this module so the engine stays
  * pure and so the seam a model would one day occupy is explicit — AGENTS.md 5.3
  * sanctions embeddings plus rerank *here*, selecting a factor, and nowhere near
  * the arithmetic below.
  */
-export type FactorResolver = (record: ActivityInput) => FactorInput | null;
+export type FactorResolver = (record: ActivityInput) => FactorResolution;
 
 /**
  * Runs the engine over many records and reports totals **and coverage
@@ -482,12 +530,27 @@ export function aggregate(
 ): AggregateResult {
   const emissions: RecordEmission[] = [];
   const unmatched = new Map<string, UnmatchedPair>();
+  const outOfPeriod = new Map<string, OutOfPeriodYear>();
   const refusals = new Map<string, { refusal: EmissionRefusal; reason: string; recordCount: number }>();
 
   for (const record of records) {
-    const factor = resolve(record);
-    if (!factor) {
-      const key = `${record.category} ${record.unit}`;
+    const resolution = resolve(record);
+    if (!resolution.ok) {
+      if (resolution.gap === "out_of_period") {
+        const year = record.activityDate.slice(0, 4);
+        const seen = outOfPeriod.get(year);
+        if (seen) seen.recordCount += 1;
+        else outOfPeriod.set(year, { year, recordCount: 1 });
+        continue;
+      }
+
+      /* A `.` separator, the one `buildFactorResolver` already keys on. It was
+         a NUL byte until prompt 68, which made `file` report this module as
+         `data` and made `grep` return nothing for the whole file — a session
+         grepping the engine got an empty result and a wrong conclusion. Neither
+         enum vocabulary contains a dot, so the key is as unambiguous as it was.
+         This moves no number. */
+      const key = `${record.category}.${record.unit}`;
       const existing = unmatched.get(key);
       if (existing) {
         existing.recordCount += 1;
@@ -501,7 +564,7 @@ export function aggregate(
       continue;
     }
 
-    const result = calculateRecordEmission(record, factor);
+    const result = calculateRecordEmission(record, resolution.factor);
     if (!result.ok) {
       const existing = refusals.get(result.refusal);
       if (existing) {
@@ -526,8 +589,16 @@ export function aggregate(
       a.unit.localeCompare(b.unit),
   );
 
+  const outOfPeriodYears = [...outOfPeriod.values()].sort(
+    (a, b) => b.recordCount - a.recordCount || a.year.localeCompare(b.year),
+  );
+
+  /* Every record that produced no figure, whichever of the five refusals it
+     hit. `matchedRecords + unmatchedRecords === totalRecords` is what makes the
+     coverage line honest, so a new refusal channel has to be added here too. */
   const unmatchedRecords =
     unmatchedPairs.reduce((n, pair) => n + pair.recordCount, 0) +
+    outOfPeriodYears.reduce((n, entry) => n + entry.recordCount, 0) +
     [...refusals.values()].reduce((n, entry) => n + entry.recordCount, 0);
 
   return {
@@ -537,6 +608,7 @@ export function aggregate(
       matchedRecords: emissions.length,
       unmatchedRecords,
       unmatchedPairs,
+      outOfPeriodYears,
       refusals: [...refusals.values()].sort(
         (a, b) => b.recordCount - a.recordCount || a.refusal.localeCompare(b.refusal),
       ),

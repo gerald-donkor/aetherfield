@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import {
   listEmissions,
+  countOutOfPeriodRecords,
   countUncalculatedRecords,
   listFactorSets,
 } from "../../../lib/db/emission-queries";
@@ -66,9 +67,10 @@ export async function EmissionsSummary({
   importId?: string | null;
   headingId: string;
 }) {
-  const [emissions, uncalculated, sets] = await Promise.all([
+  const [emissions, uncalculated, outOfPeriod, sets] = await Promise.all([
     listEmissions(organizationId, importId),
     countUncalculatedRecords(organizationId, importId),
+    countOutOfPeriodRecords(organizationId, importId),
     listFactorSets(organizationId),
   ]);
 
@@ -130,6 +132,15 @@ export async function EmissionsSummary({
                   uncalculated === 1 ? "record is" : "records are"
                 } waiting. Run a calculation to see the scope split and where the gaps are.`}
           </p>
+          {outOfPeriod > 0 ? (
+            <p className="mt-3 max-w-[34rem] font-mono text-[12px] leading-[18px]">
+              {`${outOfPeriod.toLocaleString("en-GB")} of ${
+                outOfPeriod === 1 ? "them is" : "them are"
+              } mapped to a factor, but no loaded factor set covers the date the activity happened on. Load the factor set for that year to bring ${
+                outOfPeriod === 1 ? "it" : "them"
+              } into the total.`}
+            </p>
+          ) : null}
           <RecalculateControl importId={importId} className="mt-8" />
         </div>
       ) : (
@@ -154,6 +165,23 @@ export async function EmissionsSummary({
                     uncalculated === 1 ? "record has" : "records have"
                   } no calculated emission yet and contribute nothing to the figures below — this total is not complete.`}
             </p>
+            {/* The one gap with a specific answer, named separately from the
+                undifferentiated count above it: these records are mapped, and
+                what is missing is the factor set for the year they happened
+                in. Prompt 68. */}
+            {outOfPeriod > 0 ? (
+              <p className="mt-3 font-mono text-[12px] leading-[18px]">
+                {`${
+                  outOfPeriod === uncalculated
+                    ? `All ${outOfPeriod.toLocaleString("en-GB")}`
+                    : `${outOfPeriod.toLocaleString("en-GB")} of them`
+                } ${
+                  outOfPeriod === 1 ? "is" : "are"
+                } mapped to a factor, but no loaded factor set covers the date the activity happened on. Load the factor set for that year to bring ${
+                  outOfPeriod === 1 ? "it" : "them"
+                } into the total.`}
+              </p>
+            ) : null}
             {!complete ? (
               <p className="mt-3 font-sans text-nav font-bold">
                 <Link

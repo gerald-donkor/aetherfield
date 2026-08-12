@@ -32,7 +32,13 @@ import {
   toStoredKgCo2e,
   type ActivityInput,
   type FactorInput,
+  type FactorResolution,
+  type FactorResolver,
 } from "../domain/emissions";
+import {
+  selectFactorForDate,
+  type FactorCandidate,
+} from "../domain/factor-selection";
 import type { CreateCustomFactorInput } from "../validation/emissions";
 
 /**
@@ -550,6 +556,28 @@ export type ResolvedMapping = {
   factorLabel: string;
   source: string;
   datasetVersion: string;
+  /** The publisher's stable row id. **How a mapping travels to another year's
+      set** (prompt 68): DEFRA republishes the same row under the same id each
+      year, so "the factor this tenant chose, in the year the activity happened"
+      is `(source, source_row_id)` looked up in that year's set. No schema change
+      and no per-period mapping table. */
+  sourceRowId: string;
+  /** The chosen row's own set window, so {@link buildFactorResolver}'s fast
+      path can answer without consulting a sibling. */
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
+/**
+ * One visible factor row that shares a mapping's `(source, source_row_id)`.
+ * **Loaded once per recalculation**, never per record.
+ *
+ * A `FactorCandidate` — the pure shape `lib/domain/factor-selection.ts` decides
+ * over — plus the two columns that say which mapping it belongs to.
+ */
+export type FactorSibling = FactorCandidate & {
+  source: string;
+  sourceRowId: string;
 };
 
 /**
@@ -583,8 +611,11 @@ export async function listFactorMappings(
       level3: emissionFactor.level3,
       columnText: emissionFactor.columnText,
       publishedUom: emissionFactor.publishedUom,
+      sourceRowId: emissionFactor.sourceRowId,
       source: emissionFactorSet.source,
       datasetVersion: emissionFactorSet.datasetVersion,
+      effectiveFrom: emissionFactorSet.effectiveFrom,
+      effectiveTo: emissionFactorSet.effectiveTo,
     })
     .from(activityFactorMapping)
     .innerJoin(
@@ -609,6 +640,9 @@ export async function listFactorMappings(
       .join(" · "),
     source: row.source,
     datasetVersion: row.datasetVersion,
+    sourceRowId: row.sourceRowId,
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: row.effectiveTo,
     factor: {
       id: row.id,
       scope: row.scope,
@@ -625,16 +659,157 @@ export async function listFactorMappings(
   }));
 }
 
-/** Turns the mapping rows into the pure resolver `aggregate()` takes. Keeping
-    this here rather than in `lib/domain/` is what lets the engine stay free of
-    any notion of where a factor came from. */
-export function buildFactorResolver(mappings: readonly ResolvedMapping[]) {
-  const byPair = new Map<string, FactorInput>();
+/**
+ * Every visible factor row sharing a `(source, source_row_id)` with one of these
+ * mappings — **one query, for the whole recalculation**.
+ *
+ * `recalculateOrganization` runs over an entire organisation and the nightly
+ * sweep runs it for every organisation, so a per-record lookup here would be a
+ * production problem rather than a style note. The rows come back once and
+ * {@link buildFactorResolver} does all the interval matching in memory.
+ *
+ * **The same three predicates `searchFactorsForPair` applies**, plus the tenant
+ * scope: nothing can be selected here that the picker would not have offered,
+ * and a sibling resolved across the tenant boundary would be a cross-tenant leak
+ * into a filed number, which is why the predicate is the shared helper rather
+ * than a restatement of it.
+ */
+export async function listFactorSiblings(
+  organizationId: string,
+  mappings: readonly ResolvedMapping[],
+  db: Db = getDb(),
+): Promise<FactorSibling[]> {
+  /* Distinct pairs — eight seeded mappings routinely share four factor rows,
+     and `(category, unit)` is capped at 64 by the two enums, so the OR list is
+     bounded and fully parameterised. */
+  const pairs = new Map<string, { source: string; sourceRowId: string }>();
   for (const mapping of mappings) {
-    byPair.set(`${mapping.category}.${mapping.unit}`, mapping.factor);
+    pairs.set(`${mapping.source}${mapping.sourceRowId}`, {
+      source: mapping.source,
+      sourceRowId: mapping.sourceRowId,
+    });
   }
-  return (record: ActivityInput): FactorInput | null =>
-    byPair.get(`${record.category}.${record.unit}`) ?? null;
+  if (pairs.size === 0) return [];
+
+  const rows = await db
+    .select({
+      source: emissionFactorSet.source,
+      sourceRowId: emissionFactor.sourceRowId,
+      id: emissionFactor.id,
+      scope: emissionFactor.scope,
+      scope3Category: emissionFactor.scope3Category,
+      scope2Method: emissionFactor.scope2Method,
+      gas: emissionFactor.gas,
+      ch4Variant: emissionFactor.ch4Variant,
+      gwpSet: emissionFactor.gwpSet,
+      value: emissionFactor.value,
+      activityUnit: emissionFactor.activityUnit,
+      resultUnit: emissionFactor.resultUnit,
+      biogenic: emissionFactor.biogenic,
+      effectiveFrom: emissionFactorSet.effectiveFrom,
+      effectiveTo: emissionFactorSet.effectiveTo,
+      setId: emissionFactorSet.id,
+      setOrganizationId: emissionFactorSet.organizationId,
+      publicationYear: emissionFactorSet.publicationYear,
+      setCreatedAt: emissionFactorSet.createdAt,
+    })
+    .from(emissionFactor)
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        visibleFactorScope(organizationId),
+        isNull(emissionFactor.deletedAt),
+        isNull(emissionFactorSet.deletedAt),
+        isNull(emissionFactorSet.supersededBySetId),
+        or(
+          ...[...pairs.values()].map((pair) =>
+            and(
+              eq(emissionFactorSet.source, pair.source),
+              eq(emissionFactor.sourceRowId, pair.sourceRowId),
+            ),
+          ),
+        ),
+      ),
+    );
+
+  return rows.map((row) => ({
+    source: row.source,
+    sourceRowId: row.sourceRowId,
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: row.effectiveTo,
+    setId: row.setId,
+    setOrganizationId: row.setOrganizationId,
+    publicationYear: row.publicationYear,
+    setCreatedAt: row.setCreatedAt,
+    factor: {
+      id: row.id,
+      scope: row.scope,
+      scope3Category: row.scope3Category,
+      scope2Method: row.scope2Method,
+      gas: row.gas,
+      ch4Variant: row.ch4Variant,
+      gwpSet: row.gwpSet,
+      value: row.value,
+      activityUnit: row.activityUnit,
+      resultUnit: row.resultUnit,
+      biogenic: row.biogenic,
+    },
+  }));
+}
+
+/**
+ * Turns the mapping rows into the pure resolver `aggregate()` takes — **now
+ * selecting by the record's own date** (prompt 68).
+ *
+ * Keeping this here rather than in `lib/domain/` is what lets the engine stay
+ * free of any notion of where a factor came from. It is **pure and synchronous**
+ * and issues no query: every candidate it can return is already in `siblings`.
+ *
+ * **The rule it applies is not written here.** Which set wins for a date is
+ * `selectFactorForDate` in `lib/domain/factor-selection.ts` — pure, and under
+ * test, because it decides which published value multiplies a customer's
+ * activity. This function does the two things that are genuinely about storage:
+ * index the mappings by pair, and index the siblings by the publisher's row
+ * identity. `no_mapping` is decided here because only this layer knows what a
+ * mapping is.
+ */
+export function buildFactorResolver(
+  mappings: readonly ResolvedMapping[],
+  siblings: readonly FactorSibling[] = [],
+): FactorResolver {
+  const byPair = new Map<string, ResolvedMapping>();
+  for (const mapping of mappings) {
+    byPair.set(`${mapping.category}.${mapping.unit}`, mapping);
+  }
+
+  /* Nested rather than a composite string key, so no separator has to be
+     chosen and no source or row id can collide with one. */
+  const bySourceRow = new Map<string, Map<string, FactorSibling[]>>();
+  for (const sibling of siblings) {
+    let bySource = bySourceRow.get(sibling.source);
+    if (!bySource) {
+      bySource = new Map();
+      bySourceRow.set(sibling.source, bySource);
+    }
+    const existing = bySource.get(sibling.sourceRowId);
+    if (existing) existing.push(sibling);
+    else bySource.set(sibling.sourceRowId, [sibling]);
+  }
+
+  return (record: ActivityInput): FactorResolution => {
+    const mapping = byPair.get(`${record.category}.${record.unit}`);
+    if (!mapping) return { ok: false, gap: "no_mapping" };
+
+    const factor = selectFactorForDate(
+      mapping,
+      bySourceRow.get(mapping.source)?.get(mapping.sourceRowId) ?? [],
+      record.activityDate,
+    );
+
+    return factor
+      ? { ok: true, factor }
+      : { ok: false, gap: "out_of_period" };
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -774,7 +949,14 @@ export type RecalculationOutcome = {
  * every database handle, which is the boundary AGENTS.md 6.2 actually names —
  * `aggregate()` below is handed pure values and hands back pure values.
  *
- * **The behaviour is step 10's, unchanged.** `replaceEmissions` keeps its
+ * **The factor is selected by the record's own date** (prompt 68), not by
+ * whichever row the mapping happens to point at: `listFactorSiblings` loads the
+ * mapped rows' `(source, source_row_id)` siblings once, and the resolver picks
+ * the set whose window contains the activity date. A record no visible set
+ * covers produces no figure and is reported in the coverage report's
+ * `outOfPeriodYears`.
+ *
+ * **The behaviour is otherwise step 10's, unchanged.** `replaceEmissions` keeps its
  * delete-then-insert semantics bounded by the covered record set, for the reason
  * its own docblock records: a record whose mapping was removed must lose its
  * figure rather than keep a stale one.
@@ -800,7 +982,16 @@ export async function recalculateOrganization(
 
   if (records.length === 0) return { records: 0, written: 0 };
 
-  const { emissions } = aggregate(records, buildFactorResolver(mappings));
+  /* Sequential, and only once there is something to calculate: the sibling
+     lookup is keyed by the mappings, and an organisation with no records pays
+     for neither. Still a constant number of queries in the record count — the
+     resolver below never issues one. */
+  const siblings = await listFactorSiblings(organizationId, mappings);
+
+  const { emissions } = aggregate(
+    records,
+    buildFactorResolver(mappings, siblings),
+  );
 
   const { written } = await replaceEmissions(
     organizationId,
@@ -905,6 +1096,55 @@ export async function countUncalculatedRecords(
 }
 
 /**
+ * How many committed records are mapped but dated outside every visible factor
+ * set's window — **the part of the uncalculated figure that has a specific
+ * answer.**
+ *
+ * `countUncalculatedRecords` is honest but undifferentiated: it counts records
+ * with no computed figure, whatever the reason. This names the one reason a
+ * reporter resolves by loading a year's factor set rather than by mapping a
+ * pair, which is why the coverage line prints it separately.
+ *
+ * Answered from the rows themselves rather than by running the engine — the
+ * reason {@link listFactorCoverage} exists, applied to the same question. The
+ * predicate is the shared one, so this and the pair list agree by construction.
+ */
+export async function countOutOfPeriodRecords(
+  organizationId: string,
+  importId: string | null,
+): Promise<number> {
+  const [row] = await getDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(activityRecord)
+    .innerJoin(
+      activityFactorMapping,
+      and(
+        eq(activityFactorMapping.organizationId, organizationId),
+        eq(activityFactorMapping.category, activityRecord.category),
+        eq(activityFactorMapping.unit, activityRecord.unit),
+        isNull(activityFactorMapping.deletedAt),
+      ),
+    )
+    .innerJoin(
+      emissionFactor,
+      and(
+        eq(emissionFactor.id, activityFactorMapping.factorId),
+        isNull(emissionFactor.deletedAt),
+      ),
+    )
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        eq(activityRecord.organizationId, organizationId),
+        isNull(activityRecord.deletedAt),
+        importId ? eq(activityRecord.importId, importId) : undefined,
+        outOfPeriodPredicate(organizationId),
+      ),
+    );
+  return row?.n ?? 0;
+}
+
+/**
  * Whether this organisation has any factor mapping at all.
  *
  * **It has no caller, and this docblock used to claim otherwise.** Build step 10
@@ -949,11 +1189,60 @@ function factorLabelOf(
   return parts.filter(Boolean).join(" · ");
 }
 
+/**
+ * "This record is mapped, and no visible set's window contains its date" — in
+ * SQL, **as one expression, written once**.
+ *
+ * It mirrors {@link buildFactorResolver} stage for stage, and it has to: this is
+ * what the two coverage surfaces render, and the resolver is what actually
+ * decides the figure. A predicate that answered differently would tell a
+ * reporter a gap was closed while the engine still refused the record.
+ *
+ * - the mapped row's **own** set window first, exactly as the resolver's fast
+ *   path — which is why a superseded mapped set still counts as covering, there
+ *   and here;
+ * - then the `(source, source_row_id)` siblings, under the tenant predicate and
+ *   the same three `deleted` / `superseded` filters `listFactorSiblings` and
+ *   `searchFactorsForPair` apply.
+ *
+ * The subquery's two tables are aliased in literal SQL because they are the same
+ * two tables the outer query already joins; the interpolations are the outer
+ * columns and the bound organisation id.
+ *
+ * It reads `activityRecord`, `emissionFactor` and `emissionFactorSet` from the
+ * enclosing query, so it is only valid where all three are in scope.
+ */
+function outOfPeriodPredicate(organizationId: string) {
+  return sql`${activityRecord.activityDate} not between ${emissionFactorSet.effectiveFrom} and ${emissionFactorSet.effectiveTo}
+    and not exists (
+      select 1
+      from emission_factor sibling_factor
+      join emission_factor_set sibling_set
+        on sibling_set.id = sibling_factor.set_id
+      where sibling_factor.source_row_id = ${emissionFactor.sourceRowId}
+        and sibling_set.source = ${emissionFactorSet.source}
+        and (
+          sibling_factor.organization_id is null
+          or sibling_factor.organization_id = ${organizationId}
+        )
+        and sibling_factor.deleted_at is null
+        and sibling_set.deleted_at is null
+        and sibling_set.superseded_by_set_id is null
+        and ${activityRecord.activityDate}
+          between sibling_set.effective_from and sibling_set.effective_to
+    )`;
+}
+
 export type FactorCoveragePair = {
   category: ActivityCategory;
   unit: ActivityUnit;
   /** Committed records sitting behind this pair. */
   recordCount: number;
+  /** Of those, how many are dated outside every window the mapped factor's
+      `(source, source_row_id)` is published in — mapped, and still contributing
+      nothing. Always `0` for an unmapped pair, whose records are counted by the
+      `mapping === null` gap instead. */
+  outOfPeriodRecords: number;
   /** `null` is the gap the surface exists to close. */
   mapping: {
     factorId: string;
@@ -986,6 +1275,13 @@ export type FactorCoveragePair = {
  *
  * Predicated on `organization_id = $1` throughout — on the records, and again on
  * the mapping join, so a pair can never pick up another tenant's choice.
+ *
+ * **Two questions since prompt 68, not one.** "Is there a mapping" was the whole
+ * of it, and a mapped pair whose records all fell outside every published window
+ * read as fully covered while contributing nothing. `outOfPeriodRecords` answers
+ * the second, through {@link outOfPeriodPredicate} — the same expression
+ * {@link countOutOfPeriodRecords} uses, so the pair list and the coverage line
+ * cannot disagree.
  */
 export async function listFactorCoverage(
   organizationId: string,
@@ -995,6 +1291,13 @@ export async function listFactorCoverage(
       category: activityRecord.category,
       unit: activityRecord.unit,
       recordCount: sql<number>`count(*)::int`,
+      /* A `FILTER` rather than a second query: its expression is evaluated per
+         input row, like an aggregate's argument, so the ungrouped columns it
+         reads need no `GROUP BY` entry. */
+      outOfPeriodRecords: sql<number>`count(*) filter (
+        where ${activityFactorMapping.factorId} is not null
+          and ${outOfPeriodPredicate(organizationId)}
+      )::int`,
       factorId: activityFactorMapping.factorId,
       chosenAt: activityFactorMapping.updatedAt,
       chosenBy: user.name,
@@ -1063,6 +1366,7 @@ export async function listFactorCoverage(
     category: row.category,
     unit: row.unit,
     recordCount: row.recordCount,
+    outOfPeriodRecords: row.outOfPeriodRecords,
     mapping:
       row.factorId && row.source && row.datasetVersion
         ? {

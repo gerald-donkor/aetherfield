@@ -100,6 +100,13 @@ export default async function ActivityMappingsPage({
   const recordsBehindGaps = coverage
     .filter((pair) => pair.mapping === null)
     .reduce((total, pair) => total + pair.recordCount, 0);
+  /* A mapped pair can still contribute nothing, if its records are dated
+     outside every window the mapped row is published in. Prompt 68 — before
+     it, such a pair read as fully covered here. */
+  const recordsOutOfPeriod = coverage.reduce(
+    (total, pair) => total + pair.outOfPeriodRecords,
+    0,
+  );
 
   return (
     <>
@@ -122,6 +129,17 @@ export default async function ActivityMappingsPage({
                 recordsBehindGaps === 1 ? "record" : "records"
               }.`}
         </p>
+        {recordsOutOfPeriod > 0 ? (
+          <p className="mt-4 max-w-[760px] font-serif text-p2 text-muted">
+            {`${recordsOutOfPeriod.toLocaleString("en-GB")} mapped ${
+              recordsOutOfPeriod === 1 ? "record is" : "records are"
+            } dated outside every loaded factor set's activity dates, so ${
+              recordsOutOfPeriod === 1 ? "it contributes" : "they contribute"
+            } nothing. A factor is chosen by the date the activity happened, not by today's date. Add the factor set for that year to bring ${
+              recordsOutOfPeriod === 1 ? "it" : "them"
+            } in.`}
+          </p>
+        ) : null}
         <p className="mt-5">
           <Link
             href="/activity"
@@ -207,6 +225,19 @@ export default async function ActivityMappingsPage({
                               ? ` · chosen by ${pair.mapping.chosenBy}`
                               : " · seeded default"}
                           </p>
+                          {/* Mapped and still contributing nothing. Without
+                              this the pair reads as covered. */}
+                          {pair.outOfPeriodRecords > 0 ? (
+                            <p className="mt-3 max-w-[34rem] border-l-2 border-ink py-1 pl-4 font-mono text-[11px] leading-[18px]">
+                              {`${pair.outOfPeriodRecords.toLocaleString(
+                                "en-GB",
+                              )} of ${
+                                pair.recordCount === pair.outOfPeriodRecords
+                                  ? "these"
+                                  : "them"
+                              } fall outside every loaded factor set's activity dates and produce no figure.`}
+                            </p>
+                          ) : null}
                         </div>
                       ) : (
                         <p className="mt-4 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">

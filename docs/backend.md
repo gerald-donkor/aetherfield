@@ -4191,9 +4191,217 @@ another tenant.
 | retiring a whole set from the UI | the query layer already refuses to add rows to a retired set; the button needs the same in-use accounting per set |
 | repointing or soft-deleting mappings on retirement | the visible gap is the correct failure |
 | per-row `gas_basis` | a schema change |
-| date-based factor selection by `effective_from` / `effective_to` | not built for published sets either; its own prompt |
+| date-based factor selection by `effective_from` / `effective_to` | **no longer deferred — built by prompt 68**, below. This row read "not built for published sets either; its own prompt" until then, and is corrected rather than left standing (AGENTS.md §12 rule 8) |
 | a `window.confirm` or a modal | a browser modal blocks the page |
 | widening the Vitest scope to `lib/validation/` | no precedent; see "Tests, prompt 67" |
+
+## Date-effective factor selection, prompt 68
+
+Implemented on 12 Aug 2026. **A factor is now selected by the activity record's
+own date**, not by whichever row the tenant's mapping happens to point at.
+
+`lib/db/schema.ts` has stored `effective_from` / `effective_to` on
+`emission_factor_set` since step 10, and its docblock has stated the rule since
+step 10 — DEFRA publishes the 2026 factors "for use with activity data that
+falls entirely or mostly within 2026". Nothing selected on those columns:
+`buildFactorResolver` keyed purely on `(category, unit)`. A 2025-dated
+`activity_record` was costed at the 2026 factor, silently.
+
+### The decisions, taken with the user before the prompt was written
+
+| question | answer |
+| --- | --- |
+| a record whose date no visible set covers | **refuse, and surface it** — no figure, counted in a new coverage channel |
+| how a mapping travels to another year's set | **follow `source_row_id`** — no schema change, no migration |
+| the tie-break when several visible sets cover the date | tenant-owned before published, then `publication_year` desc, then the set's `created_at` desc, then the set's `id` asc |
+
+**Why tenant-owned wins.** A customer supplying a set under its own licence is a
+deliberate act, and "published always wins" would make the custom-factor-set
+surface (prompt 66) unable to supply a year the published data does not cover.
+
+**Why the tie-break runs to four keys.** It is a total order. A figure that moves
+between two runs over unchanged data, for no recorded reason, is the failure this
+ordering exists to prevent — so nothing is left to row arrival order.
+
+### Where the rule lives, and why not where the prompt put it
+
+The prompt placed the whole resolver in `lib/db/emission-queries.ts`. The
+**decision rule** was moved to a new pure module, `lib/domain/factor-selection.ts`
+(`covers`, `preferCandidate`, `selectFactorForDate`), because it decides which
+published value multiplies a customer's activity — a disclosure figure — and
+AGENTS.md §6.2 requires that layer to be pure and independently testable.
+`lib/db/` is neither: it is `server-only`, so it cannot be imported under
+Vitest, and `npm test` is scoped to `lib/domain/`. Left in `lib/db/` the
+tie-break would have shipped untested.
+
+It is **not** in `lib/domain/emissions.ts`: the engine deliberately has no notion
+of a set, a publisher or an organisation, which is what keeps `resolveFactor` a
+parameter and keeps §5.3's model seam explicit.
+
+`lib/db/emission-queries.ts` keeps the two things that are about storage —
+`listFactorSiblings` (the query) and `buildFactorResolver` (indexing mappings by
+pair and siblings by `(source, source_row_id)`, and deciding `no_mapping`).
+
+### The resolution order
+
+1. no mapping for the pair — `no_mapping`, unchanged from step 10;
+2. **the mapped row's own set covers the date** — use it, never look further.
+   This is the one place a superseded set still calculates: a mapping is a
+   deliberate choice and superseding a set does not un-make it;
+3. otherwise the mapped row's `(source, source_row_id)` siblings whose window
+   contains the date, ordered by the tie-break above;
+4. nothing covers it — `out_of_period`. **A refusal, never the nearest year.**
+
+Windows are inclusive at both ends and compared as `YYYY-MM-DD` **strings**; no
+`Date` is constructed, for the reason `monthOf` records — parsing would introduce
+a timezone into a `date` column that has none.
+
+### The engine
+
+- **`FactorResolver` returns `FactorResolution`**, a tagged union carrying
+  `no_mapping` and `out_of_period`, where it returned `FactorInput | null`. The
+  resolver's *input* is unchanged: it already received the whole `ActivityInput`,
+  which carries `activityDate`.
+- **`CoverageReport.outOfPeriodYears`** is the new channel — `{ year,
+  recordCount }`, keyed by the record's year because loading that year's set is
+  the action, sorted count-descending then by year. `unmatchedPairs` keeps its
+  exact shape and meaning: only `no_mapping`, so it still agrees with
+  `listFactorCoverage`'s SQL.
+- The module docblock now says **five** ways it refuses, not four.
+- **`ENGINE_VERSION` is `1.1.0`.** This removes figures for every out-of-period
+  record and re-points others at a different year's row, so it moves numbers by
+  construction.
+- **The NUL separator at the old line 490 is gone**, replaced by the `.` that
+  `buildFactorResolver` already used. `lib/domain/emissions.ts` was the only file
+  in the repository that `file` reported as `data`, and `grep` returned nothing
+  for the whole file — a session grepping the engine got an empty result and a
+  wrong conclusion. Confirmed fixed: `file lib/domain/emissions.ts` now reports
+  `JavaScript source, Unicode text, UTF-8 text`. **This moved no number.**
+
+### Surfacing it
+
+One SQL expression, `outOfPeriodPredicate`, written once and used by both
+surfaces, so the pair list and the coverage line cannot disagree — and mirroring
+`buildFactorResolver` stage for stage, including the mapped set's own window
+first.
+
+| surface | what it says |
+| --- | --- |
+| `EmissionsSummary`'s coverage line | how many of the uncalculated records are mapped but outside every loaded set's dates, and that loading that year's set brings them in — `countOutOfPeriodRecords` |
+| `/activity/mappings` | a lead paragraph with the organisation-wide count, and a per-pair line on any mapped pair with out-of-period records — `listFactorCoverage.outOfPeriodRecords` |
+
+`listFactorCoverage` answered only "is there a mapping" before this. A mapped
+pair whose records all fell outside every published window read as fully covered
+while contributing nothing.
+
+**The report evidence was deliberately left alone.** An out-of-period record
+already lands in `uncalculatedRecords`, which is honest. Adding a distinct figure
+would widen `ReportEvidence` — a stored, versioned snapshot — and would have to
+be admitted to `allowedNumberTokens` (`lib/domain/reports.ts`), which is §5.3's
+guardrail on the generated narrative. That is a change to what a report *is*, not
+a coverage improvement, and it is not what this prompt asked for.
+
+### Measurements
+
+Taken 12 Aug 2026 against the development database over
+`DATABASE_URL_UNPOOLED`. **Warm** unless stated; the first query paid Neon's
+scale-to-zero cold start (2,848 ms) and the rest ran at ~300 ms.
+
+**1. The seeded windows** — one row, as expected:
+
+| source | dataset_version | publication_year | effective_from | effective_to | organization_id |
+| --- | --- | --- | --- | --- | --- |
+| DESNZ | 2026 v1.2 | 2026 | 2026-01-01 | 2026-12-31 | null |
+
+**2. The blast radius: zero, and measured rather than assumed.** The development
+database holds 1 organisation, 1 user, 11 factor mappings, 7,035 factor rows —
+and **0 `activity_record` rows and 0 `activity_emission` rows**. So no stored
+figure moves and no total changes anywhere in this environment. The per-
+organisation out-of-period query returned no rows because there is no activity
+data at all, not because everything is in period.
+
+**3 and 4. The case was produced**, since no organisation had one. A temporary
+organisation was created, driven through the real seam
+(`recalculateOrganization`), measured, and deleted; the record counts were
+confirmed back at baseline afterwards. Five records of 1,000 kWh electricity —
+two in 2026, two in 2025, one in 2024 — mapped by `seedDefaultMappings` to the
+DESNZ 2026 row `7_400_4000_5_1` at `0.13096`:
+
+| visible sets | 1.0.0 total | 1.1.0 total | 1.1.0 matched | out of period | `{records, written}` |
+| --- | --- | --- | --- | --- | --- |
+| DESNZ 2026 only | 0.6548 tCO2e (5 of 5) | **0.2619 tCO2e** (2 of 5) | 2 | `2025: 2`, `2024: 1` | `{5, 2}` |
+| plus a 2025 set at `0.1` | 0.6548 tCO2e (5 of 5) | **0.4619 tCO2e** (4 of 5) | 4 | `2024: 1` | `{5, 4}` |
+
+The 1.0.0 column is the same pure `aggregate()` run with a resolver that returns
+the mapped factor whatever the date — the behaviour this change replaced — not a
+remembered number.
+
+**The sibling path was observed**, second row: one run produced emissions against
+**two different factor rows**, the 2026 record at the DESNZ row and the 2025
+records at the second set's row, and the total is exactly
+`2 × 0.13096 + 2 × 0.1 = 0.46192` tonnes. `unmatchedPairs` stayed empty
+throughout — an out-of-period record is never reported as an unmapped pair.
+
+**A correction to the prompt's own procedure.** It said
+`app/activity/factors/` could create the second set without new seed data. It
+cannot create a **sibling**: `createTenantFactor` derives `source_row_id` as
+`custom:<sha256>` of the submission, so a row created there never shares
+`(source, source_row_id)` with a published row. The second set was therefore
+inserted directly, as a second year's seed would produce it. The
+`source_row_id` decision is right for the case it was made for — DEFRA
+republishing the same row id each year — and a customer-supplied set reaches
+records through the tenant's own mapping and its own window instead.
+
+**6. No N+1, measured.** `pg.Pool.prototype.query` was counted around
+`recalculateOrganization`: **3 pool-level queries at 5 records and 3 at 205
+records.** (The two transactions — `seedDefaultMappings` and `replaceEmissions` —
+run on a checked-out client and are outside that count; they are already batched
+and neither scales with an extra query per record.) The claim this evidences is
+the one that matters: the query count is constant in the record count.
+
+**5. `npm test` — 9 files, 197 tests, all passing** (540 ms). The five existing
+`aggregate` tests were updated for the tagged resolver; five new ones cover the
+out-of-period channel, and `lib/domain/factor-selection.test.ts` adds fourteen
+over the window boundaries and every step of the tie-break, including the same
+two candidates in both orders. `emissions.test.ts` itself runs 41.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | 9 files, 197 tests passed |
+| `npm run build` | route table unchanged — `/`, `/journal`, `/about`, `/careers`, `/design-system` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| prerendered HTML | **21 files, 21 identical, 0 differ**, two-build method per `docs/automation.md`, normalising only `.next/BUILD_ID` and the CSS chunk name — which was in fact identical on both sides (`00u7jgtk688mf.css`, `3ytlec8_wtxwp.css`) |
+| `npm run test:e2e` | chromium + firefox: **10 passed** (27.1 s). **WebKit did not run** — `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux", which is not installed. Not reported as passed |
+
+**Prerender impact: none, verified rather than assumed.** No marketing route
+imports anything this touched, and the diff above is the evidence.
+
+**Trust boundary: no new request path.** The entry points are the existing
+`recalculate` Server Action and the existing cron route, both already authorised,
+rate-limited and tenant-scoped. Every new and widened query keeps
+`visibleFactorScope(organizationId)`, and the sibling subquery restates the same
+`organization_id is null or organization_id = $1` — a sibling resolved across the
+tenant boundary would be a cross-tenant leak into a filed number.
+
+**Secrets and data.** No new environment variable, no `NEXT_PUBLIC_*`, no
+provider, no model call. Nothing on any path logs.
+
+### What prompt 68 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| any schema change or migration | the `source_row_id` decision is what avoids one, and none turned out to be needed |
+| per-period mappings — widening `activity_factor_mapping`'s unique key | the rejected option; one choice per pair keeps its meaning across revisions |
+| loading a second DEFRA year's factor set | that is data, and its own prompt. This makes a second year *usable*; it does not supply one. **Until one is loaded, any record dated outside 2026 leaves the totals** — the accepted caveat of the "refuse and surface it" decision |
+| letting the custom-factor-set surface create a sibling of a published row | it hashes its own `source_row_id`; see the correction above. A real gap, not closed here |
+| adding an out-of-period figure to the report evidence | it would widen a stored snapshot and the narrative allowlist; see above |
+| AI factor matching | §5.3 sanctions it and does not schedule it; prompt 65 deferred it once already |
+| prompt 67's other deferrals — editing a set's metadata, retiring a set from the UI, bulk CSV import | untouched |
+| recalculating every organisation | the cron sweep does it on its schedule; a mass recalculation is an operational act |
+| a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work, as prompts 63–67 were |
 
 ## Step 9 — activity-data ingestion
 

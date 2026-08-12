@@ -333,7 +333,9 @@ describe("aggregate", () => {
       record({ id: "c", category: "waste", unit: "t" }),
     ];
     const result = aggregate(records, (r) =>
-      r.category === "electricity" ? factor() : null,
+      r.category === "electricity"
+        ? { ok: true, factor: factor() }
+        : { ok: false, gap: "no_mapping" },
     );
 
     expect(result.coverage.totalRecords).toBe(3);
@@ -348,7 +350,7 @@ describe("aggregate", () => {
   it("counts a refused factor as unmatched, grouped by reason", () => {
     const result = aggregate(
       [record({ id: "a" }), record({ id: "b" })],
-      () => factor({ resultUnit: "kwh" }),
+      () => ({ ok: true, factor: factor({ resultUnit: "kwh" }) }),
     );
     expect(result.coverage.matchedRecords).toBe(0);
     expect(result.coverage.unmatchedRecords).toBe(2);
@@ -367,7 +369,10 @@ describe("aggregate", () => {
       record({ id: "2", category: "travel", unit: "km" }),
       record({ id: "3", category: "travel", unit: "km" }),
     ];
-    const result = aggregate(records, () => null);
+    const result = aggregate(records, () => ({
+      ok: false,
+      gap: "no_mapping",
+    }));
     expect(result.coverage.unmatchedPairs.map((p) => p.category)).toEqual([
       "travel",
       "waste",
@@ -375,7 +380,10 @@ describe("aggregate", () => {
   });
 
   it("never reports a total without its coverage", () => {
-    const result = aggregate([record()], () => null);
+    const result = aggregate([record()], () => ({
+      ok: false,
+      gap: "no_mapping",
+    }));
     expect(result).toHaveProperty("totals");
     expect(result).toHaveProperty("coverage");
     // Nothing matched, so the total is zero and the coverage says why — the
@@ -390,8 +398,92 @@ describe("aggregate", () => {
     const records = ["0.04", "0.04", "0.04"].map((quantity, i) =>
       record({ id: `r${i}`, quantity }),
     );
-    const result = aggregate(records, () => factor({ value: "1" }));
+    const result = aggregate(records, () => ({
+      ok: true,
+      factor: factor({ value: "1" }),
+    }));
     expect(toDecimalString(result.totals.total)).toBe("0.12");
+  });
+});
+
+/**
+ * Prompt 68. The failure these are written against is a 2025 record silently
+ * costed at the 2026 factor — a wrong number in a disclosure rather than a
+ * missing one.
+ */
+describe("aggregate, out of period", () => {
+  const outOfPeriod = (): ReturnType<typeof aggregate> =>
+    aggregate(
+      [
+        record({ id: "a", activityDate: "2025-06-01" }),
+        record({ id: "b", activityDate: "2025-11-30" }),
+        record({ id: "c", activityDate: "2024-02-02" }),
+        record({ id: "d", activityDate: "2026-03-14" }),
+      ],
+      (r) =>
+        r.activityDate.startsWith("2026")
+          ? { ok: true, factor: factor() }
+          : { ok: false, gap: "out_of_period" },
+    );
+
+  it("keeps an out-of-period record out of the total entirely", () => {
+    const result = outOfPeriod();
+    expect(result.coverage.matchedRecords).toBe(1);
+    expect(result.coverage.unmatchedRecords).toBe(3);
+    // One record at 100 kWh x 2.5, and nothing from the other three.
+    expect(toDecimalString(result.totals.total)).toBe("250.0000000");
+  });
+
+  it("reports the year, because loading that year's set is the fix", () => {
+    expect(outOfPeriod().coverage.outOfPeriodYears).toEqual([
+      { year: "2025", recordCount: 2 },
+      { year: "2024", recordCount: 1 },
+    ]);
+  });
+
+  it("never counts an out-of-period record as an unmapped pair", () => {
+    // `listFactorCoverage` mirrors `unmatchedPairs` in SQL and answers "is
+    // there a mapping". A mapped record must not appear in it.
+    expect(outOfPeriod().coverage.unmatchedPairs).toEqual([]);
+  });
+
+  it("still balances: matched plus unmatched is every record", () => {
+    const result = aggregate(
+      [
+        record({ id: "a", activityDate: "2025-01-01" }),
+        record({ id: "b", category: "waste", unit: "t" }),
+        record({ id: "c" }),
+        record({ id: "d", quantity: "nonsense" }),
+      ],
+      (r) => {
+        if (r.category === "waste") return { ok: false, gap: "no_mapping" };
+        if (r.activityDate.startsWith("2025")) {
+          return { ok: false, gap: "out_of_period" };
+        }
+        return { ok: true, factor: factor() };
+      },
+    );
+    expect(result.coverage.totalRecords).toBe(4);
+    expect(result.coverage.matchedRecords).toBe(1);
+    expect(result.coverage.unmatchedRecords).toBe(3);
+    expect(result.coverage.unmatchedPairs).toHaveLength(1);
+    expect(result.coverage.outOfPeriodYears).toHaveLength(1);
+    expect(result.coverage.refusals).toHaveLength(1);
+  });
+
+  it("sorts years by record count, then by the year, stably", () => {
+    const result = aggregate(
+      [
+        record({ id: "1", activityDate: "2024-05-05" }),
+        record({ id: "2", activityDate: "2023-05-05" }),
+        record({ id: "3", activityDate: "2023-06-06" }),
+      ],
+      () => ({ ok: false, gap: "out_of_period" }),
+    );
+    expect(result.coverage.outOfPeriodYears.map((y) => y.year)).toEqual([
+      "2023",
+      "2024",
+    ]);
   });
 });
 
