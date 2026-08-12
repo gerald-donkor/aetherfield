@@ -344,12 +344,17 @@ export default async function DashboardPage() {
               {evidence.factorSets.map((set) => (
                 <p key={set.id}>
                   Emission factors: {set.source} {set.datasetVersion} ·{" "}
-                  <a
-                    className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                    href={set.licenceUrl}
-                  >
-                    {set.licence}
-                  </a>
+                  {set.licenceUrl ? (
+                    <a
+                      className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                      href={set.licenceUrl}
+                    >
+                      {set.licence}
+                    </a>
+                  ) : (
+                    set.licence
+                  )}
+                  {set.sourceReference ? ` · ${set.sourceReference}` : ""}
                   .
                 </p>
               ))}

@@ -22,6 +22,11 @@ type SearchFactor = {
   value: string;
   source: string;
   datasetVersion: string;
+  licence: string;
+  licenceUrl: string | null;
+  sourceUrl: string | null;
+  sourceReference: string | null;
+  customerSupplied: boolean;
 };
 
 /**
@@ -144,6 +149,10 @@ export function FactorPicker({
                   </dl>
                   <p className="mt-3 font-mono text-[11px] leading-[18px] text-muted">
                     {factor.source} {factor.datasetVersion}
+                    {factor.customerSupplied ? " · customer-supplied" : ""}
+                    {factor.sourceReference
+                      ? ` · ${factor.sourceReference}`
+                      : ""}
                   </p>
                 </div>
                 <Button

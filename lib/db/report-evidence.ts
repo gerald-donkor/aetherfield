@@ -174,6 +174,7 @@ async function listPeriodFactorSets(
       licence: emissionFactorSet.licence,
       licenceUrl: emissionFactorSet.licenceUrl,
       sourceUrl: emissionFactorSet.sourceUrl,
+      sourceReference: emissionFactorSet.sourceReference,
     })
     .from(activityEmission)
     .innerJoin(

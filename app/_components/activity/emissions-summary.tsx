@@ -230,15 +230,24 @@ export async function EmissionsSummary({
           {sets.map((set) => (
             <span key={set.id} className="block">
               Emission factors: {set.source} {set.datasetVersion} (
-              {set.factorCount.toLocaleString("en-GB")} factors). Contains public
-              sector information licensed under the{" "}
-              <a
-                href={set.licenceUrl}
-                className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                {set.licence}
-              </a>
-              .
+              {set.factorCount.toLocaleString("en-GB")} factors).{" "}
+              {set.licenceUrl ? (
+                <>
+                  Contains public sector information licensed under the{" "}
+                  <a
+                    href={set.licenceUrl}
+                    className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    {set.licence}
+                  </a>
+                  .
+                </>
+              ) : (
+                <>
+                  {set.licence}
+                  {set.sourceReference ? ` · ${set.sourceReference}` : ""}.
+                </>
+              )}
             </span>
           ))}
         </p>

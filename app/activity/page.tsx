@@ -96,6 +96,14 @@ export default async function ActivityPage({
           {recordCount.toLocaleString("en-GB")}{" "}
           {recordCount === 1 ? "activity record" : "activity records"}.
         </p>
+        <p className="mt-5">
+          <Link
+            href="/activity/factors"
+            className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Add customer-supplied factors
+          </Link>
+        </p>
         <section className="mt-16" aria-labelledby="activity-upload-heading">
           <h2
             id="activity-upload-heading"

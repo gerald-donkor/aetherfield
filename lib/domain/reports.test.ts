@@ -34,6 +34,7 @@ const FACTOR_SET = {
   licence: "Open Government Licence v3.0",
   licenceUrl: "https://example.test/ogl",
   sourceUrl: "https://example.test/factors",
+  sourceReference: null,
 };
 
 function emission(

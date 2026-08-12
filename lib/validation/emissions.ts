@@ -240,6 +240,178 @@ export type RecalculateInput = z.infer<typeof recalculateInputSchema>;
     rule 2). It has no form fields, so no field errors. */
 export type RecalculateResult = SubmitResult;
 
+/* -------------------------------------------------------------------------- */
+/*  Customer-supplied factors                                                  */
+/* -------------------------------------------------------------------------- */
+
+const REQUIRED_TEXT = "Enter a value.";
+
+const boundedText = (max: number, error = REQUIRED_TEXT) =>
+  z.string().trim().min(1, { error }).max(max, {
+    error: `Keep this to ${max.toLocaleString("en-GB")} characters or fewer.`,
+  });
+
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max, {
+      error: `Keep this to ${max.toLocaleString("en-GB")} characters or fewer.`,
+    })
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined));
+
+const optionalUrl = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value && value.length > 0 ? value : undefined))
+  .pipe(z.url({ error: "Enter a full URL, including https://." }).optional());
+
+const dateText = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, {
+    error: "Use an ISO date, for example 2026-01-01.",
+  });
+
+const factorDecimal = z
+  .string()
+  .trim()
+  .regex(/^(?=.+)(?!0+(?:\.0+)?$)\d{1,5}(?:\.\d{1,17})?$/, {
+    error:
+      "Enter a positive decimal with at most 5 digits before the point and 17 after it.",
+  });
+
+export const customFactorSetSchema = z
+  .object({
+    source: boundedText(120),
+    datasetVersion: boundedText(120),
+    publicationYear: z
+      .number({ error: "Enter a publication year." })
+      .int({ error: "Enter a whole year." })
+      .min(1990, { error: "Enter a year from 1990 onward." })
+      .max(2100, { error: "Enter a year no later than 2100." }),
+    effectiveFrom: dateText,
+    effectiveTo: dateText,
+    licence: boundedText(240),
+    licenceUrl: optionalUrl,
+    sourceUrl: optionalUrl,
+    sourceReference: optionalText(240),
+    notes: optionalText(1000),
+  })
+  .superRefine((value, ctx) => {
+    if (value.effectiveTo < value.effectiveFrom) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["effectiveTo"],
+        message: "The end date cannot be before the start date.",
+      });
+    }
+
+    if (!value.sourceUrl && !value.sourceReference) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceReference"],
+        message: "Enter a source URL or an internal source reference.",
+      });
+    }
+  });
+
+export const customFactorSchema = z
+  .object({
+    level1: optionalText(160),
+    level2: optionalText(160),
+    level3: optionalText(160),
+    level4: optionalText(160),
+    columnText: optionalText(240),
+    publishedUom: boundedText(120),
+    publishedGhgUnit: boundedText(120),
+    scope: z.enum(EMISSION_SCOPES, { error: "Choose a scope." }),
+    scope3Category: z.enum(SCOPE3_CATEGORIES).optional(),
+    scope2Method: z.enum(SCOPE2_METHODS).optional(),
+    activityUnit: z.enum(FACTOR_ACTIVITY_UNITS, {
+      error: "Choose the activity unit this factor applies to.",
+    }),
+    gas: z.enum(GHG_GASES, { error: "Choose a gas." }),
+    ch4Variant: z.enum(CH4_VARIANTS).optional(),
+    gwpSet: z.enum(GWP_SETS, { error: "Choose a GWP set." }),
+    region: optionalText(120),
+    biogenic: z.boolean(),
+    value: factorDecimal,
+  })
+  .superRefine((value, ctx) => {
+    if (value.scope === "scope_3" && !value.scope3Category) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["scope3Category"],
+        message: "Choose a scope 3 category.",
+      });
+    }
+    if (value.scope !== "scope_3" && value.scope3Category) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["scope3Category"],
+        message: "Scope 3 category only applies to scope 3.",
+      });
+    }
+
+    if (value.scope === "scope_2" && !value.scope2Method) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["scope2Method"],
+        message: "Choose a scope 2 method.",
+      });
+    }
+    if (value.scope !== "scope_2" && value.scope2Method) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["scope2Method"],
+        message: "Scope 2 method only applies to scope 2.",
+      });
+    }
+
+    if (value.gas === "ch4" && !value.ch4Variant) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ch4Variant"],
+        message: "Choose which methane GWP applies.",
+      });
+    }
+    if (value.gas !== "ch4" && value.ch4Variant) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ch4Variant"],
+        message: "Methane variant only applies to CH4.",
+      });
+    }
+  });
+
+export const createCustomFactorSchema = z.object({
+  set: customFactorSetSchema,
+  factor: customFactorSchema,
+});
+
+export const retireCustomFactorSchema = z.object({
+  factorId: z.uuid({ error: "Choose a customer-supplied factor." }),
+});
+
+export type CreateCustomFactorInput = z.infer<typeof createCustomFactorSchema>;
+
+export type CustomFactorField =
+  | `set.${keyof z.infer<typeof customFactorSetSchema> & string}`
+  | `factor.${keyof z.infer<typeof customFactorSchema> & string}`;
+
+export type CustomFactorResult = SubmitResult<CustomFactorField | "factorId">;
+
+export const CUSTOM_FACTOR_ERRORS = {
+  invalid: "Check the marked fields and try again.",
+  notOwner:
+    "Only an owner can create or retire customer-supplied factors. A factor can move every figure in a disclosure.",
+  notFound:
+    "That customer-supplied factor is not available. It may already have been retired.",
+} as const;
+
 /**
  * The register the engine's refusals are written in — measured and
  * operational (AGENTS.md 5): what is wrong, and what it means for the total.

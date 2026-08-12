@@ -1,6 +1,19 @@
 import "server-only";
 
-import { and, asc, eq, ilike, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  isNotNull,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import { user } from "./auth-schema";
 import { getDb, type Db } from "./client";
@@ -20,6 +33,7 @@ import {
   type ActivityInput,
   type FactorInput,
 } from "../domain/emissions";
+import type { CreateCustomFactorInput } from "../validation/emissions";
 
 /**
  * Every read and write of the four factor and emission tables — build step 10.
@@ -93,8 +107,9 @@ export type ListedFactorSet = {
   datasetVersion: string;
   publicationYear: number;
   licence: string;
-  licenceUrl: string;
-  sourceUrl: string;
+  licenceUrl: string | null;
+  sourceUrl: string | null;
+  sourceReference: string | null;
   factorCount: number;
 };
 
@@ -121,6 +136,7 @@ export async function listFactorSets(
       licence: emissionFactorSet.licence,
       licenceUrl: emissionFactorSet.licenceUrl,
       sourceUrl: emissionFactorSet.sourceUrl,
+      sourceReference: emissionFactorSet.sourceReference,
       factorCount: sql<number>`(
         select count(*)::int from ${emissionFactor}
         where ${emissionFactor.setId} = ${emissionFactorSet.id}
@@ -139,6 +155,268 @@ export async function listFactorSets(
       ),
     )
     .orderBy(sql`${emissionFactorSet.publicationYear} desc`);
+}
+
+export type TenantFactorSet = ListedFactorSet & {
+  effectiveFrom: string;
+  effectiveTo: string;
+  notes: string | null;
+  createdAt: Date;
+};
+
+export type TenantFactorRow = {
+  id: string;
+  setId: string;
+  label: string;
+  publishedUom: string;
+  publishedGhgUnit: string;
+  scope: FactorInput["scope"];
+  scope3Category: FactorInput["scope3Category"];
+  scope2Method: FactorInput["scope2Method"];
+  activityUnit: FactorInput["activityUnit"];
+  resultUnit: FactorInput["resultUnit"];
+  gas: FactorInput["gas"];
+  ch4Variant: FactorInput["ch4Variant"];
+  gwpSet: FactorInput["gwpSet"];
+  region: string | null;
+  biogenic: boolean;
+  value: string;
+  createdAt: Date;
+  deletedAt: Date | null;
+};
+
+export async function listTenantFactorSets(
+  organizationId: string,
+): Promise<TenantFactorSet[]> {
+  return getDb()
+    .select({
+      id: emissionFactorSet.id,
+      source: emissionFactorSet.source,
+      datasetVersion: emissionFactorSet.datasetVersion,
+      publicationYear: emissionFactorSet.publicationYear,
+      effectiveFrom: emissionFactorSet.effectiveFrom,
+      effectiveTo: emissionFactorSet.effectiveTo,
+      licence: emissionFactorSet.licence,
+      licenceUrl: emissionFactorSet.licenceUrl,
+      sourceUrl: emissionFactorSet.sourceUrl,
+      sourceReference: emissionFactorSet.sourceReference,
+      notes: emissionFactorSet.notes,
+      createdAt: emissionFactorSet.createdAt,
+      factorCount: sql<number>`(
+        select count(*)::int from ${emissionFactor}
+        where ${emissionFactor.setId} = ${emissionFactorSet.id}
+      )`,
+    })
+    .from(emissionFactorSet)
+    .where(eq(emissionFactorSet.organizationId, organizationId))
+    .orderBy(desc(emissionFactorSet.createdAt));
+}
+
+export async function listTenantFactors(
+  organizationId: string,
+): Promise<TenantFactorRow[]> {
+  const rows = await getDb()
+    .select({
+      id: emissionFactor.id,
+      setId: emissionFactor.setId,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+      publishedUom: emissionFactor.publishedUom,
+      publishedGhgUnit: emissionFactor.publishedGhgUnit,
+      scope: emissionFactor.scope,
+      scope3Category: emissionFactor.scope3Category,
+      scope2Method: emissionFactor.scope2Method,
+      activityUnit: emissionFactor.activityUnit,
+      resultUnit: emissionFactor.resultUnit,
+      gas: emissionFactor.gas,
+      ch4Variant: emissionFactor.ch4Variant,
+      gwpSet: emissionFactor.gwpSet,
+      region: emissionFactor.region,
+      biogenic: emissionFactor.biogenic,
+      value: emissionFactor.value,
+      createdAt: emissionFactor.createdAt,
+      deletedAt: emissionFactor.deletedAt,
+    })
+    .from(emissionFactor)
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        eq(emissionFactor.organizationId, organizationId),
+        eq(emissionFactorSet.organizationId, organizationId),
+      ),
+    )
+    .orderBy(desc(emissionFactor.createdAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    setId: row.setId,
+    label: factorLabelOf([row.level2, row.level3, row.columnText]),
+    publishedUom: row.publishedUom,
+    publishedGhgUnit: row.publishedGhgUnit,
+    scope: row.scope,
+    scope3Category: row.scope3Category,
+    scope2Method: row.scope2Method,
+    activityUnit: row.activityUnit,
+    resultUnit: row.resultUnit,
+    gas: row.gas,
+    ch4Variant: row.ch4Variant,
+    gwpSet: row.gwpSet,
+    region: row.region,
+    biogenic: row.biogenic,
+    value: row.value,
+    createdAt: row.createdAt,
+    deletedAt: row.deletedAt,
+  }));
+}
+
+function normaliseHashPart(value: string | undefined | null): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function sourceRowIdForCustomFactor(
+  organizationId: string,
+  input: CreateCustomFactorInput,
+): string {
+  const identity = [
+    organizationId,
+    input.set.source,
+    input.set.datasetVersion,
+    input.factor.level1,
+    input.factor.level2,
+    input.factor.level3,
+    input.factor.level4,
+    input.factor.columnText,
+    input.factor.publishedUom,
+    input.factor.scope,
+    input.factor.scope3Category,
+    input.factor.scope2Method,
+    input.factor.activityUnit,
+    input.factor.gas,
+    input.factor.ch4Variant,
+    input.factor.gwpSet,
+    input.factor.region,
+    input.factor.biogenic ? "biogenic" : "non-biogenic",
+    input.factor.value,
+  ].map(normaliseHashPart);
+
+  return `custom:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`;
+}
+
+export async function createTenantFactor(input: {
+  organizationId: string;
+  data: CreateCustomFactorInput;
+}): Promise<{ factorId: string }> {
+  return getDb().transaction(async (tx) => {
+    const setInput = input.data.set;
+    await tx
+      .insert(emissionFactorSet)
+      .values({
+        organizationId: input.organizationId,
+        source: setInput.source,
+        datasetVersion: setInput.datasetVersion,
+        publicationYear: setInput.publicationYear,
+        effectiveFrom: setInput.effectiveFrom,
+        effectiveTo: setInput.effectiveTo,
+        licence: setInput.licence,
+        licenceUrl: setInput.licenceUrl ?? null,
+        sourceUrl: setInput.sourceUrl ?? null,
+        sourceReference: setInput.sourceReference ?? null,
+        retrievedAt: new Date(),
+        gasBasis: "combined_co2e",
+        notes: setInput.notes ?? null,
+      })
+      .onConflictDoNothing({
+        target: [
+          emissionFactorSet.organizationId,
+          emissionFactorSet.source,
+          emissionFactorSet.datasetVersion,
+        ],
+        where: sql`${emissionFactorSet.organizationId} is not null`,
+      });
+
+    const [set] = await tx
+      .select({ id: emissionFactorSet.id })
+      .from(emissionFactorSet)
+      .where(
+        and(
+          eq(emissionFactorSet.organizationId, input.organizationId),
+          eq(emissionFactorSet.source, setInput.source),
+          eq(emissionFactorSet.datasetVersion, setInput.datasetVersion),
+        ),
+      )
+      .limit(1);
+
+    if (!set) tx.rollback();
+
+    const factorInput = input.data.factor;
+    const sourceRowId = sourceRowIdForCustomFactor(input.organizationId, input.data);
+    const [inserted] = await tx
+      .insert(emissionFactor)
+      .values({
+        setId: set.id,
+        organizationId: input.organizationId,
+        sourceRowId,
+        level1: factorInput.level1 ?? null,
+        level2: factorInput.level2 ?? null,
+        level3: factorInput.level3 ?? null,
+        level4: factorInput.level4 ?? null,
+        columnText: factorInput.columnText ?? null,
+        publishedUom: factorInput.publishedUom,
+        publishedGhgUnit: factorInput.publishedGhgUnit,
+        scope: factorInput.scope,
+        scope3Category: factorInput.scope3Category ?? null,
+        scope2Method: factorInput.scope2Method ?? null,
+        activityUnit: factorInput.activityUnit,
+        resultUnit: "kg_co2e",
+        gas: factorInput.gas,
+        ch4Variant: factorInput.ch4Variant ?? null,
+        gwpSet: factorInput.gwpSet,
+        region: factorInput.region ?? null,
+        biogenic: factorInput.biogenic,
+        value: factorInput.value,
+      })
+      .onConflictDoNothing({
+        target: [emissionFactor.setId, emissionFactor.sourceRowId],
+      })
+      .returning({ id: emissionFactor.id });
+
+    if (inserted) return { factorId: inserted.id };
+
+    const [existing] = await tx
+      .select({ id: emissionFactor.id })
+      .from(emissionFactor)
+      .where(
+        and(
+          eq(emissionFactor.organizationId, input.organizationId),
+          eq(emissionFactor.setId, set.id),
+          eq(emissionFactor.sourceRowId, sourceRowId),
+        ),
+      )
+      .limit(1);
+
+    if (!existing) tx.rollback();
+    return { factorId: existing.id };
+  });
+}
+
+export async function retireTenantFactor(input: {
+  organizationId: string;
+  factorId: string;
+}): Promise<boolean> {
+  const rows = await getDb()
+    .update(emissionFactor)
+    .set({ deletedAt: new Date() })
+    .where(
+      and(
+        eq(emissionFactor.id, input.factorId),
+        eq(emissionFactor.organizationId, input.organizationId),
+        isNull(emissionFactor.deletedAt),
+      ),
+    )
+    .returning({ id: emissionFactor.id });
+
+  return rows.length > 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -564,6 +842,7 @@ export type FactorCoveragePair = {
     publishedUom: string;
     source: string;
     datasetVersion: string;
+    customerSupplied: boolean;
     chosenAt: Date;
     /** The person who chose it, or `null` for a seeded default — which no
         person chose, exactly as the column's own docblock says. */
@@ -606,6 +885,7 @@ export async function listFactorCoverage(
       publishedUom: emissionFactor.publishedUom,
       source: emissionFactorSet.source,
       datasetVersion: emissionFactorSet.datasetVersion,
+      setOrganizationId: emissionFactorSet.organizationId,
     })
     .from(activityRecord)
     .leftJoin(
@@ -648,6 +928,7 @@ export async function listFactorCoverage(
       emissionFactor.publishedUom,
       emissionFactorSet.source,
       emissionFactorSet.datasetVersion,
+      emissionFactorSet.organizationId,
     )
     /* Unmapped first, then the biggest gap — the same reading order
        `aggregate()` sorts `unmatchedPairs` into, so the two agree on which gap
@@ -675,6 +956,7 @@ export async function listFactorCoverage(
             publishedUom: row.publishedUom ?? "",
             source: row.source,
             datasetVersion: row.datasetVersion,
+            customerSupplied: row.setOrganizationId !== null,
             chosenAt: row.chosenAt ?? new Date(0),
             chosenBy: row.chosenBy,
           }
@@ -702,6 +984,11 @@ export type FactorSearchRow = {
   value: string;
   source: string;
   datasetVersion: string;
+  licence: string;
+  licenceUrl: string | null;
+  sourceUrl: string | null;
+  sourceReference: string | null;
+  customerSupplied: boolean;
 };
 
 /** Postgres reads `%` and `_` as wildcards and `\` as the default escape, so a
@@ -752,6 +1039,11 @@ export async function searchFactorsForPair(
       value: emissionFactor.value,
       source: emissionFactorSet.source,
       datasetVersion: emissionFactorSet.datasetVersion,
+      licence: emissionFactorSet.licence,
+      licenceUrl: emissionFactorSet.licenceUrl,
+      sourceUrl: emissionFactorSet.sourceUrl,
+      sourceReference: emissionFactorSet.sourceReference,
+      setOrganizationId: emissionFactorSet.organizationId,
     })
     .from(emissionFactor)
     .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
@@ -788,6 +1080,11 @@ export async function searchFactorsForPair(
     value: row.value,
     source: row.source,
     datasetVersion: row.datasetVersion,
+    licence: row.licence,
+    licenceUrl: row.licenceUrl,
+    sourceUrl: row.sourceUrl,
+    sourceReference: row.sourceReference,
+    customerSupplied: row.setOrganizationId !== null,
   }));
 }
 

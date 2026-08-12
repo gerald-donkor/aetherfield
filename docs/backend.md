@@ -3782,6 +3782,199 @@ id that chose a factor for a pair. Nothing is logged on any path.
 | per-record factor overrides | the data model maps by `(category, unit)` |
 | E2E coverage for this surface | not part of the approved candidate; the existing E2E command is currently blocked before tests |
 
+## Custom factor sets, prompt 66
+
+Implemented on 12 Aug 2026. **No new §5.2 build step** — the ordered sequence
+is exhausted. This closes prompt 65's named non-goal: an owner can now add a
+tenant-owned, customer-supplied factor with provenance when the correct supplier
+or contractual factor is not present in the published shared data.
+
+### Scope and data model
+
+Manual single-factor entry ships first. Bulk factor-set CSV import remains out
+of scope because it needs a parser, staging surface and rollback story.
+
+The existing nullable reference-data design is used rather than forked:
+
+- `emission_factor_set.organization_id = null` and
+  `emission_factor.organization_id = null` still mean published shared data.
+- A non-null organisation id means a tenant-owned factor set and row.
+- `emission_factor_set_organization_key (organization_id, source,
+  dataset_version)` is the set identity for customer-supplied data.
+- `emission_factor_set_row_key (set_id, source_row_id)` is reused as the
+  duplicate-submission backstop for factor rows.
+
+One schema migration was generated and applied:
+
+```
+ALTER TABLE "emission_factor_set" ALTER COLUMN "licence_url" DROP NOT NULL;
+ALTER TABLE "emission_factor_set" ALTER COLUMN "source_url" DROP NOT NULL;
+ALTER TABLE "emission_factor_set" ADD COLUMN "source_reference" text;
+```
+
+The nullability change is required because private or contractual customer
+factor sources may have no public licence URL or source URL, and the product
+must store a real internal reference rather than inventing one. Published DESNZ
+rows continue to carry both URLs.
+
+### Validation and precision
+
+`lib/validation/emissions.ts` now owns `customFactorSetSchema`,
+`customFactorSchema`, `createCustomFactorSchema` and
+`retireCustomFactorSchema`. They are shared by the `/activity/factors` client
+leaf and by the Server Actions.
+
+Important rules enforced before any write:
+
+- factor values are positive decimal strings bounded to 5 integer digits and
+  17 decimal places, preserving the measured `numeric(24,17)` contract;
+- `result_unit` is not accepted from the browser and is written server-side as
+  `kg_co2e`;
+- scope 3 category is required only for scope 3;
+- scope 2 method is required only for scope 2;
+- CH4 variant is required only for CH4;
+- effective end date cannot precede effective start date;
+- a source URL or internal source reference is required;
+- strings are trimmed and bounded, with empty required strings rejected.
+
+The value precision remains **measured** from step 10's DEFRA seed. The
+manual-entry scope is a **judgement**: it admits customer-supplied kgCO2e rows
+only, leaving `kwh` result-unit factors and market-based scope 2 certificate
+capture for a later decision.
+
+### Query layer and tenant predicates
+
+All SQL stays in `lib/db/emission-queries.ts`.
+
+Added helpers:
+
+- `listTenantFactorSets(organizationId)` and
+  `listTenantFactors(organizationId)` read only rows with
+  `organization_id = $1`;
+- `createTenantFactor()` wraps set find-or-create and factor insertion in one
+  Drizzle transaction;
+- `retireTenantFactor()` soft-retires only a factor row whose
+  `organization_id = $1`;
+- `searchFactorsForPair()` and `listFactorCoverage()` now include
+  `customerSupplied` and set provenance, so UI attribution is data-driven.
+
+Visible reference-data reads still use the approved predicate:
+
+```
+organization_id is null or organization_id = $1
+```
+
+Tenant-owned writes use strict equality:
+
+```
+organization_id = $1
+```
+
+The deterministic tenant-owned `source_row_id` is a SHA-256 hash over the
+organisation id, normalised set identity and factor identity, prefixed with
+`custom:`. It is stable enough for duplicate form submissions and includes the
+tenant id, so it is not a cross-tenant identifier.
+
+### Actions and surface
+
+`app/activity/actions.ts` gained `createCustomFactor(input)` and
+`retireCustomFactor(input)`. Both follow the existing authenticated action
+order: BotID absent by design, `getCurrentMembership()` with role, user-id rate
+limit, shared Zod parse, owner-only authorisation, tenant-predicated write
+through `lib/db/`, no email, and revalidation of `/activity/factors`,
+`/activity/mappings` and `/activity`.
+
+The actions reuse `checkFactorMappingLimit(userId)`. That is a judgement: both
+flows are owner-only factor-control writes, both can affect disclosure inputs,
+and creating a row is lighter than prompt 65's mapping write because it does not
+recalculate until the owner explicitly maps the factor.
+
+`/activity/factors` is a new dynamic authenticated route gated by
+`requireOrganization("/activity/factors")`. It lists tenant-owned factor sets
+and factor rows, renders a compact manual-entry form, and links back to
+`/activity/mappings` to use the new row. The only client leaf is
+`app/_components/activity/custom-factor-form.tsx`; it performs courtesy
+validation, pending state, focus management, result announcement and retire
+clicks. It does no data fetching and exports no constants or types.
+
+`/activity/mappings` now links to `/activity/factors` and labels tenant-owned
+search results or current mappings as customer-supplied. Attribution no longer
+assumes DEFRA/OGL when a visible set has no licence URL; it renders the set's
+licence and internal source reference instead. `/activity` gets a secondary
+link near the intro rather than a new top-level `WorkspaceNav` item.
+
+### Prerender impact and verification, prompt 66
+
+**Expected none, and verified rather than assumed.** The new route is dynamic
+(`ƒ /activity/factors`), `/activity` and `/activity/mappings` were already
+dynamic, and the marketing routes remain static/SSG.
+
+The first two isolated scratch comparisons failed before producing a diff:
+scratch builds without the working tree's font cache could not fetch Google
+Fonts under the restricted network, and a `/tmp` run that copied `node_modules`
+hit disk quota. A symlinked dependency run was rejected by Turbopack because
+`node_modules` pointed outside the project root. The successful comparison used
+the documented repository-local scratch method with hard-linked `node_modules`,
+excluded `.agents` and `.claude`, pinned one
+`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, and normalised build id plus generated
+JS/CSS chunk names while stripping RSC flight scripts:
+
+```
+base_html=21
+impl_html=21
+common_html=21
+only_base=0
+only_impl=0
+diff_html=0
+```
+
+### Checks run, prompt 66
+
+- `npm run db:generate` — generated
+  `lib/db/migrations/0010_wandering_the_captain.sql`; Drizzle reported 23
+  tables and the three SQL statements above.
+- `npm run db:migrate` — applied successfully. `pg-connection-string` emitted
+  the existing SSL warning that `sslmode=prefer`, `require` and `verify-ca` are
+  currently aliases for `verify-full` and will change semantics in a future
+  major version.
+- `npm run lint` — exit 0, no diagnostics beyond npm notice lines.
+- `npm run typecheck` — exit 0, `tsc --noEmit`.
+- `npm test` — `Test Files 8 passed (8)`, `Tests 178 passed (178)`.
+- `npm run build` — exit 0, Next 16.2.12 Turbopack, compiled successfully,
+  generated 32/32 static pages, route table includes `ƒ /activity/factors`.
+- prerender diff — `diff_html=0` across 21 shared prerendered HTML files.
+- `npm run test:e2e:local` — failed before tests ran:
+  `Error: Process from config.webServer was not able to start. Exit code: 1`.
+- `npm run test:e2e:webkit` — not run because `podman` is not installed.
+  `scripts/playwright-webkit.sh` says: `Podman is required for WebKit on Arch
+  Linux. Install it with: sudo pacman -S --needed podman`.
+
+### Secrets and data, prompt 66
+
+No new environment variables and no `NEXT_PUBLIC_*`. The actions read existing
+`DATABASE_URL` through `lib/db/client.ts` and reuse the existing Upstash
+limiter path (`KV_REST_API_URL` / `KV_REST_API_TOKEN`). No email, Blob, AI or
+third-party model call is added.
+
+The new data is customer-supplied factor provenance and numeric factor values.
+Treat it as tenant commercial data: no request path logs it, no provider
+receives it, and every read/write is tenant-filtered. A custom factor becomes a
+disclosure input only after the owner maps it and recalculates through the
+existing prompt 65 flow.
+
+### What prompt 66 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| bulk factor-set CSV import | needs its own parser, staging UI and rollback |
+| automatic mapping to the new factor | prompt 65's explicit mapping flow remains the recalculation point |
+| editing used factor rows | restatement semantics are separate; retire and add a replacement |
+| market-based scope 2 evidence capture | requires REC/GO evidence and residual-mix fallback |
+| `kwh` result-unit custom factors | this prompt only admits factors that directly compute kgCO2e |
+| AI factor matching | no model belongs in this deterministic data-entry flow |
+| top-level workspace navigation | this is an Activity sub-flow |
+| E2E harness repair | the existing local runner still fails before tests start |
+
 ## Step 9 — activity-data ingestion
 
 Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation

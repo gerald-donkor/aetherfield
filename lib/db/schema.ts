@@ -534,8 +534,12 @@ export const emissionFactorSet = pgTable(
         rendered wherever the factors are surfaced — never hard-coded in a
         component that a second dataset would make wrong. */
     licence: text("licence").notNull(),
-    licenceUrl: text("licence_url").notNull(),
-    sourceUrl: text("source_url").notNull(),
+    /** Nullable for customer-supplied private or contractual sets. */
+    licenceUrl: text("licence_url"),
+    /** Nullable for customer-supplied private or contractual sets. */
+    sourceUrl: text("source_url"),
+    /** Customer-supplied private reference when no public source URL exists. */
+    sourceReference: text("source_reference"),
     retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull(),
     gasBasis: factorGasBasis("gas_basis").notNull(),
     supersededBySetId: uuid("superseded_by_set_id").references(

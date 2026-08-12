@@ -129,6 +129,13 @@ export default async function ActivityMappingsPage({
           >
             Back to activity
           </Link>
+          <span className="mx-4 font-mono text-caption text-muted">/</span>
+          <Link
+            href="/activity/factors"
+            className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Add customer factor
+          </Link>
         </p>
 
         {coverage.length === 0 ? (
@@ -193,6 +200,9 @@ export default async function ActivityMappingsPage({
                           <p className="mt-2 font-mono text-[11px] leading-[18px] text-muted">
                             {pair.mapping.source}{" "}
                             {pair.mapping.datasetVersion}
+                            {pair.mapping.customerSupplied
+                              ? " · customer-supplied"
+                              : ""}
                             {pair.mapping.chosenBy
                               ? ` · chosen by ${pair.mapping.chosenBy}`
                               : " · seeded default"}
@@ -266,15 +276,24 @@ export default async function ActivityMappingsPage({
             {sets.map((set) => (
               <span key={set.id} className="block">
                 Emission factors: {set.source} {set.datasetVersion} (
-                {set.factorCount.toLocaleString("en-GB")} factors). Contains
-                public sector information licensed under the{" "}
-                <a
-                  href={set.licenceUrl}
-                  className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                >
-                  {set.licence}
-                </a>
-                .
+                {set.factorCount.toLocaleString("en-GB")} factors).{" "}
+                {set.licenceUrl ? (
+                  <>
+                    Contains public sector information licensed under the{" "}
+                    <a
+                      href={set.licenceUrl}
+                      className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    >
+                      {set.licence}
+                    </a>
+                    .
+                  </>
+                ) : (
+                  <>
+                    {set.licence}
+                    {set.sourceReference ? ` · ${set.sourceReference}` : ""}.
+                  </>
+                )}
               </span>
             ))}
           </p>

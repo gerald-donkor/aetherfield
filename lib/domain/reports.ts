@@ -593,9 +593,13 @@ export function reportSections(evidence: ReportEvidence): ReportSection[] {
       label: `${set.source} ${set.datasetVersion} (${set.publicationYear})`,
       value: set.licence,
     })),
-    notes: evidence.factorSets.map(
-      (set) => `${set.source} ${set.datasetVersion}: ${set.sourceUrl} — ${set.licence}, ${set.licenceUrl}`,
-    ),
+    notes: evidence.factorSets.map((set) => {
+      const source = set.sourceUrl ?? set.sourceReference ?? "source on file";
+      const licence = set.licenceUrl
+        ? `${set.licence}, ${set.licenceUrl}`
+        : set.licence;
+      return `${set.source} ${set.datasetVersion}: ${source} — ${licence}`;
+    }),
   });
 
   sections.push({

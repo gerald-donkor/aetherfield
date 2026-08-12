@@ -16,14 +16,21 @@ import {
   type StagedRow,
 } from "../../lib/db/activity-queries";
 import {
+  createTenantFactor,
   getVisibleFactor,
   recalculateOrganization,
+  retireTenantFactor,
   setFactorMapping as setFactorMappingRow,
 } from "../../lib/db/emission-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
 import { factorEligibility } from "../../lib/domain/emissions";
 import {
+  createCustomFactorSchema,
+  CUSTOM_FACTOR_ERRORS,
+  retireCustomFactorSchema,
+  type CustomFactorField,
+  type CustomFactorResult,
   recalculateInputSchema,
   type RecalculateResult,
 } from "../../lib/validation/emissions";
@@ -107,17 +114,26 @@ const GENERIC_FAILURE =
 const FACTOR_MAPPING_FAILURE =
   "We couldn't change that factor just now. Please try again in a moment.";
 
+const CUSTOM_FACTOR_FAILURE =
+  "We couldn't save that customer-supplied factor just now. Please try again in a moment.";
+
 const SIGNED_OUT =
   "Your session has expired. Sign in again to import activity data.";
 
 const FACTOR_MAPPING_SIGNED_OUT =
   "Your session has expired. Sign in again to change emission factors.";
 
+const CUSTOM_FACTOR_SIGNED_OUT =
+  "Your session has expired. Sign in again to manage customer-supplied factors.";
+
 const NO_ORGANIZATION =
   "This account belongs to no organisation. Create one before importing data.";
 
 const FACTOR_MAPPING_NO_ORGANIZATION =
   "This account belongs to no organisation. Create one before changing emission factors.";
+
+const CUSTOM_FACTOR_NO_ORGANIZATION =
+  "This account belongs to no organisation. Create one before adding customer-supplied factors.";
 
 const NOT_FOUND =
   "That import is not available. It may have been discarded or removed.";
@@ -718,8 +734,180 @@ export async function setFactorMapping(
 }
 
 /* -------------------------------------------------------------------------- */
+/*  createCustomFactor                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Creates one tenant-owned factor row inside one tenant-owned factor set —
+ * prompt 66.
+ *
+ * It deliberately does **not** map the new factor or recalculate. A
+ * customer-supplied value becomes visible to `/activity/mappings`, where the
+ * owner makes the explicit pair-level choice that already recalculates.
+ */
+export async function createCustomFactor(
+  input: unknown,
+): Promise<CustomFactorResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
+
+  // -- b. Session, tenant and role, then the rate limit --------------------
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
+    };
+  }
+
+  const userId = membership.account.user.id;
+  const organizationId = membership.organization.id;
+
+  try {
+    const limit = await checkFactorMappingLimit(userId);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many changes. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- c. Parse, with the shared schema -----------------------------------
+  const parsed = createCustomFactorSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: customFactorFieldErrors(parsed.error),
+    };
+  }
+
+  // -- d. Authorise --------------------------------------------------------
+  if (membership.role !== "owner") {
+    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwner };
+  }
+
+  // -- e. Write ------------------------------------------------------------
+  try {
+    await createTenantFactor({ organizationId, data: parsed.data });
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- f. No email. Make the row visible on factor surfaces. ---------------
+  revalidatePath("/activity/factors");
+  revalidatePath("/activity/mappings");
+  revalidatePath("/activity");
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  retireCustomFactor                                                        */
+/* -------------------------------------------------------------------------- */
+
+export async function retireCustomFactor(
+  input: unknown,
+): Promise<CustomFactorResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
+
+  // -- b. Session, tenant and role, then the rate limit --------------------
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
+    };
+  }
+
+  const userId = membership.account.user.id;
+  const organizationId = membership.organization.id;
+
+  try {
+    const limit = await checkFactorMappingLimit(userId);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many changes. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- c. Parse, with the shared schema -----------------------------------
+  const parsed = retireCustomFactorSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: { factorId: "Choose a customer-supplied factor." },
+    };
+  }
+
+  // -- d. Authorise --------------------------------------------------------
+  if (membership.role !== "owner") {
+    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwner };
+  }
+
+  // -- e. Tenant-owned soft retirement ------------------------------------
+  try {
+    const retired = await retireTenantFactor({
+      organizationId,
+      factorId: parsed.data.factorId,
+    });
+    if (!retired) {
+      return {
+        ok: false,
+        error: CUSTOM_FACTOR_ERRORS.invalid,
+        fieldErrors: { factorId: CUSTOM_FACTOR_ERRORS.notFound },
+      };
+    }
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- f. No email. Existing calculated emissions remain reproducible. -----
+  revalidatePath("/activity/factors");
+  revalidatePath("/activity/mappings");
+  revalidatePath("/activity");
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Shared helpers                                                             */
 /* -------------------------------------------------------------------------- */
+
+function customFactorFieldErrors(
+  error: z.ZodError,
+): Partial<Record<CustomFactorField, string>> {
+  const fieldErrors: Partial<Record<CustomFactorField, string>> = {};
+  for (const issue of error.issues) {
+    if (issue.path.length < 2) continue;
+    const field = `${String(issue.path[0])}.${String(
+      issue.path[1],
+    )}` as CustomFactorField;
+    fieldErrors[field] ??= issue.message;
+  }
+  return fieldErrors;
+}
 
 /** Stage b for the three actions that act on an already-staged import.
     Returns the rejection, or `null` when the caller may proceed. */
