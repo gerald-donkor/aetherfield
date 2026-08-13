@@ -136,6 +136,21 @@ const FACTOR_MAPPING_NO_ORGANIZATION =
 const CUSTOM_FACTOR_NO_ORGANIZATION =
   "This account belongs to no organisation. Create one before adding customer-supplied factors.";
 
+/* Prompt 73's fourth tenant state, per flow. Not a `NO_ORGANIZATION`: this
+   account has an organisation and it is scheduled for deletion, so the honest
+   sentence names the lock and the way out of it rather than telling somebody to
+   create what they already have. `resolveTenant` below carries the first;
+   the two factor paths resolve their membership directly (they need the role),
+   so they check the marker themselves. */
+const ORGANIZATION_LOCKED =
+  "This organisation is scheduled for deletion, so importing is locked. Restore it from your account page to make changes.";
+
+const FACTOR_MAPPING_ORGANIZATION_LOCKED =
+  "This organisation is scheduled for deletion, so its emission factors are locked. Restore it from your account page to make changes.";
+
+const CUSTOM_FACTOR_ORGANIZATION_LOCKED =
+  "This organisation is scheduled for deletion, so customer-supplied factors are locked. Restore it from your account page to make changes.";
+
 const NOT_FOUND =
   "That import is not available. It may have been discarded or removed.";
 
@@ -169,6 +184,7 @@ function resolveTenant() {
   return resolveTenantFor({
     signedOut: SIGNED_OUT,
     noOrganization: NO_ORGANIZATION,
+    organizationLocked: ORGANIZATION_LOCKED,
     failure: GENERIC_FAILURE,
   });
 }
@@ -635,6 +651,12 @@ export async function setFactorMapping(
         : FACTOR_MAPPING_SIGNED_OUT,
     };
   }
+  /* The lock, checked here rather than inherited: this path resolves its
+     membership directly because stage d needs the role, so it does not pass
+     through `resolveTenant`'s check (prompt 73). */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: FACTOR_MAPPING_ORGANIZATION_LOCKED };
+  }
 
   const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
@@ -765,6 +787,10 @@ export async function createCustomFactor(
       error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
     };
   }
+  /* The lock — see `setFactorMapping` for why it is checked here (prompt 73). */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
+  }
 
   const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
@@ -871,6 +897,10 @@ export async function retireCustomFactor(
       ok: false,
       error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
     };
+  }
+  /* The lock — see `setFactorMapping` for why it is checked here (prompt 73). */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
   }
 
   const userId = membership.account.user.id;

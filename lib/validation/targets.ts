@@ -301,6 +301,11 @@ export const TARGET_ERRORS = {
   signedOut: "Your session has expired. Sign in again to manage targets.",
   noOrganization:
     "This account belongs to no organisation. Create one before setting a target.",
+  /* Prompt 73. Not `noOrganization`: this account has an organisation, and it
+     is scheduled for deletion. Nothing here can be written until it is
+     restored. */
+  organizationLocked:
+    "This organisation is scheduled for deletion, so its targets are locked. Restore it from your account page to make changes.",
   failure:
     "We couldn't save that target just now. Please try again in a moment.",
 } as const;

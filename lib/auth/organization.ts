@@ -55,6 +55,15 @@ export type CurrentMembership = {
   /** The tenant role, narrowed. A row carrying anything else is treated as no
       membership — the same defensive narrowing `getStaffRole()` applies. */
   role: OrganizationRole;
+  /**
+   * Set when the organisation has an open deletion request — prompt 73.
+   *
+   * **The workspace is locked while this is non-null**: `requireOrganization`
+   * redirects and `authorizeOrganization` refuses, so every phase-two page and
+   * every action that resolves a tenant through them stops. It is carried on
+   * the membership rather than checked separately so a caller cannot forget it.
+   */
+  pendingDeletion: { scheduledPurgeAt: Date } | null;
 };
 
 function toResolved(membership: Membership): ResolvedOrganization {
@@ -117,6 +126,7 @@ function build(
     account,
     organization: toResolved(membership),
     role: membership.role,
+    pendingDeletion: membership.pendingDeletion,
   };
 }
 
@@ -131,6 +141,13 @@ function build(
  * checks only that a cookie exists (AGENTS.md 7.3); this function is the
  * database-backed check, and every *action* must call it too rather than
  * relying on the page having done so (AGENTS.md 11.2 rules 1 and 2).
+ *
+ * **A locked organisation goes to `/account` too** — prompt 73. One line here
+ * locks all eight phase-two pages with no call-site edit, which is why the
+ * marker is carried on the membership. `/account` is the destination rather
+ * than an error because it is the one surface that must still render for a
+ * locked organisation: it holds the restore control, and without it an owner
+ * could never reverse the request.
  */
 export async function requireOrganization(
   callbackURL: string,
@@ -143,6 +160,7 @@ export async function requireOrganization(
 
   const membership = await getCurrentMembership();
   if (!membership) redirect("/account");
+  if (membership.pendingDeletion) redirect("/account");
 
   return membership;
 }
@@ -153,6 +171,11 @@ export async function requireOrganization(
  * A Server Action returns a typed result and never throws to the client
  * (AGENTS.md 10 rule 2), so it cannot use `requireOrganization()`'s redirect.
  * It asks this instead and returns its own handled `{ ok: false }`.
+ *
+ * **A locked organisation is not authorised** — prompt 73. The caller cannot
+ * tell the two refusals apart from the return value, which is deliberate: the
+ * distinction that matters to a person is made by `resolveTenant`, which reads
+ * the marker itself and picks the honest sentence.
  */
 export async function authorizeOrganization(
   organizationId: string,
@@ -163,5 +186,7 @@ export async function authorizeOrganization(
   const membership = await getMembership(account.user.id, organizationId);
   if (!membership) return null;
 
-  return build(account, membership);
+  const built = build(account, membership);
+  if (built?.pendingDeletion) return null;
+  return built;
 }

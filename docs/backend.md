@@ -5248,6 +5248,425 @@ deferred).
 | any change to a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | out of scope entirely |
 | a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
 
+## Organisation deletion and erasure, prompt 73
+
+Implemented on 13 Aug 2026. It closes the item prompt 71 named as "the largest
+open item" in its own deferral table, and the one `lib/auth/server.ts` recorded
+against `disableOrganizationDeletion: true`: **§9.2 rule 5 wants a soft-delete
+with an audit trail so an erasure request is one reversible operation, and
+§8.3 rule 5 wants retention to be finite and stated.** Before this, an
+organisation could be created and never removed, and a customer's commercial
+data — sites, imports, activity records, computed emissions, targets, reports,
+and the private CSV blobs behind the imports — had no exit.
+
+Not a step 15. §5.2 remains the ordered plan; this is approved post-sequence
+work, on the same footing as prompts 63–72.
+
+### The shape, decided with the user
+
+Asked before the prompt file was written, because the answers change what gets
+built:
+
+- **Grace window, then purge.** An owner requests deletion; the workspace locks
+  immediately — every tenant read and write refuses — but stays restorable, and
+  a nightly sweep then hard-deletes the tenant rows and their private blobs.
+- **The window is 30 days.**
+
+Both are the user's decision, taken over "immediate erasure" and "soft-delete
+only". **The 30 days is a product decision recorded as a decision, not a
+measurement** (§12 rule 4): there is no traffic to fit it against, exactly as
+`organizationLimit` and `invitationExpiresIn` say of themselves.
+
+Better Auth's own `deleteOrganization` endpoint stays disabled.
+`disableOrganizationDeletion: true` is unchanged in `lib/auth/server.ts`, and
+its recorded reason still holds — the plugin's delete is immediate and
+unaudited. The `organization-best-practices` skill's suggested soft-delete
+pattern (a `beforeDelete` hook that **throws** to archive) was loaded and
+declined: it works by making a documented endpoint fail, and §10 rule 2's
+"never throw" is the house rule.
+
+### The marker lives in our own table
+
+New table `organization_deletion`, and **no column was added to Better Auth's
+`organization`**. `schema.organization.additionalFields` does exist in
+better-auth 1.6.26 (`node_modules/better-auth/dist/plugins/organization/types.d.mts:250-286`,
+read rather than recalled), so this was a choice between two workable designs:
+
+1. §9.1 says the generated tables are not extended by hand, and
+   `lib/db/auth-schema.ts:112-125` already records what a regeneration costs the
+   hand-added `member` unique index.
+2. §9.2 rule 5 asks for an **audit trail** — who requested, when, when the purge
+   is due, whether it was cancelled and by whom, and when it completed. That is
+   a row with a lifecycle, not a nullable timestamp.
+3. Decisively: **the audit row must outlive the purge.** The purge deletes the
+   `organization` row, so a column on it is destroyed by the very operation it
+   exists to record.
+
+`lib/db/schema.ts`, after `alert_preference`:
+
+| column | type | note |
+| --- | --- | --- |
+| `id` | `uuid` pk `gen_random_uuid()` | as every phase-two table |
+| `organization_id` | `text not null` | **deliberately no foreign key** — the one place in the schema where the absence of an FK is the design. A reference would cascade this row away at the moment it becomes the only evidence the organisation existed |
+| `organization_name`, `organization_slug` | `text not null` | snapshots, so the trail reads once the organisation is gone |
+| `status` | `organization_deletion_status` | `pending` \| `cancelled` \| `purged`, declared once in `lib/validation/organization.ts` and imported (§9.2 rule 2) |
+| `requested_at` | `timestamptz not null default now()` | |
+| `requested_by` | `text not null` | the user id, no FK, same reasoning |
+| `scheduled_purge_at` | `timestamptz not null` | `requested_at` + the window, **stored rather than computed**, so changing the constant later cannot move a date already promised to a customer |
+| `cancelled_at`, `cancelled_by` | nullable | |
+| `purged_at` | nullable | |
+| `purge_error` | `text` nullable | a failed sweep leaves the row `pending` and records why, so the next night retries |
+| `created_at` | `timestamptz not null default now()` | §9.2 rule 3 |
+
+Indexes:
+
+- `organization_deletion_pending_key` — **partial unique** on
+  `organization_id where status = 'pending'`. One open request per
+  organisation, enforced in the schema rather than by the action happening to
+  check first, which is the argument `lib/db/auth-schema.ts:112-125` makes for
+  the `member` unique index. Cancelled and purged rows accumulate freely; that
+  is the trail.
+- `organization_deletion_due_idx` on `(status, scheduled_purge_at)` — the
+  sweep's due read.
+
+Migration **`lib/db/migrations/0012_brainy_luke_cage.sql`**: one `CREATE TYPE`,
+one `CREATE TABLE`, one `CREATE UNIQUE INDEX ... WHERE`, one `CREATE INDEX`.
+
+`ORGANIZATION_DELETION_WINDOW_DAYS = 30` lives in
+`lib/validation/organization.ts` so the action, the confirmation copy, the
+locked notice and the email all read one value. That module stays the deliberate
+non-`server-only` exception and still imports nothing from `lib/db/`.
+
+### The locked state — where it is enforced
+
+`Membership` (`lib/db/organization-queries.ts`) gained
+`pendingDeletion: { scheduledPurgeAt: Date } | null`, filled by a left join to
+`organization_deletion` on `status = 'pending'` in **both** `getMembership()`
+and `listMembershipsForUser()` — one shared join predicate, so the two cannot
+disagree about what "locked" means. `CurrentMembership`
+(`lib/auth/organization.ts`) carries it through.
+
+Two chokepoints lock everything with no call-site edit:
+
+- **`requireOrganization()` redirects to `/account`** when it is set — all
+  eight phase-two pages (`/dashboard`, `/activity`, `/activity/[importId]`,
+  `/activity/mappings`, `/activity/factors`, `/targets`, `/reports`,
+  `/reports/[reportId]`). `/account` rather than an error, because it is the one
+  surface that must still render for a locked organisation: without it the
+  restore control is unreachable and the lock is a state with no exit.
+- **`authorizeOrganization()` returns `null`**, and `resolveTenant()`
+  (`lib/auth/tenant.ts`) returns a handled failure. `TenantMessages` gained a
+  fourth message, `organizationLocked`, passed per-flow exactly as the existing
+  three are — `TARGET_ERRORS.organizationLocked`,
+  `REPORT_ERRORS.organizationLocked`, and `ORGANIZATION_LOCKED` in
+  `app/activity/actions.ts`.
+
+**Five actions resolve their membership directly rather than through
+`resolveTenant`, and the prompt's "no call-site edit" did not reach them.** They
+need the *role* at stage d, which `resolveTenant` does not return, so each
+checks the marker itself. Named here because it is the gap a later session would
+otherwise reopen:
+
+| action | file | message |
+| --- | --- | --- |
+| `setFactorMapping` | `app/activity/actions.ts` | `FACTOR_MAPPING_ORGANIZATION_LOCKED` |
+| `createCustomFactor`, `retireCustomFactor` | `app/activity/actions.ts` | `CUSTOM_FACTOR_ORGANIZATION_LOCKED` |
+| `inviteMember` / `cancelInvitation` / `removeMember` / `leaveOrganization`, via `resolveMembershipForWrite` | `app/account/actions.ts` | `MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED` |
+| `setAlertEmailPreference` | `app/account/actions.ts` | `MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED` |
+
+`listAllOrganizationIds()` now **excludes** organisations with an open request,
+by an anti-join rather than a filter in the sweep, so a later caller cannot
+forget it. Recalculating a workspace that is being erased is wasted work, and
+step 14's threshold alerts would otherwise email a customer about a target
+inside a workspace they asked to have removed.
+
+**The two new actions deliberately do not go through the lock.** They resolve
+membership through their own `resolveOwnerForDeletion` helper — restore is the
+one thing a locked organisation may do.
+
+### Erasure
+
+`app/api/cron/purge-organizations/route.ts` + `sweep.ts`, copying the
+recalculation cron's shape rather than abstracting over it: the two handlers are
+eleven lines of gate each, and a shared wrapper would put the `CRON_SECRET`
+check one indirection away from the endpoint that deletes tenant data.
+
+`vercel.json` gained a second cron at **`0 3 * * *`** and a `maxDuration` of 300
+alongside the existing entry. **That hour is a judgement derived from a
+constraint, not a measurement** (§12 rule 4): it must not overlap the 02:00
+recalculation sweep, whose `maxDuration` is 300s, so a purge never races a
+recalculation of the same tenant.
+
+Two things differ from the recalculation handler, and both are deliberate:
+
+- **The rate limiter fails closed here**, where the recalculation's fails open.
+  That one is idempotent and refusing it during a Redis outage costs a night of
+  stale figures; this one deletes tenant data irreversibly, so a limiter that
+  cannot be consulted is a reason to wait a night. Nothing is lost — every due
+  row stays `pending` and is due again tomorrow. It shares
+  `checkCronSweepLimit`'s bucket: one scheduler, one call each per night, and a
+  leaked `CRON_SECRET` driving repeated sweeps is what both bound.
+- The response body carries `{ due, purged, blobsDeleted, failures }` — counts
+  only, no tenant identifier, no name, no slug, no blob pathname.
+
+**The order per due request is the design:**
+
+1. **Blobs first.** Vercel Blob is not in Postgres and no cascade reaches it, so
+   deleting the rows first would orphan a customer's uploaded CSVs in storage
+   permanently, with the pointers to them gone. Each pathname is deleted through
+   the existing `deleteActivityImport` and then nulled on its own row as it
+   succeeds, so a sweep that dies partway is resumable. Soft-deleted imports are
+   included: a discarded import's blob is still a customer's file.
+2. **Then one statement**: delete the `organization` row.
+3. `status = 'purged'`, `purged_at = now`. The audit row remains.
+
+A failure at either stage writes `purge_error` from a closed two-value
+vocabulary — `blob-delete-failed` / `organization-delete-failed`, never an
+exception message, which can quote a customer's data — leaves the row `pending`,
+and the next night retries.
+
+#### The `onDelete` audit, enumerated
+
+Read out of `lib/db/schema.ts` and `lib/db/auth-schema.ts` at execution time
+rather than trusted from the prompt. **Every `organization_id` reference is
+`onDelete: cascade`** — 14 tables:
+
+| table | `organization_id` | `onDelete` |
+| --- | --- | --- |
+| `site` | not null | cascade |
+| `activity_import` | not null | cascade |
+| `activity_import_row` | not null | cascade |
+| `activity_record` | not null | cascade |
+| `emission_factor_set` | **nullable** | cascade |
+| `emission_factor` | **nullable** | cascade |
+| `activity_factor_mapping` | not null | cascade |
+| `activity_emission` | not null | cascade |
+| `emission_target` | not null | cascade |
+| `report` | not null | cascade |
+| `target_alert` | not null | cascade |
+| `alert_preference` | not null | cascade |
+| `member` (generated) | not null | cascade |
+| `invitation` (generated) | not null | cascade |
+
+The two nullable ones are §9.2 rule 6's narrow published-reference-data
+exception, and `cascade` is the **safe** mode there: deleting the organisation
+deletes a customer's private factor set rather than orphaning it into the
+published set every tenant reads. `set null` on either would have been a silent
+cross-tenant leak of exactly the kind that rule exists to prevent. Confirmed,
+not assumed.
+
+Two references deliberately outside the cascade:
+
+- **`organization_deletion.organization_id` carries no FK** — that is what lets
+  the audit row survive.
+- **`session.active_organization_id` carries no FK** (`lib/db/auth-schema.ts:42`),
+  so a purged organisation leaves stale active ids on sessions. Harmless:
+  `getCurrentMembership()` treats an `activeOrganizationId` that resolves to
+  nothing as stale and falls back to the sole membership, which is behaviour
+  that already existed.
+
+**A table added later with a different `onDelete` mode is the failure this
+sweep cannot detect by itself.** Re-run the enumeration when the schema grows.
+
+### The surface
+
+`/account`, following the spacing already in that file (`mt-20 md:mt-24`
+between sections, `mt-7` under a caption) — **read from the file, not chosen.**
+Built from `Field` and `Button` in `app/_components/primitives.tsx` and nothing
+else; no second design system (§7.5), no GSAP.
+
+- **Not locked, owner** — a `DELETE ORGANISATION` section, last on the page,
+  stating exactly what is removed and that it is restorable for 30 days, behind
+  a confirmation that requires typing the organisation's slug.
+- **Not locked, member** — the panel renders `null`. Presentation only; the
+  action refuses a non-owner regardless.
+- **Locked** — the organisation section's intro paragraph, the "Open overview"
+  link, `MembersPanel` and the alert control are all replaced by the notice
+  giving the purge date. An owner additionally gets "Restore organisation"; a
+  member gets the notice and a line saying an owner can reverse it.
+  `CreateOrganizationForm` does **not** appear: a locked organisation is not "no
+  organisation yet". The three tenant reads the page makes are skipped entirely
+  while locked, since nothing renders them.
+
+The `MetaPair` block naming the organisation, its identifier and the viewer's
+role stays in both states — it says what is being deleted.
+
+### Email
+
+One best-effort message per owner on a deletion request, through
+`lib/email/organization.ts` (extended, not forked) and a new template
+`lib/email/templates/organization-deletion.tsx`. It states the purge date, what
+goes, and how to restore.
+
+- **A failed send never fails the write** (§10 rule 4). The row is committed
+  first; a sender returns rather than throws, and the whole loop is inside a
+  `catch` that swallows silently.
+- **Idempotency key folds in a sha256 of the recipient** — the fan-out reasoning
+  `sendTargetAlert` records: one request goes to every owner, and Resend answers
+  a repeated key carrying a different payload with a 409, so without it the
+  second owner would never be told. The address itself is never in the key.
+- **Recipients come from a new `listOwnerEmails`, not `listAlertRecipients`.**
+  That read filters on the `alert_preference` opt-out, which is a preference
+  about *target threshold* email; reusing it would make a notice about erasure
+  suppressible by an unrelated switch.
+- **No message on the purge**: by then there is no workspace to link to and the
+  address was already told the date.
+- The template names no person — every recipient is an owner and the requester
+  is one of them, so naming a colleague inside an automated destructive notice
+  is a disclosure the flow does not need. The audit row records the user id.
+
+`formatExpiry` in `lib/email/organization.ts` was renamed `formatDate`, since it
+now formats a purge date as well as an invitation expiry. Behaviour identical.
+
+### Rate limiting
+
+`checkOrganizationDeletionLimit`, keyed by **user id**, **10 per hour**,
+request and restore sharing one bucket. **A judgement, not a measurement**, like
+every window in that file. Deliberately the tightest there: there is no honest
+use that repeats deleting an organisation, and mistyping the confirmation slug
+is the only reason to try twice. The two share a bucket so an attacker who
+exhausts it cannot thereby stop the owner restoring — an exhausted bucket
+refuses both, and the purge is still 30 days away.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run db:generate` | `lib/db/migrations/0012_brainy_luke_cage.sql` — the four statements above |
+| `npm run db:migrate` | `migrations applied successfully!` |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **9 files, 210 tests passed** — `lib/domain/` is untouched, so this is a regression check |
+| `npm run build` | route table below |
+| prerender diff | **21 HTML files compared, 0 differing** |
+| `npm run test:e2e` | Chromium and Firefox **10/10 passed**. **WebKit did not run** — `Podman is required for WebKit on Arch Linux`, still not installed, as prompts 69–72 recorded. **Stated as a gap, not a pass** |
+
+Route table from `npm run build`: `/`, `/about`, `/careers`, `/design-system`,
+`/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3)
+`● SSG`; `/account` stays `ƒ`; **one new `ƒ` entry,
+`/api/cron/purge-organizations`.** No route changed mode.
+
+The prerender diff used the **two-build method** in `docs/automation.md`:
+snapshot `.next/server/app` and `.next/BUILD_ID`, `git stash push -- app lib
+vercel.json`, rebuild, snapshot again, `git stash pop`, diff normalising only
+`BUILD_ID`. Both builds produced the **same two CSS chunk names**
+(`00u7jgtk688mf.css`, `3qi1cinspn7re.css`), so no chunk normalisation was
+applied and none was needed. 21 files on both sides, no file added or removed,
+**0 differing**.
+
+#### The locked-organisation walk — what was exercised, and what was not
+
+Run against the development database, which holds exactly one organisation
+(`kinsmen-01`) with one owner. **Every step was reversible and the table was
+empty again at the end**; the organisation itself was never deleted and the
+purge sweep was never run against real data.
+
+Exercised, all twelve assertions passing:
+
+- the membership join reports no lock before, and reports the lock after a
+  `pending` row is inserted;
+- `listAllOrganizationIds`'s anti-join sees the organisation before and
+  excludes it while locked;
+- the **partial unique index refuses a second open request** — the guarantee
+  `createDeletionRequest`'s `onConflictDoNothing` rests on;
+- the due read returns nothing while the window is open and returns the row once
+  `scheduled_purge_at` has elapsed;
+- cancelling unlocks the membership and restores the organisation to the sweep;
+- a **cancelled** row does not block a subsequent open request;
+- the table is empty afterwards.
+
+**Not exercised, and stated rather than claimed** (§12 rules 3 and 9):
+
+- the eight `requireOrganization()` redirects and the per-flow action failures
+  were **not** driven through a signed-in browser session — the E2E suite covers
+  only unauthenticated redirects, and no seeded authenticated fixture exists in
+  this repository. The lock is one `if` in each of the two chokepoints plus the
+  five direct call sites listed above, all type-checked, and the data those
+  branches read was exercised above; that is weaker than a walk-through and is
+  recorded as such;
+- **the purge itself has never run.** No blob was deleted and no cascade was
+  executed against real data. The `onDelete` enumeration is read from the schema
+  and the ordering argument is reasoned, not observed;
+- no latency figure was taken, warm or cold.
+
+### Prerender impact
+
+`none — no route changes`, verified rather than assumed: 21 prerendered HTML
+files byte-identical after normalising `BUILD_ID` alone. Nothing here touches a
+marketing route, `SiteNav`, `SiteFooter` or a GSAP surface.
+`DeleteOrganizationPanel` is a client leaf imported only by `/account`, which is
+already `ƒ`.
+
+### Trust boundary
+
+Two new Server Actions and one new cron route.
+
+- **`requestOrganizationDeletion`** — what crosses: the typed organisation slug,
+  as a confirmation, and nothing else. Authorised by a live session **plus** a
+  membership row with `role === "owner"`, re-read from Postgres on the request
+  (§11.2 rule 5). **The organisation id is resolved server-side from that
+  membership row and is never accepted from the request.** Validated by
+  `deleteOrganizationSchema`, run in the leaf as a courtesy and in the action as
+  the check; the slug comparison is against the membership row's own slug, never
+  against a second browser-supplied value. Rate-limited by user id. **No BotID**:
+  the path requires a live verified session, which is strictly stronger, and
+  adding `/account` to `instrumentation-client.ts` is the two-file commitment
+  §7.3 records. A rejected request returns the existing typed `SubmitResult` —
+  never a throw, never a bare string.
+- **`restoreOrganization`** — same authorisation, **no payload at all**. Bypasses
+  the lock deliberately. A concurrent restore by another owner returns `ok` — the
+  state the person wanted is the state that holds.
+- **`/api/cron/purge-organizations`** — an external caller (§6.2's sanctioned
+  category), gated fail-closed on `CRON_SECRET` with a constant-time bearer
+  comparison, `401` with no body and no detail for every rejected caller. It
+  holds no business logic beyond calling its sweep.
+
+A non-owner member, a signed-out caller and a caller naming another organisation
+all reach the same handled failures, and nothing in the copy discloses anything
+about another tenant.
+
+### Secrets and data
+
+- **No new environment variable.** `CRON_SECRET` already exists — confirmed from
+  `vercel env ls` (names only, §8.4: Development non-sensitive, Preview and
+  Production sensitive). No `NEXT_PUBLIC_*` was added and `.env.example` is
+  unchanged.
+- **Personal data**: the audit row stores a user id and the organisation's name
+  and slug. **No email address and no person's name** — the minimum that keeps
+  the trail readable after the purge (§8.3 rule 1). Owner addresses are read at
+  send time and not stored by this change.
+- **Nothing is logged** on any path or in any catch — not a request body, not an
+  address, not a slug, not a blob pathname. `purge_error` is written from a
+  closed two-value vocabulary so it cannot carry a customer's data. The email
+  module's two `console.warn` lines carry the deletion row's id and the
+  provider's reason only, matching the invitation sender beside them.
+- Every new `lib/` module carries `import "server-only"`;
+  `lib/validation/organization.ts` stays the deliberate exception and still
+  imports nothing from `lib/db/`.
+- **This is the change that makes retention finite** (§8.3 rule 5), which is the
+  point of it.
+- **No model is called** — §5.3's phase-one bar applies; nothing here benefits
+  from one.
+
+### What prompt 73 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| enabling Better Auth's `deleteOrganization` endpoint | `disableOrganizationDeletion: true` stays. Its cascade is immediate and unaudited, which is the mismatch `lib/auth/server.ts:126-132` recorded |
+| a `beforeDelete` hook that throws to archive | the `organization-best-practices` skill's suggested soft-delete pattern, loaded and declined: it works by making a documented endpoint fail, and §10 rule 2's "never throw" is the house rule |
+| adding a column to any Better Auth table | §9.1, and the three reasons above |
+| deleting a **user** account, or `lead` / `subscriber` / `application` erasure | a different subject with different rules; those three already soft-delete |
+| an admin-side control to delete another tenant's organisation | §11.1's orthogonality — staff are not members, and a staff bypass is the failure `lib/auth/organization.ts:23-35` exists to prevent |
+| a data export before deletion | genuinely wanted, genuinely separate: step 13's report export exists, and "download everything" is its own prompt with its own format decisions |
+| an email on the purge itself | there is no workspace to link to by then, and the date was already given |
+| an authenticated E2E fixture | it would be the right way to walk the eight redirects, and it is a prompt of its own — the gap is recorded above rather than papered over |
+| changing the 02:00 recalculation sweep's schedule or logic | beyond excluding locked organisations from `listAllOrganizationIds()`, which was required |
+| set-metadata editing, retiring a set from the UI, bulk CSV import, market-based scope 2 | untouched prior deferrals |
+| AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65, 68, 69, 70 and still deferred |
+| re-pointing existing organisations' mappings at a newer set | prompt 70's deferral, unchanged |
+| any change to a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | out of scope entirely |
+| a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work, as prompts 63–72 were |
+
 ## Aligning the custom-factor form's fields, prompt 72
 
 Implemented on 13 Aug 2026, from a screenshot of the live page: "make the text

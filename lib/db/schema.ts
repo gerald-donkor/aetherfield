@@ -33,6 +33,7 @@ import {
   SCOPE3_CATEGORIES,
 } from "../validation/emissions";
 import { TARGET_ALERT_STATUSES } from "../validation/alerts";
+import { ORGANIZATION_DELETION_STATUSES } from "../validation/organization";
 import { REPORT_NARRATIVE_STATUSES } from "../validation/reports";
 import {
   PROJECTION_BASES,
@@ -1291,6 +1292,106 @@ export const alertPreference = pgTable(
     ),
   ],
 );
+
+/* -------------------------------------------------------------------------- */
+/*  Organisation deletion and erasure — prompt 73                              */
+/* -------------------------------------------------------------------------- */
+
+/** The deletion request's lifecycle, declared once in `lib/validation/` and
+    imported (AGENTS.md 9.2 rule 2). `pgEnum` wants a mutable tuple and the
+    constant is `readonly`, so it is spread — the same shape every enum above
+    takes. */
+export const organizationDeletionStatus = pgEnum(
+  "organization_deletion_status",
+  [...ORGANIZATION_DELETION_STATUSES],
+);
+
+/**
+ * One request to delete an organisation, and the audit trail of what happened
+ * to it — prompt 73, closing AGENTS.md 9.2 rule 5 and 8.3 rule 5 for the
+ * largest object in the schema.
+ *
+ * **This is not a soft-delete column on `organization`, and the reasons are
+ * three.** `schema.organization.additionalFields` does exist in better-auth
+ * 1.6.26 (`node_modules/better-auth/dist/plugins/organization/types.d.mts`),
+ * so the alternative was workable and this is a choice rather than a
+ * constraint:
+ *
+ * 1. AGENTS.md 9.1 says Better Auth's tables are generated and are not extended
+ *    by hand, and `lib/db/auth-schema.ts` already records what a regeneration
+ *    costs the hand-added `member` unique index.
+ * 2. Rule 5 asks for an **audit trail** — who requested, when, when the purge
+ *    is due, whether it was cancelled and by whom, and when it completed. That
+ *    is a row with a lifecycle, not a nullable timestamp.
+ * 3. Decisively: **the audit row must outlive the purge.** The purge deletes
+ *    the `organization` row, so a column on it is destroyed by the very
+ *    operation it exists to record.
+ *
+ * **`organization_id` and `requested_by` deliberately carry no foreign key**,
+ * and this is the one place in this file where the *absence* of an FK is the
+ * design. A reference to `organization.id` would cascade this row away at the
+ * moment it becomes the only evidence the organisation ever existed. The ids
+ * are still resolved server-side from a membership row before they are written
+ * — nothing here is ever taken from a request.
+ *
+ * **No personal data.** A user id and the organisation's own name and slug,
+ * which is the minimum that keeps the trail readable once the workspace is
+ * gone (AGENTS.md 8.3 rule 1). No address, no person's name.
+ */
+export const organizationDeletion = pgTable(
+  "organization_deletion",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** No FK — see the docblock. The row survives the purge. */
+    organizationId: text("organization_id").notNull(),
+    /** Snapshots, so the trail reads after the organisation is deleted. */
+    organizationName: text("organization_name").notNull(),
+    organizationSlug: text("organization_slug").notNull(),
+    status: organizationDeletionStatus("status").notNull().default("pending"),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** The requesting owner's user id. No FK, same reasoning. */
+    requestedBy: text("requested_by").notNull(),
+    /**
+     * `requested_at` + the window. **Stored rather than computed**, so changing
+     * `ORGANIZATION_DELETION_WINDOW_DAYS` later can never move a date already
+     * promised to a customer.
+     */
+    scheduledPurgeAt: timestamp("scheduled_purge_at", {
+      withTimezone: true,
+    }).notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: text("cancelled_by"),
+    purgedAt: timestamp("purged_at", { withTimezone: true }),
+    /**
+     * Why a sweep failed. The row stays `pending`, so the next night retries
+     * rather than silently giving up.
+     *
+     * **Written from a closed vocabulary, never from an exception.** A
+     * provider's error message can quote a customer's data, and this column is
+     * read by us (AGENTS.md 8.3 rule 2).
+     */
+    purgeError: text("purge_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    /** **One open request per organisation, enforced in the schema** rather
+        than by the action happening to check first — the same argument
+        `lib/db/auth-schema.ts` makes for the `member` unique index. Cancelled
+        and purged rows accumulate freely; that is the trail. */
+    uniqueIndex("organization_deletion_pending_key")
+      .on(t.organizationId)
+      .where(sql`${t.status} = 'pending'`),
+    /** The sweep's due-rows read. */
+    index("organization_deletion_due_idx").on(t.status, t.scheduledPurgeAt),
+  ],
+);
+
+export type OrganizationDeletion = typeof organizationDeletion.$inferSelect;
+export type NewOrganizationDeletion = typeof organizationDeletion.$inferInsert;
 
 export type TargetAlert = typeof targetAlert.$inferSelect;
 export type NewTargetAlert = typeof targetAlert.$inferInsert;

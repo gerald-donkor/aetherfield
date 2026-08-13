@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, isNull, lte } from "drizzle-orm";
 
 import { invitation, member, organization, user } from "./auth-schema";
 import { getDb } from "./client";
+import { activityImport, organizationDeletion } from "./schema";
 
 /**
  * The tenant-scope primitive (AGENTS.md 9.2 rule 6).
@@ -30,6 +31,15 @@ export type Membership = {
       `lib/auth/organization.ts`; this layer reports what is in the row. */
   role: string;
   createdAt: Date;
+  /**
+   * The open deletion request, if the organisation has one — prompt 73.
+   *
+   * **Carried on the membership rather than fetched separately**, because every
+   * gate that must refuse a locked workspace already resolves a membership, and
+   * a second round trip per request is a second thing a caller can forget. A
+   * `null` here is the ordinary state.
+   */
+  pendingDeletion: { scheduledPurgeAt: Date } | null;
 };
 
 const membershipColumns = {
@@ -38,7 +48,34 @@ const membershipColumns = {
   organizationSlug: organization.slug,
   role: member.role,
   createdAt: member.createdAt,
+  /** `null` unless a `pending` row exists — the left join below is predicated
+      on the status, so a cancelled or purged row never reads as a lock. */
+  pendingPurgeAt: organizationDeletion.scheduledPurgeAt,
 } as const;
+
+/** The left join both membership reads share, so the two cannot disagree about
+    what "locked" means. */
+const pendingDeletionJoin = and(
+  eq(organizationDeletion.organizationId, member.organizationId),
+  eq(organizationDeletion.status, "pending"),
+);
+
+function toMembership(row: {
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  role: string;
+  createdAt: Date;
+  pendingPurgeAt: Date | null;
+}): Membership {
+  const { pendingPurgeAt, ...rest } = row;
+  return {
+    ...rest,
+    pendingDeletion: pendingPurgeAt
+      ? { scheduledPurgeAt: pendingPurgeAt }
+      : null,
+  };
+}
 
 /**
  * One user's membership of one organisation, or `null` for a non-member.
@@ -55,12 +92,13 @@ export async function getMembership(
     .select(membershipColumns)
     .from(member)
     .innerJoin(organization, eq(member.organizationId, organization.id))
+    .leftJoin(organizationDeletion, pendingDeletionJoin)
     .where(
       and(eq(member.userId, userId), eq(member.organizationId, organizationId)),
     )
     .limit(1);
 
-  return record ?? null;
+  return record ? toMembership(record) : null;
 }
 
 /**
@@ -73,12 +111,15 @@ export async function getMembership(
 export async function listMembershipsForUser(
   userId: string,
 ): Promise<Membership[]> {
-  return getDb()
+  const rows = await getDb()
     .select(membershipColumns)
     .from(member)
     .innerJoin(organization, eq(member.organizationId, organization.id))
+    .leftJoin(organizationDeletion, pendingDeletionJoin)
     .where(eq(member.userId, userId))
     .orderBy(asc(member.createdAt), asc(member.id));
+
+  return rows.map(toMembership);
 }
 
 /**
@@ -98,11 +139,25 @@ export async function listMembershipsForUser(
  *
  * Ordered stably so a sweep interrupted partway resumes over the same sequence
  * the next night rather than a reshuffled one.
+ *
+ * **Organisations with an open deletion request are excluded** — prompt 73.
+ * Recalculating a workspace that is being erased is wasted work, and step 14's
+ * threshold alerts would otherwise email a customer about a target inside a
+ * workspace they have asked to have removed. The exclusion is here rather than
+ * in the sweep so it cannot be forgotten by a later caller.
  */
 export async function listAllOrganizationIds(): Promise<string[]> {
   const rows = await getDb()
     .select({ id: organization.id })
     .from(organization)
+    .leftJoin(
+      organizationDeletion,
+      and(
+        eq(organizationDeletion.organizationId, organization.id),
+        eq(organizationDeletion.status, "pending"),
+      ),
+    )
+    .where(isNull(organizationDeletion.id))
     .orderBy(asc(organization.createdAt), asc(organization.id));
   return rows.map((row) => row.id);
 }
@@ -288,4 +343,267 @@ export async function getOrganizationBySlug(
     .limit(1);
 
   return record ?? null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Deletion and erasure — prompt 73                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The organisation's owners' addresses, for the deletion notice.
+ *
+ * **Not `listAlertRecipients`, deliberately.** That read filters on the
+ * `alert_preference` opt-out, which is a preference about *target threshold*
+ * email. A workspace being scheduled for erasure is not something an owner can
+ * have opted out of hearing about, and reusing that predicate would silently
+ * make a security-relevant notice suppressible by an unrelated switch.
+ *
+ * Tenant-predicated on the resolved organisation id, as every read here is.
+ */
+export async function listOwnerEmails(
+  organizationId: string,
+): Promise<{ email: string }[]> {
+  return getDb()
+    .select({ email: user.email })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(
+      and(eq(member.organizationId, organizationId), eq(member.role, "owner")),
+    )
+    .orderBy(asc(member.createdAt), asc(member.id));
+}
+
+export type PendingDeletionRow = {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  requestedAt: Date;
+  scheduledPurgeAt: Date;
+};
+
+const pendingColumns = {
+  id: organizationDeletion.id,
+  organizationId: organizationDeletion.organizationId,
+  organizationName: organizationDeletion.organizationName,
+  organizationSlug: organizationDeletion.organizationSlug,
+  requestedAt: organizationDeletion.requestedAt,
+  scheduledPurgeAt: organizationDeletion.scheduledPurgeAt,
+} as const;
+
+/** One organisation's open deletion request, or `null`. Tenant-predicated. */
+export async function getPendingDeletion(
+  organizationId: string,
+): Promise<PendingDeletionRow | null> {
+  const [row] = await getDb()
+    .select(pendingColumns)
+    .from(organizationDeletion)
+    .where(
+      and(
+        eq(organizationDeletion.organizationId, organizationId),
+        eq(organizationDeletion.status, "pending"),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * Open a deletion request.
+ *
+ * **Returns `null` when one is already open**, rather than throwing: the
+ * partial unique index is the guarantee, `onConflictDoNothing` is how a race
+ * between two owners resolves without an exception reaching an action, and a
+ * caller that reads `null` has its own typed sentence for the state
+ * (AGENTS.md 10 rule 2).
+ *
+ * Every value written here was resolved server-side by the caller from a
+ * membership row — nothing on this path comes from a request.
+ */
+export async function createDeletionRequest(input: {
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  requestedBy: string;
+  scheduledPurgeAt: Date;
+}): Promise<PendingDeletionRow | null> {
+  const [row] = await getDb()
+    .insert(organizationDeletion)
+    .values({
+      organizationId: input.organizationId,
+      organizationName: input.organizationName,
+      organizationSlug: input.organizationSlug,
+      status: "pending",
+      requestedBy: input.requestedBy,
+      scheduledPurgeAt: input.scheduledPurgeAt,
+    })
+    .onConflictDoNothing()
+    .returning(pendingColumns);
+
+  return row ?? null;
+}
+
+/**
+ * Reverse an open request.
+ *
+ * **Predicated on `status = 'pending'`**, so a second click cannot re-stamp a
+ * row that is already cancelled, and a purged row can never be "restored" into
+ * a workspace that no longer exists. Returns whether a row moved.
+ */
+export async function cancelDeletionRequest(
+  organizationId: string,
+  cancelledBy: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const rows = await getDb()
+    .update(organizationDeletion)
+    .set({ status: "cancelled", cancelledAt: now, cancelledBy })
+    .where(
+      and(
+        eq(organizationDeletion.organizationId, organizationId),
+        eq(organizationDeletion.status, "pending"),
+      ),
+    )
+    .returning({ id: organizationDeletion.id });
+
+  return rows.length > 0;
+}
+
+/**
+ * Every request whose window has elapsed — the purge sweep's read, and the
+ * second read in this module that is not scoped to one tenant.
+ *
+ * **The justification `listAllOrganizationIds` records applies verbatim**: the
+ * sweep has no session and no request to derive a tenant from, so it derives
+ * the due set server-side and then runs tenant-predicated work once per row.
+ * Its only caller is the cron handler, authenticated by `CRON_SECRET`; nothing
+ * in the authenticated UI may call it.
+ *
+ * Ordered stably so an interrupted sweep resumes over the same sequence.
+ */
+export async function listDueDeletions(
+  now: Date = new Date(),
+): Promise<PendingDeletionRow[]> {
+  return getDb()
+    .select(pendingColumns)
+    .from(organizationDeletion)
+    .where(
+      and(
+        eq(organizationDeletion.status, "pending"),
+        lte(organizationDeletion.scheduledPurgeAt, now),
+      ),
+    )
+    .orderBy(
+      asc(organizationDeletion.scheduledPurgeAt),
+      asc(organizationDeletion.id),
+    );
+}
+
+/** The audit row's final state. It is not deleted: it is the only remaining
+    evidence the organisation existed, which is the point of AGENTS.md 9.2
+    rule 5's audit trail. */
+export async function markDeletionPurged(
+  deletionId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  await getDb()
+    .update(organizationDeletion)
+    .set({ status: "purged", purgedAt: now, purgeError: null })
+    .where(eq(organizationDeletion.id, deletionId));
+}
+
+/**
+ * Record why a purge failed, leaving the row `pending` so the next night
+ * retries.
+ *
+ * **`reason` must come from a closed vocabulary**, never from an exception
+ * message: a driver or provider error can quote a customer's data, and this
+ * column is read by us (AGENTS.md 8.3 rule 2). The sweep passes a fixed string.
+ */
+export async function recordDeletionPurgeError(
+  deletionId: string,
+  reason: string,
+): Promise<void> {
+  await getDb()
+    .update(organizationDeletion)
+    .set({ purgeError: reason })
+    .where(eq(organizationDeletion.id, deletionId));
+}
+
+/**
+ * The organisation's outstanding private blob references — the purge's first
+ * stage.
+ *
+ * **It lives here rather than in `activity-queries.ts` because it is part of
+ * the organisation's erasure**, not part of the import flow: its predicate is
+ * an organisation, its caller is the purge sweep, and keeping the three purge
+ * statements adjacent is what makes the order in `sweep.ts` reviewable. It
+ * still writes SQL only inside `lib/db/` (AGENTS.md 6.2).
+ *
+ * Soft-deleted imports are **included**: a discarded import's blob is still a
+ * customer's file in storage, and erasure means erasure.
+ */
+export async function listImportBlobPathnames(
+  organizationId: string,
+): Promise<{ id: string; blobPathname: string }[]> {
+  const rows = await getDb()
+    .select({
+      id: activityImport.id,
+      blobPathname: activityImport.blobPathname,
+    })
+    .from(activityImport)
+    .where(
+      and(
+        eq(activityImport.organizationId, organizationId),
+        isNotNull(activityImport.blobPathname),
+      ),
+    )
+    .orderBy(asc(activityImport.createdAt), asc(activityImport.id));
+
+  /* `isNotNull` has already excluded the nulls; the cast states for the type
+     system what the predicate guarantees, rather than filtering a second time. */
+  return rows as { id: string; blobPathname: string }[];
+}
+
+/**
+ * Forget one blob pointer, once the object itself is gone.
+ *
+ * **Nulled as each delete succeeds**, so a sweep that dies partway is resumable
+ * and never loses the pointer to an object it has not yet deleted. Predicated
+ * on the organisation as well as the import id, so the statement cannot reach
+ * another tenant's row even if a caller passed the wrong id.
+ */
+export async function clearImportBlobPathname(
+  organizationId: string,
+  importId: string,
+): Promise<void> {
+  await getDb()
+    .update(activityImport)
+    .set({ blobPathname: null })
+    .where(
+      and(
+        eq(activityImport.id, importId),
+        eq(activityImport.organizationId, organizationId),
+      ),
+    );
+}
+
+/**
+ * The erasure itself: one statement, and the cascade does the rest.
+ *
+ * Every `organization_id` reference in `lib/db/schema.ts` is
+ * `onDelete: "cascade"` — verified at execution time and enumerated in
+ * `docs/backend.md`, prompt 73 — so members, invitations, sites, imports,
+ * staged rows, activity records, mappings, computed emissions, targets,
+ * reports, alerts, alert preferences and the tenant's own factor sets and
+ * factor rows all go with it.
+ *
+ * **`organization_deletion` is not among them**, by construction: it carries no
+ * foreign key, which is what lets the audit row outlive the row it describes.
+ */
+export async function deleteOrganizationRow(
+  organizationId: string,
+): Promise<void> {
+  await getDb().delete(organization).where(eq(organization.id, organizationId));
 }

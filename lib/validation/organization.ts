@@ -211,6 +211,10 @@ export const MEMBERSHIP_ERRORS = {
   NO_ORGANIZATION:
     "This account belongs to no organisation, so there is nothing to manage.",
   NOT_OWNER: "Only an owner can manage this organisation's members.",
+  /* Prompt 73. Not `NO_ORGANIZATION`: the organisation exists and is scheduled
+     for deletion, so membership is frozen until it is restored. */
+  ORGANIZATION_LOCKED:
+    "This organisation is scheduled for deletion, so its members are locked. Restore it below to make changes.",
   INVALID: "Check the marked fields and try again.",
   ALREADY_MEMBER: "That person is already a member of this organisation.",
   ALREADY_INVITED:
@@ -228,6 +232,99 @@ export const MEMBERSHIP_ERRORS = {
      inviting someone else, this one to the invitee reading their own link. */
   ALREADY_JOINED: "You are already a member of this organisation.",
   VERIFY_EMAIL: "Verify your email address before responding to an invitation.",
+} as const;
+
+/* -------------------------------------------------------------------------- */
+/*  Deletion and erasure — prompt 73                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The grace window between a deletion request and the purge that erases the
+ * workspace, in days.
+ *
+ * **A product decision recorded as a decision, not a measurement**
+ * (AGENTS.md 12 rule 4, and the front matter's "measured or judged, and say
+ * which"). There is no traffic to fit it against — the flow has never shipped —
+ * and it is on exactly the footing `organizationLimit` and
+ * `invitationExpiresIn` in `lib/auth/server.ts` claim for themselves. Taken with
+ * the user on 13 August 2026, over immediate erasure and over soft-delete with
+ * no purge.
+ *
+ * **It lives here so one value reaches three places**: the action that computes
+ * `scheduled_purge_at`, the confirmation copy on `/account`, and the locked
+ * notice. The *stored* date is what a customer is promised, though — the sweep
+ * reads `scheduled_purge_at` from the row and never recomputes it from this
+ * constant, so changing the window later cannot move a date already given.
+ */
+export const ORGANIZATION_DELETION_WINDOW_DAYS = 30;
+
+/**
+ * The deletion request's lifecycle. A state, not a boolean (AGENTS.md 9.2
+ * rule 2): a cancelled request and a completed purge are different facts about
+ * the same row, and the row outlives the organisation it describes.
+ */
+export const ORGANIZATION_DELETION_STATUSES = [
+  "pending",
+  "cancelled",
+  "purged",
+] as const;
+
+export type OrganizationDeletionStatus =
+  (typeof ORGANIZATION_DELETION_STATUSES)[number];
+
+/**
+ * The confirmation the delete control requires: the organisation's own
+ * identifier, typed out.
+ *
+ * **The schema checks shape only.** Whether the typed value *matches* this
+ * organisation is decided in the action, against the slug on the membership row
+ * the action just resolved server-side — never against a value from the
+ * request. Trimmed and lowercased before the shape check, the same courtesy
+ * `slug` above extends, so a stray capital is corrected rather than rejected.
+ */
+export const deleteOrganizationSchema = z.object({
+  confirmSlug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(
+      z.string().min(1, { error: "Type the identifier to confirm." }),
+    ),
+});
+
+/** The one field the confirmation form renders. */
+export type DeleteOrganizationField = "confirmSlug";
+
+export type DeleteOrganizationFieldErrors = Record<
+  DeleteOrganizationField,
+  string
+>;
+
+export const NO_DELETE_ORGANIZATION_FIELD_ERRORS: DeleteOrganizationFieldErrors =
+  {
+    confirmSlug: "",
+  };
+
+/**
+ * The deletion path's shared copy, declared here for the reason
+ * `MEMBERSHIP_ERRORS` above is: a client leaf and a `"use server"` module must
+ * say the same thing, and a `"use server"` module can export nothing but async
+ * functions at runtime.
+ *
+ * Register per AGENTS.md 5 — measured and operational. A workspace being erased
+ * is a serious state and the copy says so plainly, without alarm.
+ */
+export const ORGANIZATION_DELETION_ERRORS = {
+  GENERIC: "We couldn't complete that just now. Please try again in a moment.",
+  SIGNED_OUT: "Your session has expired. Sign in again to continue.",
+  NO_ORGANIZATION:
+    "This account belongs to no organisation, so there is nothing to delete.",
+  NOT_OWNER: "Only an owner can delete this organisation.",
+  SLUG_MISMATCH:
+    "That is not this organisation's identifier. Type it exactly to confirm.",
+  ALREADY_PENDING:
+    "This organisation is already scheduled for deletion.",
+  NOT_PENDING: "This organisation is not scheduled for deletion.",
 } as const;
 
 /**

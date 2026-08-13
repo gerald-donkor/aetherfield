@@ -41,6 +41,7 @@ function resolveTenant() {
   return resolveTenantFor({
     signedOut: TARGET_ERRORS.signedOut,
     noOrganization: TARGET_ERRORS.noOrganization,
+    organizationLocked: TARGET_ERRORS.organizationLocked,
     failure: TARGET_ERRORS.failure,
   });
 }

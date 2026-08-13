@@ -50,6 +50,16 @@ export type TenantMessages = {
   signedOut: string;
   /** A session, but no membership row. */
   noOrganization: string;
+  /**
+   * A membership row, but the organisation has an open deletion request —
+   * prompt 73.
+   *
+   * **A fourth message rather than a reuse of `noOrganization`**, because that
+   * sentence tells the person to create an organisation and they have one; it
+   * is being erased. Passed per-flow like the other three, so each surface says
+   * what it means on that surface.
+   */
+  organizationLocked: string;
   /** The lookup itself failed. */
   failure: string;
 };
@@ -77,6 +87,14 @@ export async function resolveTenant(
      message says anything about another tenant. */
   if (!account) return { ok: false, error: messages.signedOut };
   if (!membership) return { ok: false, error: messages.noOrganization };
+
+  /* The lock. Every authenticated action that resolves its tenant here refuses
+     while a deletion request is open, with no call-site edit beyond the fourth
+     sentence above. `/account`'s restore control deliberately does not go
+     through this path — it is the one thing a locked organisation may do. */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: messages.organizationLocked };
+  }
 
   return {
     ok: true,

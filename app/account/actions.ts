@@ -12,13 +12,19 @@ import {
 import { getAuth, getCurrentAccount } from "../../lib/auth/server";
 import { setAlertPreference } from "../../lib/db/alert-queries";
 import {
+  cancelDeletionRequest,
+  createDeletionRequest,
+  getPendingDeletion,
   listMembersForOrganization,
+  listOwnerEmails,
   listPendingInvitations,
 } from "../../lib/db/organization-queries";
+import { sendOrganizationDeletionNotice } from "../../lib/email/organization";
 import {
   checkAlertPreferenceLimit,
   checkInvitationWriteLimit,
   checkOrganizationCreateLimit,
+  checkOrganizationDeletionLimit,
   formatRetry,
 } from "../../lib/rate-limit";
 import {
@@ -30,9 +36,13 @@ import {
   cancelInvitationSchema,
   type CreateOrganizationField,
   createOrganizationSchema,
+  type DeleteOrganizationField,
+  deleteOrganizationSchema,
   type InviteMemberField,
   inviteMemberSchema,
   MEMBERSHIP_ERRORS,
+  ORGANIZATION_DELETION_ERRORS,
+  ORGANIZATION_DELETION_WINDOW_DAYS,
   removeMemberSchema,
 } from "../../lib/validation/organization";
 import type { SubmitResult } from "../../lib/validation/result";
@@ -215,6 +225,14 @@ async function resolveMembershipForWrite(): Promise<
         ? MEMBERSHIP_ERRORS.NO_ORGANIZATION
         : MEMBERSHIP_ERRORS.SIGNED_OUT,
     };
+  }
+
+  /* The lock — prompt 73. These four resolve their membership directly (stage d
+     needs the role) rather than through `lib/auth/tenant.ts`, so the marker is
+     checked here. A locked organisation may do exactly one thing, and it is
+     `restoreOrganization` below; membership is not it. */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED };
   }
 
   try {
@@ -526,6 +544,13 @@ export async function setAlertEmailPreference(
     };
   }
 
+  /* The lock — prompt 73. A workspace being erased raises no alerts (the sweep
+     skips it, `listAllOrganizationIds`), so there is no preference to express
+     about it until it is restored. */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED };
+  }
+
   try {
     const limit = await checkAlertPreferenceLimit(membership.account.user.id);
     if (!limit.allowed) {
@@ -558,6 +583,228 @@ export async function setAlertEmailPreference(
     return { ok: false, error: ALERT_PREFERENCE_ERRORS.GENERIC };
   }
 
+  revalidatePath("/account");
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Deletion and erasure — prompt 73                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Stage **b** for the two deletion actions, in one place.
+ *
+ * **Deliberately not `resolveMembershipForWrite` above**, and the difference is
+ * the whole design: that helper refuses a locked organisation, and `restore` is
+ * the one thing a locked organisation must still be able to do. Sharing it
+ * would make the reversal unreachable the moment the lock is set — a state with
+ * no exit.
+ *
+ * It resolves the session and the tenant, then spends the deletion limiter,
+ * failing closed on a limiter error as every authenticated path here does
+ * (AGENTS.md 8.2 rule 4 — the failure must be visible, never a silent success).
+ *
+ * Not exported: a `"use server"` module's runtime exports must all be async
+ * functions, and this is a helper rather than an entry point.
+ */
+async function resolveOwnerForDeletion(): Promise<
+  { ok: true; membership: CurrentMembership } | { ok: false; error: string }
+> {
+  let membership: CurrentMembership | null;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.GENERIC };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account
+        ? ORGANIZATION_DELETION_ERRORS.NO_ORGANIZATION
+        : ORGANIZATION_DELETION_ERRORS.SIGNED_OUT,
+    };
+  }
+
+  /* **Owner-only, checked here.** Hiding the control on `/account` is
+     presentation and is never the check (AGENTS.md 11.2 rule 2), and the role
+     was re-read from Postgres by `getCurrentMembership` on this request rather
+     than trusted from the session payload (11.2 rule 5). */
+  if (membership.role !== "owner") {
+    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.NOT_OWNER };
+  }
+
+  try {
+    const limit = await checkOrganizationDeletionLimit(
+      membership.account.user.id,
+    );
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many attempts. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.GENERIC };
+  }
+
+  return { ok: true, membership };
+}
+
+/**
+ * Schedule the caller's organisation for deletion — prompt 73, closing
+ * AGENTS.md 9.2 rule 5 and 8.3 rule 5 for the largest object in the schema.
+ *
+ * **The same stage order as every action above it**, in AGENTS.md 10's letters.
+ * Stage **a** is absent for the reason `createOrganization` records and does
+ * not restate.
+ *
+ * **No organisation id is ever taken from the browser.** The tenant is the one
+ * on the resolved membership row; the only thing that crosses the boundary is a
+ * typed confirmation string, and it is compared against the slug on that row.
+ *
+ * **It writes a lock, not a deletion.** The workspace refuses every read and
+ * write from this moment (`lib/auth/organization.ts`, `lib/auth/tenant.ts`) and
+ * stays restorable until the stored `scheduled_purge_at`, when the nightly
+ * sweep erases it. That is what makes an erasure request one reversible
+ * operation with an audit trail rather than an immediate cascade.
+ */
+export async function requestOrganizationDeletion(
+  input: unknown,
+): Promise<SubmitResult<DeleteOrganizationField>> {
+  // -- a. BotID: absent on an authenticated path. See `createOrganization`. --
+
+  // -- b. Session, tenant, role, then the rate limit ------------------------
+  const resolved = await resolveOwnerForDeletion();
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
+
+  // -- c. Parse, with the same schema the leaf ran --------------------------
+  const parsed = deleteOrganizationSchema.safeParse(input);
+  if (!parsed.success) {
+    const { fieldErrors } = z.flattenError(parsed.error);
+    return {
+      ok: false,
+      error: MEMBERSHIP_ERRORS.INVALID,
+      fieldErrors: { confirmSlug: fieldErrors.confirmSlug?.[0] },
+    };
+  }
+
+  /* The confirmation. **Compared against the resolved membership row's slug**,
+     which came from Postgres on this request — never against a value the
+     browser also supplied, which would confirm nothing. Both sides are already
+     lowercased: the schema lowercases the typed value, and the slug column is
+     written lowercased by `createOrganizationSchema`. */
+  if (parsed.data.confirmSlug !== membership.organization.slug) {
+    return {
+      ok: false,
+      error: MEMBERSHIP_ERRORS.INVALID,
+      fieldErrors: {
+        confirmSlug: ORGANIZATION_DELETION_ERRORS.SLUG_MISMATCH,
+      },
+    };
+  }
+
+  // -- d/e. Authorise and write --------------------------------------------
+  /* The role gate ran at stage b, where the limiter needed the membership.
+     The write is next; nothing between them can change the answer. */
+  const scheduledPurgeAt = new Date(
+    Date.now() + ORGANIZATION_DELETION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  );
+
+  let created: Awaited<ReturnType<typeof createDeletionRequest>>;
+  try {
+    created = await createDeletionRequest({
+      organizationId: membership.organization.id,
+      organizationName: membership.organization.name,
+      organizationSlug: membership.organization.slug,
+      requestedBy: membership.account.user.id,
+      scheduledPurgeAt,
+    });
+  } catch {
+    /* Nothing logged: the payload, the slug and the organisation's name are a
+       customer's commercial data (AGENTS.md 8.3 rule 2, extended by 5.3). */
+    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.GENERIC };
+  }
+
+  /* `null` means the partial unique index refused a second open request — two
+     owners racing, or a double submit. An honest handled result, not an error
+     (10 rule 2). */
+  if (!created) {
+    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.ALREADY_PENDING };
+  }
+
+  // -- f. Tell the owners, best-effort --------------------------------------
+  /* **A failed email never fails the write** (AGENTS.md 10 rule 4). The lock is
+     already in place and `/account` renders it, so a message that did not leave
+     costs an owner nothing. Awaited rather than fired and forgotten so a
+     serverless instance is not frozen mid-send; each send returns rather than
+     throws, and nothing about a failure is logged here. */
+  try {
+    const owners = await listOwnerEmails(membership.organization.id);
+    for (const owner of owners) {
+      await sendOrganizationDeletionNotice({
+        deletionId: created.id,
+        organizationName: created.organizationName,
+        scheduledPurgeAt: created.scheduledPurgeAt,
+        to: owner.email,
+      });
+    }
+  } catch {
+    /* Swallowed deliberately and silently, for the reason above. */
+  }
+
+  /* **No redirect** (10 rule 5). `/account` is where the person already is, and
+     it re-renders into its locked state in place. */
+  revalidatePath("/account");
+  return { ok: true };
+}
+
+/**
+ * Reverse an open deletion request, unlocking the workspace.
+ *
+ * **The one action a locked organisation may run**, which is why it resolves
+ * membership through `resolveOwnerForDeletion` rather than the lock-aware
+ * helper the membership actions share. Without this exception the lock would be
+ * a state with no exit.
+ *
+ * It takes **no input at all**: the organisation is the resolved one, and there
+ * is nothing a browser could usefully say about which request to reverse. A
+ * request whose purge has already run cannot be reached — the membership row it
+ * would be resolved from went with the cascade.
+ */
+export async function restoreOrganization(): Promise<SubmitResult> {
+  const resolved = await resolveOwnerForDeletion();
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
+
+  try {
+    /* Read first so "there was nothing to restore" is told apart from "the
+       update matched nothing", and predicated on the resolved tenant. */
+    const pending = await getPendingDeletion(membership.organization.id);
+    if (!pending) {
+      return { ok: false, error: ORGANIZATION_DELETION_ERRORS.NOT_PENDING };
+    }
+
+    const cancelled = await cancelDeletionRequest(
+      membership.organization.id,
+      membership.account.user.id,
+    );
+    if (!cancelled) {
+      /* Another owner restored it between the read and the write. The state the
+         person wanted is the state that holds, so this is not a failure. */
+      revalidatePath("/account");
+      return { ok: true };
+    }
+  } catch {
+    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.GENERIC };
+  }
+
+  /* No email on restore: every owner was told the date, and the workspace they
+     can now open says the rest. AGENTS.md 8.3 rule 1 — only what the flow
+     needs. */
   revalidatePath("/account");
   return { ok: true };
 }

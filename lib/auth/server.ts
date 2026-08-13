@@ -124,10 +124,20 @@ function createAuth() {
         organizationLimit: 3,
         membershipLimit: 100,
         /**
-         * Deletion is out of scope for step 8, and off rather than merely
-         * unbuilt: the plugin's delete cascades members and invitations, while
-         * §9.2 rule 5 wants a soft-delete with an audit trail so an erasure
-         * request is one reversible operation. Design the two together, later.
+         * Off, and it **stays** off — this line is now a decision rather than a
+         * deferral. Step 8 disabled it because the plugin's delete is immediate
+         * and unaudited, cascading members and invitations, while §9.2 rule 5
+         * wants a soft-delete with an audit trail so an erasure request is one
+         * reversible operation.
+         *
+         * **Prompt 73 built that path instead**, and it is deliberately not
+         * this endpoint: an owner opens an `organization_deletion` row from
+         * `/account`, the workspace locks immediately and stays restorable, and
+         * a nightly sweep erases the blobs and then the row — leaving the audit
+         * row behind, which a cascade through here could not do. See
+         * `docs/backend.md`, "Organisation deletion and erasure, prompt 73".
+         *
+         * Re-enabling this would put a second, unaudited door on the same act.
          */
         disableOrganizationDeletion: true,
         /**

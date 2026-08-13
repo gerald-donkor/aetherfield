@@ -290,6 +290,29 @@ const ALERT_PREFERENCE_WINDOW = "1 h" as const;
  * an owner onboarding a team comfortable room — the three writes share the
  * bucket, and inviting a ten-person department costs ten of the twenty.
  */
+/**
+ * Requesting and reversing an organisation's deletion, **keyed by user id** —
+ * prompt 73.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), like every window
+ * above it: the flow has never shipped, so there is nothing to fit against.
+ *
+ * **Deliberately tight, and the asymmetry with every limiter above is the
+ * point.** Deleting an organisation is the single most consequential act a
+ * customer can perform here, and there is no honest use that repeats it: an
+ * owner requests once, or restores once, and mistyping the confirmation slug is
+ * the only reason to try twice in a sitting. Ten an hour leaves ample room for
+ * that while bounding what one compromised owner session can do to a
+ * workspace — the *rate*, not the act, since the grace window is what actually
+ * makes the act reversible.
+ *
+ * **The request and the restore share one bucket**, so an attacker who
+ * exhausts it cannot thereby stop the owner restoring: an exhausted bucket
+ * refuses both, and the purge is still 30 days away.
+ */
+const ORGANIZATION_DELETION_LIMIT = 10;
+const ORGANIZATION_DELETION_WINDOW = "1 h" as const;
+
 const INVITATION_WRITE_LIMIT = 20;
 const INVITATION_WRITE_WINDOW = "1 h" as const;
 
@@ -612,6 +635,25 @@ export async function checkAlertPreferenceLimit(
     "alert-preference",
     ALERT_PREFERENCE_LIMIT,
     ALERT_PREFERENCE_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Requesting and reversing an organisation's deletion, keyed by the **user
+ * id** — prompt 73. See the constant's docblock for why it is the tightest
+ * window in this file, and why the number is a judgement.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkOrganizationDeletionLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "organization-deletion",
+    ORGANIZATION_DELETION_LIMIT,
+    ORGANIZATION_DELETION_WINDOW,
     userId,
   );
 }

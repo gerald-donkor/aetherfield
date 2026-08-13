@@ -311,6 +311,10 @@ export const REPORT_ERRORS = {
   signedOut: "Your session has expired. Sign in again to manage reports.",
   noOrganization:
     "This account belongs to no organisation. Create one before building a report.",
+  /* Prompt 73. Not `noOrganization`: the organisation exists and is scheduled
+     for deletion, so nothing may be built against it until it is restored. */
+  organizationLocked:
+    "This organisation is scheduled for deletion, so its reports are locked. Restore it from your account page to make changes.",
   failure:
     "We couldn't complete that just now. Please try again in a moment.",
 } as const;

@@ -5,6 +5,7 @@ import { AlertPreferenceControl } from "../_components/alerts/alert-preference-c
 import { SignOutButton } from "../_components/auth/sign-out-button";
 import { SiteFooter, SiteNav } from "../_components/chrome";
 import { CreateOrganizationForm } from "../_components/organization/create-organization-form";
+import { DeleteOrganizationPanel } from "../_components/organization/delete-organization-panel";
 import { MembersPanel } from "../_components/organization/members-panel";
 import { ButtonLink, MetaPair } from "../_components/primitives";
 import { getCurrentMembership } from "../../lib/auth/organization";
@@ -19,10 +20,11 @@ import {
   ORGANIZATION_ROLE_LABELS,
 } from "../../lib/validation/organization";
 
-/** The invitation expiry, in the site's date register. Formatted here rather
-    than in the client leaf: a fixed locale and UTC keep the server's markup and
-    the browser's identical, and a leaf that formats dates hydrates differently
-    depending on where it runs. */
+/** A date in the site's register. Formatted here rather than in the client
+    leaf: a fixed locale and UTC keep the server's markup and the browser's
+    identical, and a leaf that formats dates hydrates differently depending on
+    where it runs. Used for an invitation's expiry and, since prompt 73, for a
+    scheduled purge date. */
 const EXPIRY_FORMAT = new Intl.DateTimeFormat("en-GB", {
   day: "numeric",
   month: "long",
@@ -55,13 +57,19 @@ export default async function AccountPage() {
      **Every one is predicated on the resolved organisation id** — the tenant
      comes from the membership row this request just resolved, never from the
      request itself (AGENTS.md 9.2 rule 6). */
-  const [emailAlerts, members, invitations] = membership
-    ? await Promise.all([
-        getAlertPreference(membership.organization.id, account.user.id),
-        listMembersForOrganization(membership.organization.id),
-        listPendingInvitations(membership.organization.id),
-      ])
-    : [true, [], []];
+  /* **A locked organisation reads nothing** — prompt 73. Its roster, its
+     invitations and its alert preference are not rendered while a deletion is
+     pending, so fetching them would be a tenant read this page does not use. */
+  const locked = Boolean(membership?.pendingDeletion);
+
+  const [emailAlerts, members, invitations] =
+    membership && !locked
+      ? await Promise.all([
+          getAlertPreference(membership.organization.id, account.user.id),
+          listMembersForOrganization(membership.organization.id),
+          listPendingInvitations(membership.organization.id),
+        ])
+      : [true, [], []];
 
   return (
     <>
@@ -95,10 +103,12 @@ export default async function AccountPage() {
           <p className="font-mono text-caption text-muted">ORGANISATION</p>
           {membership ? (
             <>
-              <p className="mt-7 max-w-[680px] font-serif text-p2 text-muted">
-                This account belongs to one organisation. Emissions, energy and
-                waste data is recorded against it.
-              </p>
+              {membership.pendingDeletion ? null : (
+                <p className="mt-7 max-w-[680px] font-serif text-p2 text-muted">
+                  This account belongs to one organisation. Emissions, energy
+                  and waste data is recorded against it.
+                </p>
+              )}
               <dl className="mt-14 grid max-w-[760px] gap-8 border-y border-border py-8 md:grid-cols-2">
                 <MetaPair label="Organisation" value={membership.organization.name} />
                 <MetaPair label="Identifier" value={membership.organization.slug} />
@@ -107,46 +117,83 @@ export default async function AccountPage() {
                   value={ORGANIZATION_ROLE_LABELS[membership.role]}
                 />
               </dl>
-              <div className="mt-10">
-                <ButtonLink href="/dashboard">Open overview</ButtonLink>
-              </div>
 
-              {/* Prompt 63's members surface. The roster and the pending
-                  invitations are read above, tenant-predicated; the panel is a
-                  client leaf that renders them and calls the four actions. */}
-              <div className="mt-20 md:mt-24">
-                <p className="font-mono text-caption text-muted">MEMBERS</p>
-                <MembersPanel
-                  className="mt-7"
+              {/* Prompt 73's locked state. When a deletion is pending the
+                  workspace has nothing to open and nothing to manage — every
+                  page behind `requireOrganization` redirects back here — so the
+                  overview link, the members panel and the alert switch are all
+                  replaced by the notice and the restore control. */}
+              {membership.pendingDeletion ? (
+                <DeleteOrganizationPanel
+                  className="mt-10"
                   organizationName={membership.organization.name}
+                  organizationSlug={membership.organization.slug}
                   viewerIsOwner={membership.role === "owner"}
-                  members={members.map((entry) => ({
-                    id: entry.id,
-                    name: entry.name,
-                    email: entry.email,
-                    roleLabel: roleLabel(entry.role),
-                    isSelf: entry.userId === account.user.id,
-                  }))}
-                  invitations={invitations.map((entry) => ({
-                    id: entry.id,
-                    email: entry.email,
-                    roleLabel: roleLabel(entry.role),
-                    expiresLabel: EXPIRY_FORMAT.format(entry.expiresAt),
-                  }))}
+                  purgeLabel={EXPIRY_FORMAT.format(
+                    membership.pendingDeletion.scheduledPurgeAt,
+                  )}
                 />
-              </div>
+              ) : (
+                <>
+                  <div className="mt-10">
+                    <ButtonLink href="/dashboard">Open overview</ButtonLink>
+                  </div>
 
-              {/* Build step 14's off switch. The preference is read
-                  server-side, per organisation; a missing row means on. */}
-              <div className="mt-20 md:mt-24">
-                <p className="font-mono text-caption text-muted">
-                  TARGET ALERTS
-                </p>
-                <AlertPreferenceControl
-                  className="mt-7"
-                  emailAlerts={emailAlerts}
-                />
-              </div>
+                  {/* Prompt 63's members surface. The roster and the pending
+                      invitations are read above, tenant-predicated; the panel is
+                      a client leaf that renders them and calls the four
+                      actions. */}
+                  <div className="mt-20 md:mt-24">
+                    <p className="font-mono text-caption text-muted">MEMBERS</p>
+                    <MembersPanel
+                      className="mt-7"
+                      organizationName={membership.organization.name}
+                      viewerIsOwner={membership.role === "owner"}
+                      members={members.map((entry) => ({
+                        id: entry.id,
+                        name: entry.name,
+                        email: entry.email,
+                        roleLabel: roleLabel(entry.role),
+                        isSelf: entry.userId === account.user.id,
+                      }))}
+                      invitations={invitations.map((entry) => ({
+                        id: entry.id,
+                        email: entry.email,
+                        roleLabel: roleLabel(entry.role),
+                        expiresLabel: EXPIRY_FORMAT.format(entry.expiresAt),
+                      }))}
+                    />
+                  </div>
+
+                  {/* Build step 14's off switch. The preference is read
+                      server-side, per organisation; a missing row means on. */}
+                  <div className="mt-20 md:mt-24">
+                    <p className="font-mono text-caption text-muted">
+                      TARGET ALERTS
+                    </p>
+                    <AlertPreferenceControl
+                      className="mt-7"
+                      emailAlerts={emailAlerts}
+                    />
+                  </div>
+
+                  {/* Prompt 73's deletion surface, last on the page because it
+                      is the last thing an owner should reach for. Owner-only —
+                      the panel renders nothing for a member, and both actions
+                      re-read the role from Postgres regardless. */}
+                  <div className="mt-20 md:mt-24">
+                    <p className="font-mono text-caption text-muted">
+                      DELETE ORGANISATION
+                    </p>
+                    <DeleteOrganizationPanel
+                      organizationName={membership.organization.name}
+                      organizationSlug={membership.organization.slug}
+                      viewerIsOwner={membership.role === "owner"}
+                      purgeLabel={null}
+                    />
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <>

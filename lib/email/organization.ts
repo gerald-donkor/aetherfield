@@ -1,11 +1,18 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import {
   isOrganizationRole,
+  ORGANIZATION_DELETION_WINDOW_DAYS,
   ORGANIZATION_ROLE_LABELS,
 } from "../validation/organization";
 import { appBaseUrl } from "./config";
 import { sendEmail } from "./send";
+import {
+  DELETION_SUBJECT_PREFIX,
+  OrganizationDeletion,
+} from "./templates/organization-deletion";
 import {
   INVITATION_SUBJECT_PREFIX,
   OrganizationInvitation,
@@ -55,16 +62,17 @@ function idempotencyKey(invitationId: string): string {
   return `organization-invitation/${invitationId}`;
 }
 
-/** The invitation's expiry, in the site's date register — the same "2026" the
-    rest of the content ships (AGENTS.md content conventions). UTC and a fixed
-    locale so the string does not depend on where the server happens to run. */
-function formatExpiry(expiresAt: Date): string {
+/** A date in the site's register — the same "2026" the rest of the content
+    ships (AGENTS.md content conventions). UTC and a fixed locale so the string
+    does not depend on where the server happens to run. Used for the
+    invitation's expiry and, since prompt 73, the deletion's purge date. */
+function formatDate(when: Date): string {
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "long",
     year: "numeric",
     timeZone: "UTC",
-  }).format(expiresAt);
+  }).format(when);
 }
 
 export type InvitationEmailInput = {
@@ -100,7 +108,7 @@ export async function sendOrganizationInvitation(
         organizationName: input.organizationName,
         inviterName: input.inviterName,
         roleLabel,
-        expiresLabel: formatExpiry(input.expiresAt),
+        expiresLabel: formatDate(input.expiresAt),
         acceptUrl: `${appBaseUrl()}/invitation/${input.invitationId}`,
       }),
       idempotencyKey: idempotencyKey(input.invitationId),
@@ -117,6 +125,81 @@ export async function sendOrganizationInvitation(
   } catch {
     console.warn(
       `[email] organization-invitation threw for invitation ${input.invitationId}`,
+    );
+    return false;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Deletion notice — prompt 73                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `<event-type>/<entity-id>` per step 3's documented format, keyed on the
+ * deletion row's id **and a hash of the recipient**.
+ *
+ * The fan-out reasoning `sendTargetAlert` records applies exactly: one deletion
+ * request goes to every owner, and Resend answers a repeated key carrying a
+ * different payload with a 409 — so without the recipient in the key, the
+ * second owner would never be told. The address is **hashed, never carried**
+ * (AGENTS.md 8.3 rule 2): the key lands in a third party's idempotency store.
+ */
+function deletionKey(deletionId: string, to: string): string {
+  const digest = createHash("sha256").update(to).digest("hex").slice(0, 16);
+  return `organization-deletion/${deletionId}/${digest}`;
+}
+
+export type DeletionNoticeInput = {
+  /** The `organization_deletion` row's id — the only identifier that appears
+      in a log line on this path. */
+  deletionId: string;
+  organizationName: string;
+  scheduledPurgeAt: Date;
+  to: string;
+};
+
+/**
+ * Tells one owner that their organisation is scheduled for deletion.
+ *
+ * **Best-effort, and a failure never fails the write** (AGENTS.md 10 rule 4).
+ * The `organization_deletion` row is committed before this runs; an owner whose
+ * message did not arrive still sees the locked notice and the restore control
+ * on `/account`, which is the surface that actually carries the state.
+ *
+ * **Returns rather than throws**, including when `BETTER_AUTH_URL` is unset —
+ * the one way `appBaseUrl()` fails.
+ *
+ * **Nothing personal is logged**: a failure line carries the template name, the
+ * provider's reason and the deletion row's id. Never the address, never the
+ * organisation's name.
+ */
+export async function sendOrganizationDeletionNotice(
+  input: DeletionNoticeInput,
+): Promise<boolean> {
+  try {
+    const outcome = await sendEmail({
+      to: input.to,
+      subject: `${DELETION_SUBJECT_PREFIX} ${input.organizationName}`,
+      body: OrganizationDeletion({
+        organizationName: input.organizationName,
+        purgeLabel: formatDate(input.scheduledPurgeAt),
+        windowDays: ORGANIZATION_DELETION_WINDOW_DAYS,
+        accountUrl: `${appBaseUrl()}/account`,
+      }),
+      idempotencyKey: deletionKey(input.deletionId, input.to),
+      template: "organization-deletion",
+    });
+
+    if (!outcome.sent) {
+      console.warn(
+        `[email] send failed for deletion ${input.deletionId}: ${outcome.reason}`,
+      );
+      return false;
+    }
+    return true;
+  } catch {
+    console.warn(
+      `[email] organization-deletion threw for deletion ${input.deletionId}`,
     );
     return false;
   }
