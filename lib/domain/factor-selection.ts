@@ -154,6 +154,66 @@ export function preferredBySourceRow<
 }
 
 /**
+ * The publisher's row identity a candidate carries, plus the one it declares it
+ * restates — prompt 71.
+ *
+ * `supersedes*` is a **pair, both or neither**, which the database enforces with
+ * a check constraint. A row that declares one half is a row that supersedes
+ * nothing, and {@link factorSiblingKeys} treats it that way rather than
+ * inventing the missing half.
+ */
+export type FactorRowIdentity = {
+  source: string;
+  sourceRowId: string;
+  supersedesSource?: string | null;
+  supersedesSourceRowId?: string | null;
+};
+
+/**
+ * Every `(source, source_row_id)` a row is reachable under — **the keying rule
+ * that closes prompt 71's gap.**
+ *
+ * A mapping names one published `(source, source_row_id)`, and the resolver
+ * looks its candidates up under exactly that pair. A customer-supplied row lives
+ * in a set carrying the customer's own `source` and holds a hashed `custom:` row
+ * id, so filing it under its own pair alone leaves it unreachable no matter how
+ * wide the query that loaded it — widening the query is necessary and is not
+ * sufficient.
+ *
+ * So a row is filed under **both**: its own pair, so a mapping pointing directly
+ * at it still finds its siblings, and the declared pair, so a mapping pointing at
+ * the published row it restates finds it too. Identical pairs collapse to one
+ * key, because a duplicate would only make the same candidate compete with
+ * itself.
+ *
+ * It is here rather than in `lib/db/` for the reason the module docblock gives:
+ * it decides which value multiplies a customer's activity, and `lib/db/` is
+ * `server-only` and outside `npm test`'s scope.
+ */
+export function factorSiblingKeys(
+  row: FactorRowIdentity,
+): { source: string; sourceRowId: string }[] {
+  const keys = [{ source: row.source, sourceRowId: row.sourceRowId }];
+
+  const { supersedesSource, supersedesSourceRowId } = row;
+  if (
+    supersedesSource != null &&
+    supersedesSourceRowId != null &&
+    !(
+      supersedesSource === row.source &&
+      supersedesSourceRowId === row.sourceRowId
+    )
+  ) {
+    keys.push({
+      source: supersedesSource,
+      sourceRowId: supersedesSourceRowId,
+    });
+  }
+
+  return keys;
+}
+
+/**
  * The factor to calculate this record with, or `null` for out-of-period.
  *
  * `null` is the fourth of the engine's five refusals reaching this module: the

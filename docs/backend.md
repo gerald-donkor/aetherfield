@@ -4396,7 +4396,7 @@ provider, no model call. Nothing on any path logs.
 | any schema change or migration | the `source_row_id` decision is what avoids one, and none turned out to be needed |
 | per-period mappings — widening `activity_factor_mapping`'s unique key | the rejected option; one choice per pair keeps its meaning across revisions |
 | loading a second DEFRA year's factor set | that is data, and its own prompt. This makes a second year *usable*; it does not supply one. **Until one is loaded, any record dated outside 2026 leaves the totals** — the accepted caveat of the "refuse and surface it" decision |
-| letting the custom-factor-set surface create a sibling of a published row | it hashes its own `source_row_id`; see the correction above. A real gap, not closed here |
+| letting the custom-factor-set surface create a sibling of a published row | it hashes its own `source_row_id`; see the correction above. A real gap, not closed here — **closed by prompt 71**, which adds a declared `(supersedes_source, supersedes_source_row_id)` pair rather than reusing the published row id |
 | adding an out-of-period figure to the report evidence | it would widen a stored snapshot and the narrative allowlist; see above |
 | AI factor matching | §5.3 sanctions it and does not schedule it; prompt 65 deferred it once already |
 | prompt 67's other deferrals — editing a set's metadata, retiring a set from the UI, bulk CSV import | untouched |
@@ -4769,7 +4769,7 @@ a third party and no model was called.
 | 2024 or any earlier year | one year at a time — and the 2024 record staying refused is what proves refusals still refuse |
 | EPA Hub, eGRID, a second publisher, IEA factors | step 10's decisions, unchanged; IEA remains licence-blocked |
 | AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65 and 68 and still deferred |
-| the custom-factor-set sibling gap | `createTenantFactor` still hashes its own `source_row_id`, so a tenant row can never be a sibling of a published one. Prompt 68's open gap, still open |
+| the custom-factor-set sibling gap | `createTenantFactor` still hashes its own `source_row_id`, so a tenant row can never be a sibling of a published one. Prompt 68's open gap, still open here and **closed by prompt 71** |
 | market-based scope 2, set-metadata editing, retiring a set, bulk CSV import | untouched prior deferrals |
 | an xlsx parser in the application | the workbook is converted once by the committed script; the app reads the derived CSV with the pure `parseCsv` |
 | adding an out-of-period figure to `ReportEvidence` | prompt 68's reasoning is unchanged |
@@ -4994,9 +4994,258 @@ matching stays deferred).
 | any schema change, migration or `db:generate` | none was needed |
 | a third factor set, or 2024 | prompt 69's decision: one year at a time |
 | AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65, 68 and 69 and still deferred |
-| the custom-factor-set sibling gap | `createTenantFactor` still hashes its own `source_row_id`. Prompt 68's open gap, unchanged and still open |
+| the custom-factor-set sibling gap | `createTenantFactor` still hashes its own `source_row_id`. Prompt 68's open gap, unchanged and still open here — **closed by prompt 71** |
 | market-based scope 2, set-metadata editing, retiring a set, bulk CSV import | untouched prior deferrals |
 | showing the dataset year anywhere new in the UI | `/activity/mappings` and the factor picker already render `source` + `datasetVersion`; no new surface was owed |
+| a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
+
+## Superseding a published factor row, prompt 71
+
+Implemented on 13 Aug 2026. **Closes the custom-factor-set sibling gap** carried
+forward unchanged by prompts 68, 69 and 70: a customer-supplied `emission_factor`
+can now declare that it restates a specific published row, which makes it
+reachable by `listFactorSiblings` and selectable by `selectFactorForDate` for a
+date the published set does not cover.
+
+It is the only open item the record classified as a **defect** rather than as
+deferred scope, and it sits on the path that decides a filed disclosure figure.
+
+### The failure it closes
+
+Read out of the code, not inferred:
+
+- `listFactorSiblings` matched each mapping on
+  `and(eq(emissionFactorSet.source, …), eq(emissionFactor.sourceRowId, …))`.
+  `source` is a **set** column; `source_row_id` is a **factor** column.
+- `sourceRowIdForCustomFactor` returns `custom:${sha256(…)}`, and the row is
+  written into a tenant set carrying the customer's own `source`.
+
+So a customer-supplied row was unreachable as a sibling on **both** halves of the
+key, and the customer could not resolve it from either side:
+
+1. An organisation maps a `(category, unit)` pair to a DEFRA row.
+2. It supplies its own set covering 2024, which the published data does not
+   cover.
+3. Records dated 2024 resolve `out_of_period` — `selectFactorForDate` returns
+   `null` — because the tenant row is not a sibling of the mapped row.
+4. Re-pointing the mapping at the tenant row fixes 2024 and breaks 2026 the same
+   way.
+
+### The decision, taken with the user on 13 Aug 2026
+
+**A tenant row declares what it restates through a nullable
+`(supersedes_source, supersedes_source_row_id)` pair on `emission_factor`.**
+
+Two alternatives were rejected, and the reasons are the point:
+
+| rejected | why |
+| --- | --- |
+| a `supersedes_factor_id` self-FK | it pins one specific row, and every sibling read filters `isNull(emissionFactorSet.supersededBySetId)`. When the target's set is later superseded by a republication the link stops resolving **silently** — a figure disappearing for no recorded reason |
+| reusing the published `source_row_id` verbatim, under a sibling key without `source` | two publishers that reuse one row-id string would collide into each other's sibling set, producing a **wrong** figure rather than a missing one |
+
+The chosen pair follows `source_row_id`, which is already prompt 68's answer to
+"how does a mapping travel to another year's set", and it leaves the tenant set's
+own `source` attribution intact — **a customer's own figure is never relabelled
+as DESNZ's.**
+
+### The schema
+
+Migration `0011_daily_slapstick.sql`, generated by `npm run db:generate` and
+applied by `npm run db:migrate` over `DATABASE_URL_UNPOOLED`. Two columns, one
+index and two checks; **no data migration**, because every existing row is
+correctly `null` on both.
+
+```sql
+ALTER TABLE "emission_factor" ADD COLUMN "supersedes_source" text;
+ALTER TABLE "emission_factor" ADD COLUMN "supersedes_source_row_id" text;
+CREATE INDEX "emission_factor_supersedes_idx" ON "emission_factor" USING btree ("supersedes_source","supersedes_source_row_id");
+ALTER TABLE "emission_factor" ADD CONSTRAINT "emission_factor_supersedes_pair" CHECK (("emission_factor"."supersedes_source" is null) = ("emission_factor"."supersedes_source_row_id" is null));
+ALTER TABLE "emission_factor" ADD CONSTRAINT "emission_factor_supersedes_tenant_only" CHECK ("emission_factor"."organization_id" is not null or "emission_factor"."supersedes_source" is null);
+```
+
+- **`emission_factor_supersedes_pair`** — both null or both set. A half-declared
+  supersession is a row that silently supersedes nothing: the source alone
+  matches no sibling key, and the row id alone would match across publishers.
+- **`emission_factor_supersedes_tenant_only`** — **published reference data never
+  supersedes anything.** Only a row a customer supplied may declare a
+  restatement.
+- The index exists because `listFactorSiblings` now filters on the pair.
+
+### The four changes, and why widening the query was not enough
+
+1. **The identity hash.** `sourceRowIdForCustomFactor` appends the two
+   supersession fields **only when supersession is declared.** Two custom factors
+   identical in every other field but restating different published rows are
+   different rows; without the pair in the hash they collide on
+   `(set_id, source_row_id)` and the existing `onConflictDoNothing` discards the
+   second in silence. Appending unconditionally would instead move the hash of
+   **every non-superseding submission**, so a row created before this change
+   would re-submit as a duplicate rather than as the idempotent no-op it gets
+   today. Appending only when set preserves every existing hash exactly.
+
+2. **The sibling query.** Each pair's predicate now matches **either** key:
+
+   ```
+   (set.source = $s AND factor.source_row_id = $r)
+   OR (factor.supersedes_source = $s AND factor.supersedes_source_row_id = $r)
+   ```
+
+   `visibleFactorScope(organizationId)` stays an outer `AND` over the whole
+   `where` and is deliberately **not** folded inside the `or` — it is what stops
+   one tenant's superseding row entering another tenant's sibling set.
+   `isNull(deletedAt)` on both factor and set, and `isNull(supersededBySetId)`,
+   are unchanged. `FactorSibling` is now `FactorCandidate & FactorRowIdentity`.
+
+3. **The keying rule, and it is in `lib/domain/`.** `buildFactorResolver` filed
+   every sibling under its **set's** `source` and its **own** `sourceRowId`, then
+   looked it up by the mapping's pair. A superseding tenant row would be filed
+   under the tenant set's source and its `custom:` row id, so the widened query
+   would load it and the resolver would still never find it. **Widening the query
+   alone does not close the gap.**
+
+   `factorSiblingKeys` in `lib/domain/factor-selection.ts` returns the keys a row
+   is reachable under — its own pair, plus the declared pair when both halves are
+   present and differ from its own — and `buildFactorResolver` files each sibling
+   under **every** key it returns. Indexing under its own pair as well is what
+   keeps a mapping that points directly at the tenant row finding that row's
+   siblings.
+
+   It is in `lib/domain/` for exactly the reason prompt 68 moved the tie-break
+   there: it decides which value multiplies a customer's activity, and `lib/db/`
+   is `server-only` and outside `npm test`'s `lib/domain/` scope. Left in
+   `lib/db/` this rule would ship untested.
+
+4. **Nothing else in the selection rule changed.** `covers`, `preferCandidate`,
+   `preferredBySourceRow` and `selectFactorForDate` are untouched. A superseding
+   tenant row that covers the date already beats a published row covering the
+   same date, because `preferCandidate` ranks tenant-owned first — the wanted
+   behaviour **falls out of the existing total order** rather than needing a new
+   tier. A second rule deciding a filed number is what that avoids.
+
+### Validation and the surface
+
+`customFactorSchema` gains an optional `supersedes` **object** with `source` and
+`sourceRowId` required inside it, so the object itself carries the
+"both-or-neither" rule and mirrors the database check without a `superRefine`
+restating it. `lib/validation/` imports nothing from `lib/db/` (§6.3): the
+candidate rows reach the form as props from the Server Component.
+
+`listSupersedableRows` is the new query behind that prop — **the published rows
+this organisation's active mappings currently point at**, distinct on
+`(source, source_row_id)`. That is precisely the set where a supersession has any
+effect, and it keeps the control's list short instead of offering thousands of
+DEFRA rows. A row the organisation supplied itself is excluded:
+`isNull(emissionFactor.organizationId)` is the whole filter, because a tenant row
+restating another tenant row is a link with no meaning.
+
+`CustomFactorForm` gains one optional `<select>`, defaulting to "Restates
+nothing", rendered only when there is at least one candidate. Its copy states the
+one behaviour that departs from prompt 66's precedent:
+
+> A restating row is used wherever that published row is mapped, for the dates
+> this set covers. It takes effect at the next recalculation without a mapping
+> change — the rest of this form does not.
+
+`createCustomFactor` keeps its action order unchanged — BotID absent by design,
+`getCurrentMembership()`, user-id rate limit, shared Zod parse, owner-only
+authorisation, tenant-predicated write, no email, revalidation of
+`/activity/factors`, `/activity/mappings` and `/activity`. **No recalculation is
+triggered from the create action.**
+
+### Measured
+
+A synthetic organisation on the real database, seeded with the default mappings,
+two 1,000 kWh electricity records — one dated `2026-03-01`, one `2024-03-01`.
+The mapped row is `DESNZ 7_400_4000_5_1`, window `2026-01-01..2026-12-31`, value
+`0.13096000000000000`. The declared tenant set covers `2024-01-01..2024-12-31`
+at `0.25000000000000000`.
+
+| | recalculation | 2024 | 2026 |
+| --- | --- | --- | --- |
+| **before** the supersession | `{ records: 2, written: 1 }` | *no figure* — `out_of_period` | `130.960000000000000000000000` kgCO2e, 1 row |
+| **after** the supersession | `{ records: 2, written: 2 }` | `250.000000000000000000000000` kgCO2e, 1 row | `130.960000000000000000000000` kgCO2e, 1 row |
+
+**2026 did not move.** The only figure that changed is the one a deliberately
+declared supersession was asked to produce, which is why `ENGINE_VERSION` is not
+bumped.
+
+**Query count is constant in the record count** — `pg.Pool.prototype.query`
+counted around `recalculateOrganization`:
+
+```
+2 records  -> 3 pool queries
+42 records -> 3 pool queries
+```
+
+Three at both counts, matching prompt 68's baseline. The widened `or` did not
+become an N+1. **Warm** — the Neon compute was already up from the migration, so
+no cold start is in these numbers, and none of them is a latency figure.
+
+Every synthetic organisation, set, factor, mapping, record and emission was
+deleted afterwards and the removal confirmed: `remaining records/factors/orgs:
+0 0 0`.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run db:generate` | `lib/db/migrations/0011_daily_slapstick.sql` — the five statements above |
+| `npm run db:migrate` | `migrations applied successfully!` |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **9 files, 210 tests passed** (prompt 70's baseline: 9 / 197) |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG`; `/activity/factors` stays `ƒ Dynamic` |
+| prerender diff | **21 files compared, 21 identical, 0 differing.** CSS chunk byte-identical at 68,208 bytes on both sides |
+| `npm run test:e2e` | Chromium and Firefox **10/10 passed**. **WebKit did not run** — `Podman is required for WebKit on Arch Linux`, still not installed, as prompt 70 recorded. Not reported as passed |
+
+The prerender diff used the copy-tree method in `docs/automation.md` (a
+`next dev` was running, trap 3), excluding `.claude/` and `.agents/` on both
+sides, normalising `BUILD_ID` and both content-hashed chunk patterns, and
+stripping the `self.__next_f.push` payloads.
+
+The six new tests are in `lib/domain/factor-selection.test.ts`: own pair only,
+both pairs when declared, own pair still reachable alongside the declared one, a
+half-declared pair ignored rather than completed, an identical pair collapsed,
+and a same-row-id pair from a different publisher **not** collapsed.
+
+### Trust boundary
+
+No new route and no new request path. The one changed request path is the
+existing `createCustomFactor` Server Action, which now additionally carries a
+claimed `(source, sourceRowId)` pair to supersede.
+
+**That pair is a claim, not a capability.** It is parsed by the shared Zod schema
+and written as text; the write stays tenant-predicated exactly as a submitted
+`setId` already was. A pair naming a row the organisation cannot see is harmless
+**by construction**: every read of it runs under
+`visibleFactorScope(organizationId)`, so it can only ever resolve to published
+data or the tenant's own rows. A rejected request returns the existing typed
+result with field errors; nothing throws to the client.
+
+### Secrets and data
+
+No environment variable is read or added, no `NEXT_PUBLIC_*`, no `.env.example`
+line. Emission factors are reference data and carry no personal data;
+`activity_factor_mapping.created_by` is untouched. `lib/db/emission-queries.ts`
+keeps `import "server-only"` and gained no `console` call. Nothing reaches a
+third party and **no model is called** (§5.3 — AI factor matching stays
+deferred).
+
+### What prompt 71 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| changing `covers`, `preferCandidate`, `preferredBySourceRow` or `selectFactorForDate` | the existing total order already produces the wanted outcome; a new tier would be a second rule deciding a filed number |
+| per-period mappings, or widening `activity_factor_mapping`'s unique key | prompt 68's explicitly rejected option — one choice per pair keeps its meaning across revisions |
+| re-pointing existing organisations' mappings at a newer set | prompt 70's deferral, unchanged: a mapping is a deliberate choice and a backfill would silently undo an override |
+| recalculating on create, or a mass recalculation | prompt 68's reasoning stands — a mass recalculation is an operational act, and the cron sweep runs on its schedule |
+| bumping `ENGINE_VERSION` | the engine is untouched, and the only figure that moved is the one a declared supersession produced. `1.1.0` stands |
+| editing or removing a declared supersession after the fact | retiring the row already withdraws it, and an edit surface wants its own decisions |
+| organisation soft-delete and erasure | the largest open item, but deferred scope with a recorded reason, and it wants its own prompt |
+| set-metadata editing, retiring a set from the UI, bulk CSV import, market-based scope 2 | untouched prior deferrals |
+| AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65, 68, 69 and 70 and still deferred |
+| a third factor set, or a second published year | prompt 69's decision: one year at a time. This makes a *customer's* row reachable; it supplies no data |
+| any change to a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | out of scope entirely |
 | a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
 
 ## Step 9 — activity-data ingestion

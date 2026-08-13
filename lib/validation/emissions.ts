@@ -352,6 +352,26 @@ export const customFactorSchema = z
     region: optionalText(120),
     biogenic: z.boolean(),
     value: factorDecimal,
+    /**
+     * The published row this row restates — prompt 71, and optional.
+     *
+     * **An object, so both halves arrive together or neither does**, mirroring
+     * the database's `emission_factor_supersedes_pair` check: a half-declared
+     * supersession is a row that silently supersedes nothing. Both fields are
+     * required inside it, so the object itself is what carries the "together"
+     * rule and no `superRefine` restates it.
+     *
+     * The candidate rows are passed into the form as props by the Server
+     * Component that renders it. **`lib/validation/` imports nothing from
+     * `lib/db/`** (AGENTS.md 6.3), so the pair is validated as text here and
+     * re-read under the tenant predicate on the way in.
+     */
+    supersedes: z
+      .object({
+        source: boundedText(120),
+        sourceRowId: boundedText(240),
+      })
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.scope === "scope_3" && !value.scope3Category) {

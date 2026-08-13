@@ -8,6 +8,7 @@ import { SiteFooter, SiteNav } from "../../_components/chrome";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
 import {
+  listSupersedableRows,
   listTenantFactorSets,
   listTenantFactors,
 } from "../../../lib/db/emission-queries";
@@ -24,9 +25,10 @@ const DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
 
 export default async function ActivityFactorsPage() {
   const membership = await requireOrganization("/activity/factors");
-  const [sets, factors] = await Promise.all([
+  const [sets, factors, supersedableRows] = await Promise.all([
     listTenantFactorSets(membership.organization.id),
     listTenantFactors(membership.organization.id),
+    listSupersedableRows(membership.organization.id),
   ]);
 
   /* Presentation only. The action's own owner check is what enforces this
@@ -244,6 +246,7 @@ export default async function ActivityFactorsPage() {
                     licence: set.licence,
                     gasBasis: set.gasBasis,
                   }))}
+                  supersedableRows={supersedableRows}
                 />
               </div>
             </>

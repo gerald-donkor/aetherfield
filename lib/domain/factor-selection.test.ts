@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { FactorInput } from "./emissions";
 import {
   covers,
+  factorSiblingKeys,
   preferCandidate,
   preferredBySourceRow,
   selectFactorForDate,
@@ -301,5 +302,100 @@ describe("preferredBySourceRow", () => {
 
   it("returns an empty map for no candidates at all", () => {
     expect(preferredBySourceRow([]).size).toBe(0);
+  });
+});
+
+/**
+ * Prompt 71. Written against the failure this rule exists to close: a customer
+ * supplies a set covering 2024, the published data does not cover 2024, and the
+ * record resolves `out_of_period` because the tenant row is not reachable under
+ * the mapping's published key.
+ */
+describe("factorSiblingKeys", () => {
+  it("returns the row's own pair when nothing is superseded", () => {
+    expect(
+      factorSiblingKeys({ source: "DESNZ", sourceRowId: "1_100_1000_15_1" }),
+    ).toEqual([{ source: "DESNZ", sourceRowId: "1_100_1000_15_1" }]);
+  });
+
+  it("returns both pairs when a supersession is declared", () => {
+    expect(
+      factorSiblingKeys({
+        source: "Supplier tariff",
+        sourceRowId: "custom:abc123",
+        supersedesSource: "DESNZ",
+        supersedesSourceRowId: "1_100_1000_15_1",
+      }),
+    ).toEqual([
+      { source: "Supplier tariff", sourceRowId: "custom:abc123" },
+      { source: "DESNZ", sourceRowId: "1_100_1000_15_1" },
+    ]);
+  });
+
+  it("keeps the row reachable under its own pair as well as the superseded one", () => {
+    const keys = factorSiblingKeys({
+      source: "Supplier tariff",
+      sourceRowId: "custom:abc123",
+      supersedesSource: "DESNZ",
+      supersedesSourceRowId: "1_100_1000_15_1",
+    });
+    /* A mapping pointing directly at the tenant row must still find it — the
+       supersession adds a key, it never replaces one. */
+    expect(keys).toContainEqual({
+      source: "Supplier tariff",
+      sourceRowId: "custom:abc123",
+    });
+    expect(keys).toHaveLength(2);
+  });
+
+  it("ignores a half-declared pair rather than inventing the missing half", () => {
+    const own = [{ source: "Supplier tariff", sourceRowId: "custom:abc123" }];
+    expect(
+      factorSiblingKeys({
+        source: "Supplier tariff",
+        sourceRowId: "custom:abc123",
+        supersedesSource: "DESNZ",
+      }),
+    ).toEqual(own);
+    expect(
+      factorSiblingKeys({
+        source: "Supplier tariff",
+        sourceRowId: "custom:abc123",
+        supersedesSourceRowId: "1_100_1000_15_1",
+      }),
+    ).toEqual(own);
+    expect(
+      factorSiblingKeys({
+        source: "Supplier tariff",
+        sourceRowId: "custom:abc123",
+        supersedesSource: null,
+        supersedesSourceRowId: null,
+      }),
+    ).toEqual(own);
+  });
+
+  it("collapses a pair identical to the row's own, so it cannot compete with itself", () => {
+    expect(
+      factorSiblingKeys({
+        source: "DESNZ",
+        sourceRowId: "1_100_1000_15_1",
+        supersedesSource: "DESNZ",
+        supersedesSourceRowId: "1_100_1000_15_1",
+      }),
+    ).toEqual([{ source: "DESNZ", sourceRowId: "1_100_1000_15_1" }]);
+  });
+
+  it("does not collapse a same-row-id pair from a different publisher", () => {
+    /* Two publishers reusing one row-id string is exactly why `source` stays in
+       the key: dropping it would merge their sibling sets and produce a wrong
+       figure rather than a missing one. */
+    expect(
+      factorSiblingKeys({
+        source: "Supplier tariff",
+        sourceRowId: "1_100_1000_15_1",
+        supersedesSource: "DESNZ",
+        supersedesSourceRowId: "1_100_1000_15_1",
+      }),
+    ).toHaveLength(2);
   });
 });

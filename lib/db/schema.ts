@@ -607,6 +607,29 @@ export const emissionFactor = pgTable(
         its predecessor row by row. */
     sourceRowId: text("source_row_id").notNull(),
 
+    /**
+     * The published row this customer-supplied row **restates** — prompt 71.
+     *
+     * A tenant set covering a year the published data does not cover was
+     * unreachable before this: `listFactorSiblings` keys a mapping's siblings on
+     * `(set.source, factor.source_row_id)`, and a tenant row carries the
+     * customer's own `source` and a hashed `custom:` row id, so it matched on
+     * neither half. Declaring the pair here makes the row reachable **as** the
+     * mapped published row, for the dates its own set covers, without
+     * relabelling a customer's figure as the publisher's.
+     *
+     * **A pair, not a factor id.** A self-FK pins one row, and every sibling
+     * read filters `superseded_by_set_id is null`, so a republication of the
+     * target's set would break the link silently — a figure disappearing for no
+     * recorded reason. The pair follows `source_row_id`, which is already how a
+     * mapping travels between years.
+     *
+     * Both null or both set, and null on published data: the two checks below.
+     */
+    supersedesSource: text("supersedes_source"),
+    /** The superseded row's `source_row_id`. See {@link supersedesSource}. */
+    supersedesSourceRowId: text("supersedes_source_row_id"),
+
     /* The publisher's hierarchy, verbatim. */
     level1: text("level_1"),
     level2: text("level_2"),
@@ -662,6 +685,23 @@ export const emissionFactor = pgTable(
     uniqueIndex("emission_factor_set_row_key").on(t.setId, t.sourceRowId),
     index("emission_factor_organization_scope_idx").on(t.organizationId, t.scope),
     index("emission_factor_set_scope_idx").on(t.setId, t.scope),
+    /* A half-declared supersession is a row that silently supersedes nothing:
+       the source alone matches no sibling key, and the row id alone would match
+       across publishers. */
+    check(
+      "emission_factor_supersedes_pair",
+      sql`(${t.supersedesSource} is null) = (${t.supersedesSourceRowId} is null)`,
+    ),
+    /* Published reference data never supersedes anything. Only a row a customer
+       supplied may declare a restatement of one. */
+    check(
+      "emission_factor_supersedes_tenant_only",
+      sql`${t.organizationId} is not null or ${t.supersedesSource} is null`,
+    ),
+    index("emission_factor_supersedes_idx").on(
+      t.supersedesSource,
+      t.supersedesSourceRowId,
+    ),
   ],
 );
 

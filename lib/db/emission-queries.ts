@@ -36,9 +36,11 @@ import {
   type FactorResolver,
 } from "../domain/emissions";
 import {
+  factorSiblingKeys,
   preferredBySourceRow,
   selectFactorForDate,
   type FactorCandidate,
+  type FactorRowIdentity,
 } from "../domain/factor-selection";
 import type { CreateCustomFactorInput } from "../validation/emissions";
 
@@ -339,6 +341,20 @@ function sourceRowIdForCustomFactor(
     input.factor.value,
   ].map(normaliseHashPart);
 
+  /* **Appended only when declared** (prompt 71). Two rows identical in every
+     other field but restating different published rows are different rows, and
+     without the pair here they collide on `(set_id, source_row_id)` and the
+     `onConflictDoNothing` below discards the second in silence. Appending it
+     unconditionally would instead move the hash of every non-superseding
+     submission, so a row created before this change would re-submit as a
+     duplicate rather than as the idempotent no-op it gets today. */
+  if (input.factor.supersedes) {
+    identity.push(
+      normaliseHashPart(input.factor.supersedes.source),
+      normaliseHashPart(input.factor.supersedes.sourceRowId),
+    );
+  }
+
   return `custom:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`;
 }
 
@@ -454,6 +470,11 @@ export async function createTenantFactor(input: {
         setId: set.id,
         organizationId: input.organizationId,
         sourceRowId,
+        /* A claim, not a capability: every read of the pair runs under
+           `visibleFactorScope`, so it can only ever resolve to published data or
+           this tenant's own rows. */
+        supersedesSource: factorInput.supersedes?.source ?? null,
+        supersedesSourceRowId: factorInput.supersedes?.sourceRowId ?? null,
         level1: factorInput.level1 ?? null,
         level2: factorInput.level2 ?? null,
         level3: factorInput.level3 ?? null,
@@ -569,17 +590,85 @@ export type ResolvedMapping = {
   effectiveTo: string;
 };
 
+/** A published row an organisation's mappings currently point at — the only
+    rows a customer-supplied row has any reason to supersede. */
+export type SupersedableRow = {
+  source: string;
+  sourceRowId: string;
+  label: string;
+  datasetVersion: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
+/**
+ * The published rows this organisation's active mappings point at — prompt 71's
+ * candidate list for a declared supersession.
+ *
+ * **Mapped and published, not every published row.** A supersession has an
+ * effect only where a mapping already names the row, and the alternative is
+ * offering thousands of DEFRA rows in a `<select>`. A row the organisation
+ * supplied itself is excluded: `organization_id is null` on the set is the whole
+ * filter, and a tenant row restating another tenant row is a link with no
+ * meaning.
+ *
+ * Distinct on `(source, source_row_id)`, because eight seeded mappings
+ * routinely share four rows.
+ */
+export async function listSupersedableRows(
+  organizationId: string,
+  db: Db = getDb(),
+): Promise<SupersedableRow[]> {
+  const rows = await db
+    .selectDistinct({
+      source: emissionFactorSet.source,
+      sourceRowId: emissionFactor.sourceRowId,
+      datasetVersion: emissionFactorSet.datasetVersion,
+      effectiveFrom: emissionFactorSet.effectiveFrom,
+      effectiveTo: emissionFactorSet.effectiveTo,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+    })
+    .from(activityFactorMapping)
+    .innerJoin(
+      emissionFactor,
+      eq(emissionFactor.id, activityFactorMapping.factorId),
+    )
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        eq(activityFactorMapping.organizationId, organizationId),
+        isNull(activityFactorMapping.deletedAt),
+        isNull(emissionFactor.deletedAt),
+        isNull(emissionFactorSet.deletedAt),
+        isNull(emissionFactor.organizationId),
+      ),
+    );
+
+  return rows.map((row) => ({
+    source: row.source,
+    sourceRowId: row.sourceRowId,
+    datasetVersion: row.datasetVersion,
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: row.effectiveTo,
+    label:
+      [row.level2, row.level3, row.columnText].filter(Boolean).join(" · ") ||
+      row.sourceRowId,
+  }));
+}
+
 /**
  * One visible factor row that shares a mapping's `(source, source_row_id)`.
  * **Loaded once per recalculation**, never per record.
  *
  * A `FactorCandidate` — the pure shape `lib/domain/factor-selection.ts` decides
- * over — plus the two columns that say which mapping it belongs to.
+ * over — plus the columns that say which mapping it belongs to: its own row
+ * identity, and the published one a customer-supplied row declares it restates
+ * (prompt 71). `factorSiblingKeys` turns the four into the keys the resolver
+ * files it under.
  */
-export type FactorSibling = FactorCandidate & {
-  source: string;
-  sourceRowId: string;
-};
+export type FactorSibling = FactorCandidate & FactorRowIdentity;
 
 /**
  * Every `(category, unit)` this organisation has a factor for.
@@ -696,6 +785,8 @@ export async function listFactorSiblings(
     .select({
       source: emissionFactorSet.source,
       sourceRowId: emissionFactor.sourceRowId,
+      supersedesSource: emissionFactor.supersedesSource,
+      supersedesSourceRowId: emissionFactor.supersedesSourceRowId,
       id: emissionFactor.id,
       scope: emissionFactor.scope,
       scope3Category: emissionFactor.scope3Category,
@@ -722,13 +813,22 @@ export async function listFactorSiblings(
         isNull(emissionFactor.deletedAt),
         isNull(emissionFactorSet.deletedAt),
         isNull(emissionFactorSet.supersededBySetId),
+        /* **Either key** (prompt 71): the row's own published identity, or the
+           published row a customer-supplied row declares it restates.
+           `visibleFactorScope` stays an outer `AND` over the whole `where` and
+           is deliberately not folded in here — it is what stops one tenant's
+           superseding row entering another tenant's sibling set. */
         or(
-          ...[...pairs.values()].map((pair) =>
+          ...[...pairs.values()].flatMap((pair) => [
             and(
               eq(emissionFactorSet.source, pair.source),
               eq(emissionFactor.sourceRowId, pair.sourceRowId),
             ),
-          ),
+            and(
+              eq(emissionFactor.supersedesSource, pair.source),
+              eq(emissionFactor.supersedesSourceRowId, pair.sourceRowId),
+            ),
+          ]),
         ),
       ),
     );
@@ -736,6 +836,8 @@ export async function listFactorSiblings(
   return rows.map((row) => ({
     source: row.source,
     sourceRowId: row.sourceRowId,
+    supersedesSource: row.supersedesSource,
+    supersedesSourceRowId: row.supersedesSourceRowId,
     effectiveFrom: row.effectiveFrom,
     effectiveTo: row.effectiveTo,
     setId: row.setId,
@@ -784,17 +886,24 @@ export function buildFactorResolver(
   }
 
   /* Nested rather than a composite string key, so no separator has to be
-     chosen and no source or row id can collide with one. */
+     chosen and no source or row id can collide with one.
+
+     **Filed under every key `factorSiblingKeys` returns**, which for a
+     customer-supplied row that declares a supersession is two (prompt 71). The
+     rule is in `lib/domain/` rather than here because it decides which value
+     multiplies a customer's activity. */
   const bySourceRow = new Map<string, Map<string, FactorSibling[]>>();
   for (const sibling of siblings) {
-    let bySource = bySourceRow.get(sibling.source);
-    if (!bySource) {
-      bySource = new Map();
-      bySourceRow.set(sibling.source, bySource);
+    for (const key of factorSiblingKeys(sibling)) {
+      let bySource = bySourceRow.get(key.source);
+      if (!bySource) {
+        bySource = new Map();
+        bySourceRow.set(key.source, bySource);
+      }
+      const existing = bySource.get(key.sourceRowId);
+      if (existing) existing.push(sibling);
+      else bySource.set(key.sourceRowId, [sibling]);
     }
-    const existing = bySource.get(sibling.sourceRowId);
-    if (existing) existing.push(sibling);
-    else bySource.set(sibling.sourceRowId, [sibling]);
   }
 
   return (record: ActivityInput): FactorResolution => {

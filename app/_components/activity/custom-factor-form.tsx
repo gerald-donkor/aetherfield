@@ -58,6 +58,22 @@ type FormFactorSet = {
   gasBasis: "combined_co2e" | "per_gas";
 };
 
+/** A published row this organisation's mappings already point at, and which a
+    new row may therefore declare it restates (prompt 71). */
+type FormSupersedableRow = {
+  source: string;
+  sourceRowId: string;
+  label: string;
+  datasetVersion: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
+/** The `<option>` value, and the way back to the pair. A single string keeps
+    the control a plain `<select>`; the newline cannot occur in either half,
+    which come from a publisher's row id and a set's source. */
+const PAIR_SEPARATOR = "\n";
+
 const GAS_BASIS_LABEL = {
   combined_co2e: "combined CO2e rows",
   per_gas: "per-gas rows",
@@ -87,7 +103,13 @@ function optionLabel(value: string): string {
   return value.replaceAll("_", " ");
 }
 
-export function CustomFactorForm({ sets }: { sets: FormFactorSet[] }) {
+export function CustomFactorForm({
+  sets,
+  supersedableRows,
+}: {
+  sets: FormFactorSet[];
+  supersedableRows: FormSupersedableRow[];
+}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
@@ -98,6 +120,8 @@ export function CustomFactorForm({ sets }: { sets: FormFactorSet[] }) {
   const [scope, setScope] = useState<EmissionScope>("scope_1");
   const [gas, setGas] = useState<GhgGas>("co2e");
   const [biogenic, setBiogenic] = useState(false);
+  /* "" is "restates nothing", which is the default and the common case. */
+  const [supersedes, setSupersedes] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<
@@ -160,6 +184,14 @@ export function CustomFactorForm({ sets }: { sets: FormFactorSet[] }) {
         region: String(body.get("region") ?? ""),
         biogenic,
         value: String(body.get("value") ?? ""),
+        supersedes: supersedes
+          ? {
+              source: supersedes.slice(0, supersedes.indexOf(PAIR_SEPARATOR)),
+              sourceRowId: supersedes.slice(
+                supersedes.indexOf(PAIR_SEPARATOR) + 1,
+              ),
+            }
+          : undefined,
       },
     };
 
@@ -178,6 +210,7 @@ export function CustomFactorForm({ sets }: { sets: FormFactorSet[] }) {
         setScope("scope_1");
         setGas("co2e");
         setBiogenic(false);
+        setSupersedes("");
         setMessage("Customer-supplied factor saved. It is available in factor mapping.");
         router.refresh();
       } else {
@@ -562,6 +595,40 @@ export function CustomFactorForm({ sets }: { sets: FormFactorSet[] }) {
             Biogenic or outside-of-scopes component
           </label>
         </div>
+
+        {supersedableRows.length > 0 ? (
+          <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
+            <SelectField
+              id="custom-factor-supersedes"
+              label="Restates a published row"
+              error={errors["factor.supersedes"]}
+            >
+              <select
+                id="custom-factor-supersedes"
+                value={supersedes}
+                onChange={(event) => setSupersedes(event.target.value)}
+                disabled={pending}
+                className={SELECT_CLASS}
+              >
+                <option value="">Restates nothing</option>
+                {supersedableRows.map((row) => (
+                  <option
+                    key={`${row.source}${PAIR_SEPARATOR}${row.sourceRowId}`}
+                    value={`${row.source}${PAIR_SEPARATOR}${row.sourceRowId}`}
+                  >
+                    {row.source} {row.datasetVersion} — {row.label}
+                  </option>
+                ))}
+              </select>
+            </SelectField>
+            <p className="font-serif text-[15px] leading-6 text-muted md:mt-[30px]">
+              A restating row is used wherever that published row is mapped, for
+              the dates this set covers. It takes effect at the next
+              recalculation without a mapping change — the rest of this form does
+              not.
+            </p>
+          </div>
+        ) : null}
 
         <Button type="submit" className="mt-10" disabled={pending}>
           {pending ? "Saving..." : "Save factor"}
