@@ -76,6 +76,19 @@ export function covers(
 }
 
 /**
+ * The four fields {@link preferCandidate} reads, and nothing else.
+ *
+ * A caller that is choosing between rows rather than calculating with them —
+ * `seedDefaultMappings` picking one row per `source_row_id` — has the set's
+ * provenance and no window, so the tie-break is typed against what it actually
+ * needs. {@link FactorCandidate} satisfies it.
+ */
+export type CandidateProvenance = Pick<
+  FactorCandidate,
+  "setId" | "setOrganizationId" | "publicationYear" | "setCreatedAt"
+>;
+
+/**
  * Which of several covering sets wins — **a total order, because it decides a
  * filed number.**
  *
@@ -94,8 +107,11 @@ export function covers(
  * moves between two runs over unchanged data, for no recorded reason, is exactly
  * what this ordering is written to prevent.
  */
-export function preferCandidate(a: FactorCandidate, b: FactorCandidate): number {
-  const published = (candidate: FactorCandidate) =>
+export function preferCandidate(
+  a: CandidateProvenance,
+  b: CandidateProvenance,
+): number {
+  const published = (candidate: CandidateProvenance) =>
     candidate.setOrganizationId === null ? 1 : 0;
   return (
     published(a) - published(b) ||
@@ -103,6 +119,38 @@ export function preferCandidate(a: FactorCandidate, b: FactorCandidate): number 
     b.setCreatedAt.getTime() - a.setCreatedAt.getTime() ||
     a.setId.localeCompare(b.setId)
   );
+}
+
+/**
+ * One winner per `source_row_id`, chosen by {@link preferCandidate}.
+ *
+ * **The seeder and the resolver agree by construction.** Two published sets are
+ * now loaded, so a publisher's stable row identity returns one row per set, and
+ * "which of those does a new organisation's default name" is the same question
+ * {@link selectFactorForDate} answers for a date it must resolve. Reusing the
+ * one total order is what makes the two answers the same answer; an `ORDER BY`
+ * restating its four tiers in SQL would be a second copy of a rule that decides
+ * a filed number's provenance.
+ *
+ * Because that order is total, the winner does not depend on the input's
+ * sequence — the comparison is strict, so an equally-ranked later row never
+ * displaces an earlier one, and no two distinct rows rank equally.
+ *
+ * A `source_row_id` no candidate carries is simply absent from the map, which
+ * is what keeps a default naming a row the visible sets do not contain from
+ * seeding anything.
+ */
+export function preferredBySourceRow<
+  T extends CandidateProvenance & { sourceRowId: string },
+>(candidates: readonly T[]): Map<string, T> {
+  const winners = new Map<string, T>();
+  for (const candidate of candidates) {
+    const held = winners.get(candidate.sourceRowId);
+    if (held === undefined || preferCandidate(candidate, held) < 0) {
+      winners.set(candidate.sourceRowId, candidate);
+    }
+  }
+  return winners;
 }
 
 /**

@@ -4,7 +4,9 @@ import type { FactorInput } from "./emissions";
 import {
   covers,
   preferCandidate,
+  preferredBySourceRow,
   selectFactorForDate,
+  type CandidateProvenance,
   type FactorCandidate,
 } from "./factor-selection";
 
@@ -192,5 +194,112 @@ describe("preferCandidate, the tie-break that decides a filed number", () => {
     const owned = year(2025, { setId: "t", setOrganizationId: "org-1" });
     expect(preferCandidate(owned, published)).toBeLessThan(0);
     expect(preferCandidate(published, owned)).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Prompt 70. `seedDefaultMappings` used to take the last row of an unordered
+ * result, so which set's copy of a `source_row_id` a new organisation's default
+ * named was undefined once two published sets were loaded. These cases are the
+ * proof that the choice is fixed by the order and not by arrival.
+ */
+describe("preferredBySourceRow", () => {
+  type Row = CandidateProvenance & { sourceRowId: string; id: string };
+
+  const row = (over: Partial<Row> & { id: string }): Row => ({
+    sourceRowId: "srcrow-1",
+    setId: "set-2025",
+    setOrganizationId: null,
+    publicationYear: 2025,
+    setCreatedAt: new Date("2026-01-01T00:00:00Z"),
+    ...over,
+  });
+
+  /** Every sequence of the input must answer identically. */
+  const winnersOverEveryOrder = (rows: Row[]) => {
+    const permute = (rest: Row[]): Row[][] =>
+      rest.length <= 1
+        ? [rest]
+        : rest.flatMap((item, i) =>
+            permute([...rest.slice(0, i), ...rest.slice(i + 1)]).map((tail) => [
+              item,
+              ...tail,
+            ]),
+          );
+    return permute(rows).map((sequence) =>
+      [...preferredBySourceRow(sequence)].map(
+        ([sourceRowId, winner]) => `${sourceRowId}:${winner.id}`,
+      ).sort(),
+    );
+  };
+
+  it("takes the later publication year, whatever the input sequence", () => {
+    for (const winners of winnersOverEveryOrder([
+      row({ id: "older", setId: "set-2025", publicationYear: 2025 }),
+      row({ id: "newer", setId: "set-2026", publicationYear: 2026 }),
+    ])) {
+      expect(winners).toEqual(["srcrow-1:newer"]);
+    }
+  });
+
+  it("takes a tenant's own set ahead of a later published one", () => {
+    for (const winners of winnersOverEveryOrder([
+      row({ id: "published", setId: "set-2026", publicationYear: 2026 }),
+      row({
+        id: "supplied",
+        setId: "set-own",
+        setOrganizationId: "org-1",
+        publicationYear: 2025,
+      }),
+    ])) {
+      expect(winners).toEqual(["srcrow-1:supplied"]);
+    }
+  });
+
+  it("falls through to createdAt when the publication year ties", () => {
+    for (const winners of winnersOverEveryOrder([
+      row({
+        id: "earlier",
+        setId: "set-a",
+        setCreatedAt: new Date("2026-01-01T00:00:00Z"),
+      }),
+      row({
+        id: "later",
+        setId: "set-b",
+        setCreatedAt: new Date("2026-06-01T00:00:00Z"),
+      }),
+    ])) {
+      expect(winners).toEqual(["srcrow-1:later"]);
+    }
+  });
+
+  it("falls through to the set id when createdAt ties too", () => {
+    for (const winners of winnersOverEveryOrder([
+      row({ id: "bbb", setId: "set-bbb" }),
+      row({ id: "aaa", setId: "set-aaa" }),
+    ])) {
+      expect(winners).toEqual(["srcrow-1:aaa"]);
+    }
+  });
+
+  it("decides each source row independently", () => {
+    for (const winners of winnersOverEveryOrder([
+      row({ id: "a-2025", sourceRowId: "srcrow-a", setId: "s25", publicationYear: 2025 }),
+      row({ id: "a-2026", sourceRowId: "srcrow-a", setId: "s26", publicationYear: 2026 }),
+      row({ id: "b-2025", sourceRowId: "srcrow-b", setId: "s25", publicationYear: 2025 }),
+    ])) {
+      expect(winners).toEqual(["srcrow-a:a-2026", "srcrow-b:b-2025"]);
+    }
+  });
+
+  it("omits a source row no candidate carries, so the seeder inserts nothing for it", () => {
+    const winners = preferredBySourceRow([row({ id: "only" })]);
+    expect(winners.get("srcrow-1")?.id).toBe("only");
+    expect(winners.has("absent-row")).toBe(false);
+    expect(winners.size).toBe(1);
+  });
+
+  it("returns an empty map for no candidates at all", () => {
+    expect(preferredBySourceRow([]).size).toBe(0);
   });
 });

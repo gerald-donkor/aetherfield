@@ -36,6 +36,7 @@ import {
   type FactorResolver,
 } from "../domain/emissions";
 import {
+  preferredBySourceRow,
   selectFactorForDate,
   type FactorCandidate,
 } from "../domain/factor-selection";
@@ -1434,10 +1435,21 @@ function escapeLike(text: string): string {
  * Visible reference data only (`organization_id is null or = $1`), non-deleted,
  * and from a set that has not been superseded — the same three predicates
  * `seedDefaultMappings` applies, so nothing can be chosen here that the seeder
- * would not have chosen.
+ * would not have chosen. That sentence was **false** between prompts 68 and 70:
+ * the seeder omitted `emission_factor_set.deleted_at is null`. Prompt 70 added
+ * it there rather than removing it here, which is the direction that cannot
+ * widen what a default may name.
  *
  * The match is over the publisher's own description columns, which are the three
  * `listFactorMappings` already joins into `factorLabel`.
+ *
+ * **The ordering carries a deterministic tail.** Two published sets hold rows
+ * with identical labels, so the three label columns alone leave the pair's
+ * sequence — and therefore which of them survives `FACTOR_SEARCH_LIMIT` — to
+ * Postgres. The tail is `preferCandidate`'s own reading order: customer-supplied
+ * ahead of published, then the later publication year, then the set id. The
+ * label columns keep their precedence, so the list a reporter reads does not
+ * re-sequence.
  */
 export async function searchFactorsForPair(
   organizationId: string,
@@ -1491,6 +1503,9 @@ export async function searchFactorsForPair(
       asc(emissionFactor.level2),
       asc(emissionFactor.level3),
       asc(emissionFactor.columnText),
+      asc(sql`${emissionFactorSet.organizationId} is null`),
+      desc(emissionFactorSet.publicationYear),
+      asc(emissionFactorSet.id),
     )
     .limit(FACTOR_SEARCH_LIMIT);
 
@@ -1619,6 +1634,16 @@ export async function setFactorMapping(input: {
  * `isNotNull` on the resolved factor is what keeps a default that names a
  * `source_row_id` the seeded set does not contain from inserting a broken row:
  * the join simply produces nothing for it.
+ *
+ * **Which set's copy of a row a default names is decided by
+ * `preferredBySourceRow`, not by the order Postgres happens to return.** Two
+ * published DESNZ sets are loaded, so every default's `source_row_id` matches a
+ * row in each; before prompt 70 the last row of an unordered result won, and
+ * two otherwise identical organisations could show a different dataset version
+ * for the same default. Resolution is unaffected either way — prompt 68's path
+ * follows the mapped row's siblings when its own window does not cover the
+ * date — so this is which provenance a reporter sees, not which figure is
+ * filed.
  */
 export async function seedDefaultMappings(
   organizationId: string,
@@ -1639,6 +1664,10 @@ export async function seedDefaultMappings(
       .select({
         id: emissionFactor.id,
         sourceRowId: emissionFactor.sourceRowId,
+        setId: emissionFactorSet.id,
+        setOrganizationId: emissionFactorSet.organizationId,
+        publicationYear: emissionFactorSet.publicationYear,
+        setCreatedAt: emissionFactorSet.createdAt,
       })
       .from(emissionFactor)
       .innerJoin(
@@ -1649,16 +1678,17 @@ export async function seedDefaultMappings(
         and(
           inArray(emissionFactor.sourceRowId, wanted),
           isNull(emissionFactor.deletedAt),
+          isNull(emissionFactorSet.deletedAt),
           isNull(emissionFactorSet.supersededBySetId),
           visibleFactorScope(organizationId),
           isNotNull(emissionFactor.id),
         ),
       );
 
-    const byRowId = new Map(factors.map((f) => [f.sourceRowId, f.id]));
+    const byRowId = preferredBySourceRow(factors);
     const values = defaults
       .map((d) => {
-        const factorId = byRowId.get(d.sourceRowId);
+        const factorId = byRowId.get(d.sourceRowId)?.id;
         return factorId
           ? { organizationId, category: d.category, unit: d.unit, factorId }
           : null;

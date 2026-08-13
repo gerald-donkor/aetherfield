@@ -4684,7 +4684,7 @@ of sets.
 `activity_emission`, 1 organisation, 0 sites, 11 mappings — and 14,064 factor
 rows across 2 sets, which is the intended residue.
 
-### A finding, reported rather than fixed
+### A finding, reported rather than fixed — **closed by prompt 70**
 
 **`seedDefaultMappings` picks its factor row non-deterministically now that two
 sets are visible.** Its query selects by `source_row_id` across
@@ -4699,9 +4699,17 @@ one pointing at 2026 resolve every record identically. But "which row is the
 mapping" is visible on `/activity/mappings`, and a surface that shows a
 different year on two otherwise identical organisations is a defect of
 presentation. `lib/db/emission-queries.ts` was out of scope for this prompt
-(§6 of `prompts/69-defra-2025-factor-set.md`), so it is recorded for a later one:
-the fix is an `ORDER BY` making the choice deterministic — newest publication
-year, presumably — not a change to resolution.
+(§6 of `prompts/69-defra-2025-factor-set.md`), so it was recorded for a later
+one.
+
+**Prompt 70 fixed it on 13 Aug 2026, and not the way this paragraph predicted**
+(§12 rule 8). The prediction was "an `ORDER BY` making the choice deterministic
+— newest publication year, presumably". The determinism half was right; the
+mechanism was wrong. An `ORDER BY` would have restated `preferCandidate`'s four
+tiers a second time in SQL, and those tiers decide a filed number's provenance,
+so the fix reuses the pure function instead. "Newest publication year" is also
+only tier 2 of four — an `ORDER BY` on it alone would still have been arbitrary
+between two sets of the same year. See the section below.
 
 ### Checks
 
@@ -4765,6 +4773,230 @@ a third party and no model was called.
 | market-based scope 2, set-metadata editing, retiring a set, bulk CSV import | untouched prior deferrals |
 | an xlsx parser in the application | the workbook is converted once by the committed script; the app reads the derived CSV with the pure `parseCsv` |
 | adding an out-of-period figure to `ReportEvidence` | prompt 68's reasoning is unchanged |
+| a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
+
+## A deterministic factor set for the seeded default mappings, prompt 70
+
+Implemented on 13 Aug 2026. **Closes prompt 69's "A finding, reported rather
+than fixed"**, and closes a docblock claim the repository had stopped
+satisfying. Post-sequence work, as prompts 63–69 were. Not a step 15.
+
+**Three files changed**, none of them a route, a component or a marketing
+surface: `lib/domain/factor-selection.ts`, `lib/db/emission-queries.ts` and
+`lib/domain/factor-selection.test.ts`. No schema change, no migration,
+`ENGINE_VERSION` stays `1.1.0`, and `db:generate` was not run.
+
+### The two defects, as read from the code
+
+**1. The winner was whatever Postgres returned last.** `seedDefaultMappings`
+selected `{ id, sourceRowId }` across `visibleFactorScope` with no `ORDER BY`,
+then built `new Map(factors.map(…))` — last row wins. With two published DESNZ
+sets each carrying the same nine ids, a new organisation's eleven defaults could
+land on either year's rows, and row order without `ORDER BY` is undefined.
+
+**2. `searchFactorsForPair`'s docblock claimed a parity the code did not have.**
+It said it applies *"the same three predicates `seedDefaultMappings` applies"*.
+It did not: the picker filtered `isNull(emissionFactorSet.deletedAt)` and the
+seeder did not. Under §12 rule 8 the divergence was closed rather than described
+— by adding the missing predicate to the **seeder**, which is the direction that
+narrows what a default may name rather than widening it.
+
+### The fix — reusing the total order, not writing a second one
+
+`lib/domain/factor-selection.ts` gains two pure exports and keeps its lack of
+`server-only` (§6.2 — the domain layer stays importable and testable):
+
+| export | what it is |
+| --- | --- |
+| `CandidateProvenance` | the four fields `preferCandidate` actually reads — `setId`, `setOrganizationId`, `publicationYear`, `setCreatedAt`. `preferCandidate`'s parameters were widened from `FactorCandidate` to this, so a caller choosing between rows rather than calculating with them need not invent a window |
+| `preferredBySourceRow(candidates)` | `Map<sourceRowId, winner>`, each winner chosen by `preferCandidate`. Generic over any row carrying `CandidateProvenance & { sourceRowId }` |
+
+**Why not an `ORDER BY`.** `preferCandidate` is the project's single answer to
+"which of several covering sets wins", decided with the user on 12 Aug 2026 and
+carrying four tiers: tenant-owned before published → `publicationYear` desc →
+set `createdAt` desc → set id asc. Restating those in SQL would put a second
+copy of the rule that decides a figure's provenance in a second language. The
+seeder and prompt 68's resolver now agree **by construction**.
+
+The comparison in `preferredBySourceRow` is strict (`preferCandidate(…) < 0`),
+so an equally-ranked later row never displaces an earlier one — and since the
+order is total, no two distinct rows rank equally. That is what makes the result
+independent of input sequence.
+
+`seedDefaultMappings` selects the four provenance columns alongside `id` and
+`sourceRowId`, adds `isNull(emissionFactorSet.deletedAt)` to its `where`, and
+uses the helper. **`visibleFactorScope(organizationId)` is untouched** — not
+restated, not inlined, not widened.
+
+`searchFactorsForPair` gains a deterministic tail after its three label columns:
+
+```
+asc(sql`${emissionFactorSet.organizationId} is null`)   -- customer-supplied first
+desc(emissionFactorSet.publicationYear)
+asc(emissionFactorSet.id)
+```
+
+the same reading order `preferCandidate` encodes. Two identically-labelled rows
+from two sets previously ordered arbitrarily between themselves, which also
+decided arbitrarily which of them survived `FACTOR_SEARCH_LIMIT`. The label
+columns keep their precedence, so the list a reporter reads does not
+re-sequence.
+
+### Measurements
+
+**1. The defect's precondition, from the development database.** Two visible
+sets, neither deleted, neither superseded, both published:
+
+| set id | dataset_version | publication year | organization_id | created_at |
+| --- | --- | --- | --- | --- |
+| `560dadb5-b4fa-4925-aa37-55d0fc9f40d8` | 2026 v1.2 | 2026 | null | 2026-08-10T19:20:10.412Z |
+| `265d72c4-d929-4cf4-8ede-edde707a4ac7` | 2025 v1 | 2025 | null | 2026-08-12T23:48:40.577Z |
+
+The eleven `DEFAULT_FACTOR_MAPPINGS` cover **nine distinct `source_row_id`s, and
+every one returns exactly two visible rows** — one per set. Ids returning fewer
+than two: **0**. So the finding's premise held on every default, not on some.
+
+`10_401_4003_5_1`, `17_404_4005_1_1`, `1_100_1004_1_1`, `1_100_1004_6_1`,
+`1_101_1011_8_1`, `20_507_5313_15_1`, `25_301_3074_4_1`, `27_304_3140_14_1`,
+`7_400_4000_5_1` — all `rows=2`, `sets=2025 v1, 2026 v1.2`.
+
+**2. The winner, read back.** A throwaway organisation with no mappings, seeded
+through `seedDefaultMappings` and read back joined to its set:
+
+| category / unit | source_row_id | factor_id | set |
+| --- | --- | --- | --- |
+| electricity / kWh | `7_400_4000_5_1` | `8e43e43d-1f18-472c-8e0b-a5256114a15d` | 2026 v1.2 |
+| electricity / MWh | `7_400_4000_5_1` | `8e43e43d-1f18-472c-8e0b-a5256114a15d` | 2026 v1.2 |
+| fuel / kWh | `1_100_1004_6_1` | `d45b47e7-4e62-40c1-8165-914f2df97d58` | 2026 v1.2 |
+| fuel / L | `1_101_1011_8_1` | `ad3d8168-b715-43e3-bdda-97ac920dbdc7` | 2026 v1.2 |
+| fuel / m3 | `1_100_1004_1_1` | `8d859335-09b0-47a0-9283-527d2c8cbca4` | 2026 v1.2 |
+| heat / kWh | `10_401_4003_5_1` | `13b233b1-1045-4696-9bed-f3974ff12cad` | 2026 v1.2 |
+| waste / kg | `20_507_5313_15_1` | `4f11c9df-cb7e-4ca9-b52e-c323f57fa65d` | 2026 v1.2 |
+| waste / t | `20_507_5313_15_1` | `4f11c9df-cb7e-4ca9-b52e-c323f57fa65d` | 2026 v1.2 |
+| water / m3 | `17_404_4005_1_1` | `4e2cea3c-6d5d-4f4d-b3d1-39524936ed8b` | 2026 v1.2 |
+| travel / km | `25_301_3074_4_1` | `5ceec5a7-28c7-4c56-8b9b-f77b4712a2e1` | 2026 v1.2 |
+| freight / tkm | `27_304_3140_14_1` | `f2122d3b-d986-4762-971f-e529aa8b931c` | 2026 v1.2 |
+
+`{ inserted: 11 }`, and **11 of 11 on the newest published set**.
+
+**3. Determinism, not luck.** A repeated database read cannot prove the absence
+of a coincidence, so this is asserted in the domain tests, over **every
+permutation** of the input rather than a sample of shuffles:
+`winnersOverEveryOrder` enumerates all orderings and each must answer
+identically. Six new cases cover the later publication year, tenant-owned ahead
+of a *later* published set, the `createdAt` fall-through, the set-id
+fall-through, independence between two source rows, and the absent-row case that
+keeps a default naming a row no visible set contains from seeding anything.
+
+**4. No figure moves.** Two organisations, the same five 1,000 kWh electricity
+records dated 2026-03-15, 2026-07-01, 2025-03-15, 2025-09-30 and 2024-06-01: one
+seeded by the new code (2026 rows), one **pinned to the 2025 rows** to reproduce
+the pre-prompt-70 outcome. Both driven through `recalculateOrganization`:
+
+| | control, mapped to 2025 | seeded, mapped to 2026 |
+| --- | --- | --- |
+| outcome | `{ records: 5, written: 4 }` | `{ records: 5, written: 4 }` |
+| 2025-03-15 | `d52d03fe-…eaa3c` 177.000000 (2025 v1) | `d52d03fe-…eaa3c` 177.000000 (2025 v1) |
+| 2025-09-30 | `d52d03fe-…eaa3c` 177.000000 (2025 v1) | `d52d03fe-…eaa3c` 177.000000 (2025 v1) |
+| 2026-03-15 | `8e43e43d-…4a15d` 130.960000 (2026 v1.2) | `8e43e43d-…4a15d` 130.960000 (2026 v1.2) |
+| 2026-07-01 | `8e43e43d-…4a15d` 130.960000 (2026 v1.2) | `8e43e43d-…4a15d` 130.960000 (2026 v1.2) |
+| 2024-06-01 | refused, no set covers it | refused, no set covers it |
+
+**Every `factor_id` and every `kg_co2e` identical**, asserted by comparison and
+not by eye. They are also the same two factor ids and the same two values prompt
+69 recorded one section above, so the equality holds against the prior record as
+well as across the two mappings. This is what makes prompt 70 a presentation fix:
+which row the *mapping* names moved; which row the *calculation* used did not,
+because prompt 68's resolver follows the mapped row's siblings when its own
+window does not cover the date.
+
+**5. Query count unchanged.** `pg.Pool.prototype.query` counted around
+`recalculateOrganization`: **3 pool-level queries at 5 records**, the same 3
+prompts 68 and 69 measured. `seedDefaultMappings` is still one `select` plus one
+`insert` inside its transaction; the extra columns and the extra predicate add
+no round trip.
+
+**Teardown confirmed back at baseline**: organizations **1**, mappings **11**,
+records **0**, emissions **0**, sites **0** — identical to the reading before the
+throwaway organisations were created.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **9 files, 204 tests passed** (511 ms) — the 197 baseline plus 7 new `preferredBySourceRow` cases, every prior test still passing |
+| the five measurements | via a throwaway `dotenv -e .env.local -- tsx --conditions=react-server` script, deleted afterwards; nothing added to a request path |
+| `npm run build` | the 31-route table below, unchanged |
+| prerender diff | **21 HTML files, 21 identical, 0 differ**; CSS byte-identical at **65,212 bytes** and the same chunk name on both sides (`042--fgx_-5jm.css`) |
+| `npm run test:e2e` | chromium + firefox: **10 passed** (24.2 s). **WebKit did not run** — `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux", which is not installed on this machine. Not reported as passed |
+| `npm run db:generate` / `db:migrate` | **not run** — no schema change |
+
+**The route table: 31 routes — 11 `○ Static`, 2 `● SSG` (6 + 3 paths), 18
+`ƒ Dynamic`, plus `ƒ Proxy (Middleware)`.** Identical on both sides of the diff
+and identical to prompt 69's.
+
+**A note on the CSS byte count, which differs from prompt 69's 68,208.** Both
+comparison trees here also excluded `prompts/`, because an *untracked* prompt
+file exists in the working tree and not in `git archive HEAD`, and Tailwind v4
+would have scanned its prose on one side only. The number to check the method
+against is therefore 65,212 for a prompts-excluded pair, not 68,208. Both sides
+were built the same way, which is what the comparison rests on.
+
+**The prose hazard fired, and was found rather than accepted.** The first
+implementation build grew the stylesheet by **18 bytes**, and a rule-by-rule
+diff named it: a single `{grid-row:1}` declaration, whose selector is Tailwind's
+own grid-row utility name — which was also, verbatim, the `sourceRowId` value
+the new test fixtures used. Tailwind v4 scans `.ts` files including tests and
+takes candidate class names out of any string it finds, not only out of JSX.
+The fixtures were renamed to `srcrow-1` / `srcrow-a` / `srcrow-b` and the
+rebuild is byte-identical.
+
+**The offending token is deliberately not spelled out in this paragraph**, and
+that is not coyness: `docs/` is inside the scan root too, so writing it here
+ships the rule from this file instead. It was verified — the first draft of this
+section quoted the token and the stylesheet grew by the same 18 bytes again,
+caught by re-running the diff after the record was written. `docs/automation.md`
+records this trap from step 10's `text-overflow` leak; this is the second time
+it has fired in implementation code, the first time from a **string literal**
+rather than a doc comment, and the first time from the record of the fix.
+
+**Prerender impact: none, verified rather than assumed**, by the two-build
+method in `docs/automation.md` — both sides excluding `.claude/`, `.agents/` and
+`prompts/`, normalising `.next/BUILD_ID` and both the `.js` and `.css` chunk
+patterns, and stripping the `self.__next_f.push` payloads.
+
+**Trust boundary: no new request path, no new route, no new action.** The two
+already-authorised paths this reaches — the `recalculate` Server Action in
+`app/activity/actions.ts` and `/api/cron/recalculate` — gain and lose no stage.
+Nothing crosses the tenant boundary: `visibleFactorScope(organizationId)` is
+unchanged in every query touched, and the seeder's one added predicate
+*narrows* what it may select. No browser input reaches the new code —
+`DEFAULT_FACTOR_MAPPINGS` is a compiled-in constant.
+
+**Secrets and data.** No new environment variable, no `NEXT_PUBLIC_*`, no
+`.env.example` line. `lib/db/emission-queries.ts` keeps `import "server-only"`
+and still contains no `console` call; `lib/domain/factor-selection.ts` remains
+free of it, as §6.2 requires. No personal data: emission factors are public
+reference data, and `activity_factor_mapping.created_by` was not touched.
+Nothing reached a third party and **no model was called** (§5.3 — AI factor
+matching stays deferred).
+
+### What prompt 70 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| changing `selectFactorForDate` or any resolution semantics | prompt 68's path is correct and prompt 69 proved it against two sets. This is which row a *new* organisation's default names, not how a date resolves |
+| an `ORDER BY` restating `preferCandidate`'s four tiers in SQL | a second copy of the rule that decides a figure's provenance. The pure function is the single definition |
+| re-pointing existing organisations' mappings at the newer set | a mapping is a deliberate choice once made, and `seedDefaultMappings` refuses to overwrite one — a backfill would silently undo an override. Its own prompt, with the user's say-so, if it is wanted |
+| bumping `ENGINE_VERSION` | the engine is unchanged and no figure moved. `1.1.0` stands |
+| any schema change, migration or `db:generate` | none was needed |
+| a third factor set, or 2024 | prompt 69's decision: one year at a time |
+| AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65, 68 and 69 and still deferred |
+| the custom-factor-set sibling gap | `createTenantFactor` still hashes its own `source_row_id`. Prompt 68's open gap, unchanged and still open |
+| market-based scope 2, set-metadata editing, retiring a set, bulk CSV import | untouched prior deferrals |
+| showing the dataset year anywhere new in the UI | `/activity/mappings` and the factor picker already render `source` + `datasetVersion`; no new surface was owed |
 | a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
 
 ## Step 9 — activity-data ingestion

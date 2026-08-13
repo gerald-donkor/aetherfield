@@ -818,6 +818,19 @@ EOF
 Every added rule should trace to a class you actually wrote. Reword the comment
 rather than shipping the utility.
 
+**Two extensions to this, both found at prompt 70, both silent.**
+
+- **A string literal leaks as readily as a comment.** A test fixture whose value
+  happened to be a `grid-row` utility's name shipped that rule to every page.
+  The scanner does not care that the string is data — check *values* in new test
+  fixtures, not only prose.
+- **`docs/` is inside the scan root.** So the paragraph recording the leak
+  re-shipped the same rule from `docs/backend.md` when it quoted the offending
+  token. **Describe the token, do not spell it**, and always re-run the CSS diff
+  *after* writing the record, not only after writing the code — otherwise the
+  documentation of the fix reintroduces the defect and the check that would have
+  caught it has already been run.
+
 ### A stale `tsconfig.tsbuildinfo` masks a `tsconfig.json` change
 
 Raising `target` at step 10 had no effect on `npm run typecheck`, which kept
