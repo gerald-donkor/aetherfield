@@ -5248,6 +5248,136 @@ deferred).
 | any change to a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | out of scope entirely |
 | a step 15 | §5.2 remains the ordered plan; this is approved post-sequence work |
 
+## Aligning the custom-factor form's fields, prompt 72
+
+Implemented on 13 Aug 2026, from a screenshot of the live page: "make the text
+boxes consistently aligned and inline". Layout only — no action, schema, query
+or validation rule is touched.
+
+### The root cause, read out of the code
+
+`FieldFrame` (`app/_components/primitives.tsx:224-268`) renders label → hint →
+control → error in normal flow inside a plain `<div className={className}>`, and
+the hint at `:252` is conditional. `CustomFactorForm` lays its fields out in
+`md:grid-cols-2`. **A grid item's content starts at the item's top edge**, so a
+field carrying a hint started its control one hint-height — a measured 30px —
+below the field beside it. Three rows paired a hinted field with an unhinted
+one, and the taller row read as broken vertical rhythm rather than as `gap-6`.
+
+The form's local `SelectField` renders no hint, so the selects always aligned.
+
+### Why the fix is local, and not in `FieldFrame`
+
+`Field` / `TextareaField` / `FileField` are consumed by sixteen modules,
+including `/design-system`, `/sign-in`, `/sign-up`, `/forgot-password`,
+`/reset-password`, `/verify-email` and the three dialogs on `/`, `/journal`,
+`/careers` and `/job-listing/[slug]` — all prerendered. Changing the frame's
+markup or class strings rewrites almost every static route's HTML, which is what
+`CONTROL_BASE`'s own comment at `primitives.tsx:214-217` already guards against.
+`/activity/factors` is `ƒ Dynamic`, so a fix scoped to it costs no prerendered
+byte. `Field` forwards `className` onto the frame div, so no primitive changed.
+
+### The mechanism, and the one the prompt proposed instead
+
+`FIELD_ALIGN = "md:flex md:flex-col md:justify-end"`, passed to all 19 `Field` /
+`TextareaField` elements in the three grid blocks — not only the hinted ones, so
+a field that gains a hint later cannot reintroduce the bug. A grid item stretches
+to its row's height, so hanging the label/hint/control stack off the item's
+bottom edge puts two equal-height (52px) controls on the same line.
+
+**Prompt 72 specified `[&>input]:mt-auto` instead. It was tried first, measured,
+and rejected** — its selector `.[&>input]:mt-auto > input` outranks the `mt-2`
+on the control, so on the tallest item in each row, where there is no slack to
+absorb, `margin-top` resolved to 0 and the label sat flush against its input.
+Measured on the live page at 1350px, candidate B collapsed the label→control gap
+to **0** on every unhinted row (Level 1/2, Level 3/4, Effective from/to, Region,
+Notes) and to **30** from 38 on every hinted one, and shortened the form by
+about 50px. `md:justify-end` moves the whole stack and preserves both gaps
+exactly. This is a deviation from the approved prompt's stated mechanism, taken
+on the measurement above, not on preference.
+
+### The two hand-tuned offsets, re-derived
+
+Both now follow **one rule: a companion line beside a control centres on that
+control's text line.** The control's own top is `16px` label (`--text-nav` is
+16px at `--text-nav--line-height: 1`) + `8px` (`mt-2`) = **24px**, and the slack
+between a 52px control and a 24px `leading-6` line is `(52 - 24) / 2` = **14px**.
+
+| element | was | now | derivation |
+| --- | --- | --- | --- |
+| the two set-description notes, and prompt 71's supersession note | `md:mt-[30px]` | `md:mt-[38px]` | 24 + 14. **Measured**: the note's first line box centre and the select's centre both land on the same y (1481 and 1481 at the measured scroll). The old 30 put it 8px high. Whether centring on the control's text beats the old nudge is a **judgement**, taken on a zoomed comparison of the two |
+| the biogenic checkbox | `md:mt-[34px]` | `md:mt-0 md:mb-[14px] md:self-end` | the same 14px, read from the row's **bottom** edge instead of its top. **Measured**: its line centre and the Region control's centre are both 2936. The old 34 sat 4px high, and it assumed a partner with no hint — the scope and gas selects change which field that is, so a top offset could not stay right |
+
+### The alignment measurement
+
+Chrome at **1350 CSS px** (`devicePixelRatio` 0.75, so a 1013px window), signed
+in as an owner on the dev server, `document.fonts.ready` awaited, reading
+`getBoundingClientRect().top` of every `input` and `select` in the three grid
+blocks. Control top is given relative to its grid row's top edge.
+
+| grid row | before | after |
+| --- | --- | --- |
+| Source / Dataset-version | 54 / 54 | 54 / 54 |
+| **Publication year / Licence or basis** | **24 / 54** | **54 / 54** |
+| Effective from / Effective to | 24 / 24 | 24 / 24 |
+| Licence URL / Source URL | 54 / 54 | 54 / 54 |
+| Internal source reference / Notes (textarea) | 54 / 24 | 71 / 24 — bottoms now agree at 2178 |
+| Level 1 / Level 2, Level 3 / Level 4 | 24 / 24 | 24 / 24 |
+| **Column text / Published unit** | **54 / 24** | **54 / 54** |
+| **Published GHG unit / Value** | **24 / 54** | **54 / 54** |
+| Scope / Activity unit, Gas / GWP set | 24 / 24 | 24 / 24 |
+| Region / biogenic checkbox | 24 / 34 | 24 / checkbox line centred on the control |
+
+The label→control gap is unchanged everywhere: **8px** without a hint, **38px**
+with one. Re-measured with `scope_3` and `ch4` selected, which insert two more
+selects and re-pair every following row: all eight rows still agree.
+
+### The limit, stated rather than hidden
+
+**If exactly one field in a row carries a validation error, that row's two
+controls disagree while the error is on screen** — the errored field's stack is
+taller by its error line, so it rides up. Measured by submitting the empty form
+(11 field errors): Column text 1556, Published unit 1530, a **26px**
+disagreement, against the **30px** that row showed permanently before this
+change and in every state. Closing it properly needs `grid-rows-subgrid` over
+the whole form, which is a larger change to a settled layout than the reported
+defect warrants, and is deliberately not done.
+
+### Prerender impact and verification, prompt 72
+
+**None, and verified rather than assumed.** `/activity/factors` is `ƒ` and
+nothing else imports `custom-factor-form.tsx`. The copy-tree two-build diff
+(`docs/automation.md`, traps 1-6) at parent `714f764`, both sides excluding
+`.claude/` and `.agents/`, `BUILD_ID` and both content-hashed chunk patterns
+normalised and `self.__next_f.push` stripped: **21 HTML files each side, same
+path set, 21 identical, 0 differing.** The two route tables `diff` clean.
+
+The CSS chunk moves, as a class-string change must: **68,208 → 68,506 bytes**
+(+298). No prerendered HTML references it by name, because the name is
+normalised out — the chunk is content-hashed and the HTML carries the hash only.
+
+### Checks run, prompt 72
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no diagnostics |
+| `npm run typecheck` | clean, no diagnostics |
+| `npm test` | **9 files, 210 tests passed** in 832ms — unchanged, as expected |
+| `npm run build` | both trees exit 0; `/activity/factors` stays `ƒ`, every `○` and `●` route unchanged |
+| prerender diff | 21 compared, 21 identical, 0 differing |
+| `npm run test:e2e` | Chromium and Firefox: **10 passed** in 26.4s. **WebKit did not run** — `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux", which is unchanged from earlier prompts and is **not** reported as passing |
+
+### What prompt 72 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| touching `FieldFrame`, `Field`, `TextareaField`, `FileField` or `CONTROL_BASE` | §8.1 — it rewrites the prerendered HTML of nine static routes |
+| `grid-rows-subgrid` over the whole form | the complete fix for the one-error-in-a-row case, and a larger change than the defect warrants |
+| restyling the form — spacing scale, field order, `max-w-[980px]`, `gap-6` | the report is about alignment, not the design |
+| the same treatment on the other twelve `Field` consumers | none was reported, and each carries its own prerender question |
+| the local `SelectField` | it renders no hint, so its controls already aligned |
+| anything behind the form — the action, the schema, the queries, prompt 71's supersession behaviour | untouched. No migration; `npm run db:generate` was not run |
+
 ## Step 9 — activity-data ingestion
 
 Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation

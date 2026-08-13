@@ -82,6 +82,14 @@ const GAS_BASIS_LABEL = {
 const NETWORK_ERROR =
   "We couldn't reach the server. Check your connection and try again.";
 
+/* Bottom-aligns a field's label/hint/control stack inside its grid item. A grid
+   item stretches to its row's height, so a field carrying a hint used to start
+   its control one hint-height below the field beside it; hanging the stack off
+   the item's bottom edge puts every 52px control in a row on the same line.
+   Local to this form on purpose: `FieldFrame` is shared with nine prerendered
+   routes (AGENTS.md 8.1) and `/activity/factors` is the only dynamic one. */
+const FIELD_ALIGN = "md:flex md:flex-col md:justify-end";
+
 const SELECT_CLASS =
   "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
 
@@ -261,14 +269,18 @@ export function CustomFactorForm({
             </select>
           </SelectField>
 
+          {/* 38px = the control's own top (16px label + 8px gap) plus half the
+              slack between a 52px control and this 24px line box, so the note's
+              first line sits on the control's text line rather than above it.
+              The checkbox below is the same rule read from the row's bottom. */}
           {chosenSet ? (
-            <div className="font-serif text-[15px] leading-6 text-muted md:mt-[30px]">
+            <div className="font-serif text-[15px] leading-6 text-muted md:mt-[38px]">
               {chosenSet.licence}. Effective {chosenSet.effectiveFrom} to{" "}
               {chosenSet.effectiveTo}, published {chosenSet.publicationYear}.
               This set holds {GAS_BASIS_LABEL[chosenSet.gasBasis]}.
             </div>
           ) : (
-            <p className="font-serif text-[15px] leading-6 text-muted md:mt-[30px]">
+            <p className="font-serif text-[15px] leading-6 text-muted md:mt-[38px]">
               A new set records where these factors came from and under what
               licence. That provenance is rendered as evidence beside the
               figures they produce.
@@ -279,6 +291,7 @@ export function CustomFactorForm({
         {creatingSet ? (
         <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-source"
             name="source"
             label="Source"
@@ -288,6 +301,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-version"
             name="datasetVersion"
             label="Dataset/version"
@@ -297,6 +311,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-year"
             name="publicationYear"
             type="number"
@@ -307,6 +322,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-licence"
             name="licence"
             label="Licence or basis"
@@ -316,6 +332,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-effective-from"
             name="effectiveFrom"
             type="date"
@@ -325,6 +342,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-effective-to"
             name="effectiveTo"
             type="date"
@@ -334,6 +352,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-licence-url"
             name="licenceUrl"
             label="Licence URL"
@@ -342,6 +361,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-source-url"
             name="sourceUrl"
             label="Source URL"
@@ -350,6 +370,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-source-reference"
             name="sourceReference"
             label="Internal source reference"
@@ -358,6 +379,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <TextareaField
+            className={FIELD_ALIGN}
             id="custom-factor-notes"
             name="notes"
             label="Notes"
@@ -370,6 +392,7 @@ export function CustomFactorForm({
 
         <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-level-1"
             name="level1"
             label="Level 1"
@@ -377,6 +400,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-level-2"
             name="level2"
             label="Level 2"
@@ -384,6 +408,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-level-3"
             name="level3"
             label="Level 3"
@@ -391,6 +416,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-level-4"
             name="level4"
             label="Level 4"
@@ -398,6 +424,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-column"
             name="columnText"
             label="Column text"
@@ -406,6 +433,7 @@ export function CustomFactorForm({
             disabled={pending}
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-uom"
             name="publishedUom"
             label="Published unit"
@@ -414,6 +442,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-ghg-unit"
             name="publishedGhgUnit"
             label="Published GHG unit"
@@ -422,6 +451,7 @@ export function CustomFactorForm({
             required
           />
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-value"
             name="value"
             inputMode="decimal"
@@ -577,6 +607,7 @@ export function CustomFactorForm({
           </SelectField>
 
           <Field
+            className={FIELD_ALIGN}
             id="custom-factor-region"
             name="region"
             label="Region"
@@ -584,7 +615,11 @@ export function CustomFactorForm({
             disabled={pending}
           />
 
-          <label className="mt-8 flex items-start gap-3 font-serif text-[16px] leading-6 text-ink md:mt-[34px]">
+          {/* Hung off the row's bottom edge, 14px = (52 - 24) / 2 clear of it,
+              so this line centres on whichever control it lands beside — the
+              old top offset assumed a partner with no hint, and the scope and
+              gas selects change which field that is. */}
+          <label className="mt-8 flex items-start gap-3 font-serif text-[16px] leading-6 text-ink md:mt-0 md:mb-[14px] md:self-end">
             <input
               type="checkbox"
               checked={biogenic}
@@ -621,7 +656,7 @@ export function CustomFactorForm({
                 ))}
               </select>
             </SelectField>
-            <p className="font-serif text-[15px] leading-6 text-muted md:mt-[30px]">
+            <p className="font-serif text-[15px] leading-6 text-muted md:mt-[38px]">
               A restating row is used wherever that published row is mapped, for
               the dates this set covers. It takes effect at the next
               recalculation without a mapping change — the rest of this form does
