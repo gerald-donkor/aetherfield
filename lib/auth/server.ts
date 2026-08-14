@@ -16,6 +16,7 @@ import {
   sendPasswordResetEmail,
 } from "../email/auth";
 import { sendOrganizationInvitation } from "../email/organization";
+import { safeAuthLogger } from "./logger";
 import {
   organizationAccessControl,
   organizationRoles,
@@ -30,6 +31,12 @@ import {
 function createAuth() {
   return betterAuth({
     appName: "Aetherfield",
+    /**
+     * Prompt 79. Without this, Better Auth's default sink forwards the caught
+     * error to `console`, and a failed session lookup prints the Drizzle
+     * query's parameters — the session token among them. See `./logger.ts`.
+     */
+    logger: safeAuthLogger,
     database: drizzleAdapter(getDb(), {
       provider: "pg",
       schema: databaseSchema,

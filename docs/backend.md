@@ -6986,6 +6986,281 @@ compiled cleanly; that is an environment failure, not a code regression.
 | add a migration | no schema changed |
 | change any marketing route, `SiteNav`, `SiteFooter` or GSAP surface | §8.1 and the settled-site contract |
 
+## Better Auth database-failure log redaction, prompt 79
+
+Implemented on 14 Aug 2026. Prompt 78 left one open finding: when a database
+read failed, provider output included the query's parameters, and one Better
+Auth session lookup therefore printed a live fixture session token. That token
+was invalidated with its row at the time and is not reproduced here or
+anywhere else. This is post-sequence hardening, not a step 15 — AGENTS.md §5.2
+remains the complete ordered product build.
+
+### What changed
+
+| file | change |
+| --- | --- |
+| `lib/auth/logger.ts` | new — `safeAuthLogger`, the allowlist log sink |
+| `lib/auth/server.ts` | `logger: safeAuthLogger` on the `betterAuth()` options |
+
+Nothing else. No schema, migration, route, environment variable, dependency,
+package script or UI changed, and `npm run db:generate` was not run.
+
+### The cause, read from the installed sources
+
+Three installed files compose into the disclosure, and each was read rather
+than recalled:
+
+1. `node_modules/better-auth/dist/api/routes/session.mjs:258` — the
+   `get-session` catch calls `ctx.context.logger.error("INTERNAL_SERVER_ERROR", error)`,
+   passing the caught error itself as an argument.
+2. `node_modules/@better-auth/core/dist/env/logger.mjs`, `LogFunc` — with no
+   `logger` option configured, the error branch is
+   `console.error(formattedMessage, ...args)`. Every argument reaches the
+   console verbatim.
+3. `node_modules/drizzle-orm/errors.js` — `DrizzleQueryError`'s constructor
+   builds its message from the query text and the bound parameter array, and
+   keeps `query` and `params` as own properties. Node's console inspector
+   prints both.
+
+So the printed line carried the value the session lookup was made with.
+
+`"INTERNAL_SERVER_ERROR"` is a literal at exactly one call site across
+`node_modules/better-auth/dist/`, which is why it can be allowlisted as an
+event rather than matched as a pattern.
+
+### The safe logger's contract
+
+`safeAuthLogger` is `server-only` and is passed as Better Auth's public
+`logger` option. Its type is derived from the package's own public surface —
+`NonNullable<BetterAuthOptions["logger"]>` off `better-auth/types` — so no deep
+import, no copied internal logger, no `node_modules` patch.
+
+- Output is composed from the level and an event code and nothing else. The
+  line is `[Aetherfield][Better Auth] <LEVEL> <event>`.
+- The event comes from a `Map` of exact provider messages verified as literals
+  in the installed source. `INTERNAL_SERVER_ERROR` maps to `auth.internal_error`;
+  everything else maps to one code, `auth.unclassified_event`. A `Map` rather
+  than an object literal, so a provider message naming an `Object.prototype`
+  member cannot resolve to an entry nobody wrote.
+- **The handler's signature stops at `message`.** The rest arguments are not
+  merely unused, they are unreachable — a throwing getter on an argument
+  cannot be evaluated by code that never receives it, which is what makes rule
+  6 of the brief structurally true rather than carefully coded.
+- The level word is written out per branch, so no method is ever called on a
+  provider-supplied value.
+- `error` goes to `console.error`, `warn` to `console.warn`, `info` and `debug`
+  to `console.log`. One line per provider call.
+- `level` is deliberately not set. The installed `createLogger` applies its own
+  `"warn"` threshold *before* calling a custom handler, and the custom-handler
+  branch does not require the option to be stated; setting it would change the
+  shipped threshold under cover of a logging fix. The sink is narrowed, not
+  disabled — a safe event still reaches the log for every provider call.
+
+**Why an allowlist and not redaction.** Matching a token-shaped substring is
+the narrower change and the wrong one: the same parameter array reaches names,
+work addresses, organisation rows, application fields and blob references, all
+governed by AGENTS.md §8.3. Nothing provider-controlled is inspected at all.
+
+### The deterministic fault probe
+
+Two clean trees were built and started on unused local ports — `git archive HEAD`
+for the parent, a `tar` of the working tree for the implementation, both with
+`.claude/`, `.agents/` and every `.env*` file removed so the two sides read the
+same environment. Each ran with a fake loopback database URL, a local
+`BETTER_AUTH_URL` and a test-only 44-character secret. No real secret was read
+or printed.
+
+**A total outage does not reproduce the finding, and that matters.** With the
+database wholly unreachable, Better Auth's database-backed rate limiter fails
+before the endpoint handler runs, so the request never reaches the session
+lookup at all; the parent printed only `rate_limit` queries. Prompt 78's
+condition was *intermittent*, so the rate-limit read succeeded and the session
+read did not. The probe reproduces exactly that with a minimal Postgres wire
+stub held outside the repository: every statement succeeds except one naming
+the session relation, which is answered with an `ErrorResponse`. The stub is
+uncommitted and adds no dependency, route or environment flag.
+
+The forged cookie's value is the non-secret sentinel
+`AF79-FORGED-SESSION-SENTINEL-0000000000`. It has to carry a valid signature:
+`better-call`'s `getSignedCookie` (`node_modules/better-call/dist/context.mjs`)
+splits on the last `.` and verifies an HMAC-SHA-256 over the value, returning
+early on a mismatch — an unsigned forgery never reaches the database and would
+have proved nothing. The signature was computed with the probe's own test-only
+secret.
+
+| measurement | parent | implementation |
+| --- | --- | --- |
+| HTTP status | 500 | 500 |
+| response body | `{"message":"Failed to get session","code":"FAILED_TO_GET_SESSION"}` | identical |
+| sentinel occurrences in server output | **2** | **0** |
+| `Failed query` occurrences | 1 | 0 |
+| parameter-section occurrences | 2 | 0 |
+| session-relation text occurrences | 2 | 0 |
+| fake database user / password / name occurrences | 0 | 0 |
+| total server log lines | 46 | 8 |
+| safe auth events | none — the sink did not exist | `[Aetherfield][Better Auth] WARN auth.unclassified_event` and `[Aetherfield][Better Auth] ERROR auth.internal_error` |
+
+The parent's line began `[Better Auth]: INTERNAL_SERVER_ERROR Error: Failed
+query: …` and continued into the bound parameters. It is not quoted in full
+here, by the same rule that keeps prompt 78's real value out of this file.
+
+The warning in the implementation column is the provider's own
+missing-social-credential notice under the probe's credential-free
+environment. It is included because it is the evidence that a non-error level
+still reaches the log through the correct channel: narrowing the sink did not
+silence the pipeline.
+
+### The direct fault matrix
+
+The handler was exercised in a temporary, uncommitted probe. Every call was
+handed the same hostile argument list: a `DrizzleQueryError`-shaped `Error`
+carrying sentinels in its message, its stack, its `query` and its `params`; a
+nested object; a self-referencing object; an object whose getter records that
+it was read and then throws; plus a number, `null` and `undefined`.
+
+| case | level | channel | lines | sentinels | threw |
+| --- | --- | --- | --- | --- | --- |
+| allowlisted session failure | error | `console.error` | 1 | 0 | no |
+| interpolated error message | error | `console.error` | 1 | 0 | no |
+| interpolated warning | warn | `console.warn` | 1 | 0 | no |
+| info level | info | `console.log` | 1 | 0 | no |
+| debug level | debug | `console.log` | 1 | 0 | no |
+| an `Error` passed *as* the message | error | `console.error` | 1 | 0 | no |
+| `undefined` message | warn | `console.warn` | 1 | 0 | no |
+| an unknown static provider label | error | `console.error` | 1 | 0 | no |
+
+**35 assertions, all passing**, exit 0. Eight calls produced eight lines. The
+recording getter was never read. The only two distinct outputs across the whole
+matrix were `[Aetherfield][Better Auth] ERROR auth.internal_error` for the
+allowlisted label and the corresponding `auth.unclassified_event` line at each
+level for everything else.
+
+### The boundary audit, and what this does not close
+
+Supported by the evidence above:
+
+- **This closes Better Auth's provider-logger path for the configured auth
+  instance.** Measured, not assumed: zero sentinels against the parent's two,
+  on identical status and body.
+- **It does not modify `DrizzleQueryError`, so an unrelated Drizzle error that
+  reaches the framework still prints its message.** Also measured rather than
+  reasoned: the total-outage run against the *implementation* build printed 60
+  framework error blocks, each carrying `query` and `params` — here the rate
+  limiter's key, which embeds the client IP address. The escaping error is
+  the rate limiter's, not the session lookup's, and the sentinel never appears
+  in it; but the mechanism is intact and is recorded as the next candidate
+  below rather than described as fixed.
+- **`onRequestError` is a reporting hook, not a suppressor.** The installed
+  Next 16 documentation
+  (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/instrumentation.md:38`)
+  describes it as a way "to track **server** errors to any custom observability
+  provider", and says nothing about replacing or sanitizing Next's own output.
+  The total-outage measurement above is the empirical half of the same point.
+  No `instrumentation.ts` was added; the repository has only
+  `instrumentation-client.ts`, and exports no `onRequestError` anywhere.
+
+Every `console` call under `app/` and `lib/` was inspected:
+
+| location | what it prints |
+| --- | --- |
+| `app/**` | **no `console` call at all** — four files carry a comment saying so |
+| `lib/auth/logger.ts:88,92,96,100,103` | the level and an event code, this change |
+| `lib/email/auth.ts:44,48` | a fixed event name and a fixed failure reason |
+| `lib/email/demo-request.ts:90,96` | a lead id and a fixed reason |
+| `lib/email/application.ts:132,138` | an application id and a fixed reason |
+| `lib/email/newsletter.ts:73,81,116,121` | a subscriber id and a fixed reason |
+| `lib/email/organization.ts:119,126,194,201` | an invitation or organisation id and a fixed reason |
+| `lib/email/alerts.ts:91,122,131` | an alert id and a fixed reason |
+| `lib/db/seed/seed-emission-factors.ts:199,244,297,330,333,340` | counts and labels in an operator-run CLI seed, not a request path |
+
+None logs an address, a name, a row, a cookie, a token or a request body.
+
+**The next candidate, with its exact path.** An unrelated `DrizzleQueryError`
+escaping to the framework — measured above on the rate limiter's
+`consume` path, whose parameters embed the client IP. Closing it is a different
+change from this one (it is Drizzle's error surface and Next's error printer,
+not a provider option) and needs its own evidence and decision.
+
+### Prerender impact
+
+`none — no route markup or render-mode changes`, verified rather than assumed.
+The comparison was run after this section and the prompt file were on disk, so
+Tailwind v4's scan of `docs/` and `prompts/` prose is included on the
+implementation side. `docs/automation.md`'s clean two-build procedure, with
+`.claude/`, `.agents/` and every `.env*` file removed from both sides and the
+build id, JavaScript and CSS chunk names and inline RSC transport normalised:
+
+| measurement | result |
+| --- | --- |
+| prerendered HTML files | **21** on each side, same set |
+| differing after normalisation | **0 of 21** |
+| compiled CSS | **68,506 → 68,506 bytes** |
+| CSS rules added / removed | **0 / 0** |
+| route table | identical, diffed line by line |
+
+**Remeasure the parent; do not carry a number forward.** Prompt 78's record
+puts its clean base at 74,718 bytes and its own prompt carried 68,506 as a
+stale floor. This comparison's clean base — a different commit — measures
+68,506 again. The load-bearing result is the parent-to-implementation equality
+and the empty rule-set difference, not either absolute figure.
+
+### Trust boundary
+
+No new request path. The existing browser-to-server boundary remains Better
+Auth's catch-all Route Handler, and the measured failure keeps its existing
+status, body and cookie behavior — proven by the identical parent and
+implementation columns above.
+
+The new boundary is between a caught provider error and the server log. The
+handler accepts a provider-controlled level and message and composes output
+from neither's content: only from the level's identity and an allowlisted
+event code. No `NODE_ENV` or E2E conditional, no `disableCSRFCheck`, no
+`disableOriginCheck`, no auth fallback, no test-only Route Handler and no
+swallowed error was introduced. The provider error still propagates; only its
+observation changed.
+
+### Secrets and data
+
+No new environment variable, no `.env.example` change, no `NEXT_PUBLIC_*`, no
+additional secret read, no model call. The probe used only fake loopback
+credentials, a test-only Better Auth secret and non-secret sentinels, and no
+value from prompt 78 appears in code, tests, transcripts or this record.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, exit 0 |
+| `npm run typecheck` | clean, exit 0 |
+| `npm test` | **10 files, 215 tests passed** (867 ms), unchanged |
+| parent/implementation synthetic auth failure | same 500 and same body; sentinel **2 → 0**; safe event present |
+| direct logger fault probe | **35 assertions passed**, exit 0; 8 calls, 8 lines, 0 sentinels, getter untouched |
+| `npm run build` | exit 0, compiled in 8.8 s, 32/32 static pages |
+| route table | identical to the parent build, diffed line by line |
+| `npm run test:e2e:local`, default workers | **97 passed, 1 failed** in 4.8 min — see below |
+| `npm run test:e2e:local -- --workers=1` | **98 passed in 6.9 min**, Chromium + Firefox, exit 0 |
+| `npm run test:e2e:webkit` | did not run: `Podman is required for WebKit on Arch Linux.` `podman` is not installed here. Environment gap, not a pass — unchanged from prompt 78 |
+| `npm run db:generate` | not run; the schema is untouched |
+| prerender/CSS comparison | **0 of 21** HTML files differed; CSS **68,506 → 68,506** bytes, **0 rules added / 0 removed** — see "Prerender impact" above |
+
+**The one failure, explained rather than rounded away.** The first run used
+Playwright's default worker count and lost one Firefox case —
+`e2e/factor-picker.spec.ts:179`, a 30-second `page.waitForURL` timeout on the
+factor-search navigation. It is not an auth route, not a database-disclosure
+assertion, and nothing in it reaches `lib/auth/`. It is prompt 78's recorded
+local instability at higher worker counts, and prompt 78's documented remedy
+resolves it: the second run used the same process-only network condition and
+one worker,
+
+```sh
+NODE_OPTIONS=--network-family-autoselection-attempt-timeout=1000 \
+  npm run test:e2e:local -- --workers=1
+```
+
+and returned prompt 78's baseline of 98 passed. Neither the option nor the
+worker count is committed; both are verification conditions. Teardown reported
+`rate_limit` rows 3 before and 3 after on both runs.
+
 ## Provider-free fuzzy factor matching, prompt 76
 
 Prompt 75 reached its first Vercel AI Gateway embedding request and received
