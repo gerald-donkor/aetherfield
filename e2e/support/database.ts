@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { del } from "@vercel/blob";
 import { Pool } from "pg";
 
 import {
@@ -30,16 +31,20 @@ import {
 
 let pool: Pool | undefined;
 
-function connectionString(): string {
-  if (!process.env.DATABASE_URL_UNPOOLED) {
-    try {
-      process.loadEnvFile(path.join(__dirname, "..", "..", ".env.local"));
-    } catch {
-      /* Absent is not fatal here: the variable may already be exported. The
-         error below is the one worth raising, and it names the key, never a
-         value (AGENTS.md 8.4). */
-    }
+/** Loads `.env.local` if the named key is not already exported. Absent is not
+    fatal: the variable may come from the environment. Every caller raises its
+    own error naming the key, never a value (AGENTS.md 8.4). */
+function loadLocalEnv(key: string): void {
+  if (process.env[key]) return;
+  try {
+    process.loadEnvFile(path.join(__dirname, "..", "..", ".env.local"));
+  } catch {
+    /* Deliberately swallowed — see above. */
   }
+}
+
+function connectionString(): string {
+  loadLocalEnv("DATABASE_URL_UNPOOLED");
 
   const url = process.env.DATABASE_URL_UNPOOLED;
   if (!url) {
@@ -92,6 +97,42 @@ export async function markEmailVerified(email: string): Promise<string> {
   return id;
 }
 
+/**
+ * Deletes the private CSVs this run's imports uploaded — prompt 77.
+ *
+ * **Not `lib/storage/activity-import.ts`.** That module carries
+ * `import "server-only"` and the boundary is not something a test may route
+ * around, exactly as the pool above is not `lib/db/client.ts`. The package's
+ * own `del` is called instead, with the token passed explicitly because
+ * nothing but Next.js auto-loads `.env.local` (AGENTS.md 7.3).
+ *
+ * Best-effort and silent, like the module it mirrors: a delete failure must not
+ * replace the teardown's real outcome — the counted readback — with a secondary
+ * one, and there is nothing loggable here that is not a customer's data.
+ * A store this fixture could not clean is reported by its absence of noise, not
+ * by a pathname in a log (8.3 rule 2).
+ */
+async function removeFixtureImportBlobs(
+  organizationIds: string[],
+): Promise<void> {
+  loadLocalEnv("BLOB_READ_WRITE_TOKEN");
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return;
+
+  const result = await getPool().query<{ blob_pathname: string }>(
+    'SELECT "blob_pathname" FROM "activity_import" WHERE "organization_id" = ANY($1) AND "blob_pathname" IS NOT NULL',
+    [organizationIds],
+  );
+  const pathnames = result.rows.map((row) => row.blob_pathname);
+  if (pathnames.length === 0) return;
+
+  try {
+    await del(pathnames, { token });
+  } catch {
+    /* Swallowed deliberately, and silently — see above. */
+  }
+}
+
 export async function countTables(): Promise<TableCounts> {
   const counts = {} as TableCounts;
   for (const name of COUNTED_TABLES) {
@@ -142,6 +183,42 @@ export async function removeFixture(record: RunRecord): Promise<void> {
   const client = getPool();
 
   if (organizationIds.length > 0) {
+    /* **Prompt 77's activity relations, deleted before the organisation they
+       reference.** In dependency order downwards: an emission references a
+       record, a record references a site and an import row, a row references
+       an import. Each is scoped by `organization_id`, which every one of them
+       carries `not null` (AGENTS.md 9.2 rule 6).
+
+       The blob goes first, while `activity_import` still names it. A committed
+       import keeps its uploaded file — only a discard deletes it — so without
+       this the walk would leave one private CSV per run in the store forever,
+       which is the retention rule read backwards (8.3 rule 5). */
+    await removeFixtureImportBlobs(organizationIds);
+
+    await client.query(
+      'DELETE FROM "activity_emission" WHERE "organization_id" = ANY($1)',
+      [organizationIds],
+    );
+    await client.query(
+      'DELETE FROM "activity_factor_mapping" WHERE "organization_id" = ANY($1)',
+      [organizationIds],
+    );
+    await client.query(
+      'DELETE FROM "activity_record" WHERE "organization_id" = ANY($1)',
+      [organizationIds],
+    );
+    await client.query(
+      'DELETE FROM "activity_import_row" WHERE "organization_id" = ANY($1)',
+      [organizationIds],
+    );
+    await client.query(
+      'DELETE FROM "activity_import" WHERE "organization_id" = ANY($1)',
+      [organizationIds],
+    );
+    await client.query('DELETE FROM "site" WHERE "organization_id" = ANY($1)', [
+      organizationIds,
+    ]);
+
     await client.query('DELETE FROM "member" WHERE "organization_id" = ANY($1)', [
       organizationIds,
     ]);

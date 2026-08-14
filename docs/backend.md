@@ -6070,6 +6070,220 @@ schema is untouched.
 | a new `package.json` script | none was needed. The existing three E2E scripts pick the new projects up through `dependencies` |
 | any change to a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | §8.1 and the front matter's settled surfaces |
 
+## An E2E walk of the factor picker, prompt 77
+
+Implemented on 14 Aug 2026. **Prompt 76 shipped `/activity/mappings`'s wording
+search with no browser-level verification at all** — its own record above lists
+`npm run test:e2e:local` as "no test result" and names the interactive focus
+behaviour as the thing nothing had ever exercised. That was the newest and
+largest verification gap in the repository, and it sat on the surface that
+decides which factor multiplies a disclosure figure. This walk closes it.
+
+Nothing under `app/` or `lib/` changed. The whole change is `e2e/`.
+
+### What was added
+
+| file | what it is |
+| --- | --- |
+| `e2e/factor-picker.spec.ts` | the walk — three tests in a `test.describe.serial`, under `test.use({ storageState: OWNER_STATE_PATH })` |
+| `e2e/support/fixture.ts` | six activity relations added to `COUNTED_TABLES` |
+| `e2e/support/database.ts` | the matching deletes in dependency order, plus the blob cleanup below |
+
+No new `package.json` script and no new Playwright project: the existing browser
+projects pick a new spec file up through `testDir` and their
+`dependencies: ["setup"]`.
+
+### The dependency, and why the import is obtained through the UI
+
+`/activity/mappings` renders the picker **only when the organisation has
+committed activity records** — `app/activity/mappings/page.tsx` answers
+`coverage.length === 0` with the "No committed activity records yet." section
+and renders neither the coverage column nor "Choose a factor". Supplying
+`?category=…&unit=…` does not route around it; `selected` is consulted only
+inside the non-empty branch. Prompt 74's fixture deliberately seeds no activity
+data, so this walk had to make the surface reachable.
+
+**It does so through the application's own UI** — `setInputFiles` with a buffer
+the test wrote, "Stage import", then "Commit 2 rows" and "Confirm commit" — not
+by writing rows into the database, which is the same discipline prompt 74
+applied to sign-up and organisation creation. Two rows in one `(category, unit)`
+pair, `fuel` + `L`, chosen because DESNZ publishes many `litres` rows and that
+is what gives the wording search something to rank; the dates sit inside the
+seeded 2026 set's activity window, so the pair is calculable rather than out of
+period. Headers are named canonically, so the alias set in
+`lib/domain/activity-import.ts` has nothing to guess at.
+
+### What is now exercised, and which branch each assertion enters
+
+| assertion | the branch it enters |
+| --- | --- |
+| staging | `stageImport`, then the review view's own summary — `6 of 6 fields are mapped, from a file with 6 columns.` and the override form's six selects, each holding its resolved column index |
+| commit | `commitImport`'s transaction, then the Server Component's re-render reporting `The rows below are part of your activity records.` with the commit section gone |
+| exact-text search | `searchFactorsForPair`'s substring pass — at least one result row labelled `Exact text match` |
+| close wording, on a misspelling (`diesal`) | `searchFactorsByWording`'s ranked pass — a row carrying `Close wording` or `Weak wording match`, plus the caveat line about character groups |
+| the invalid path | `factorSearchSchema`'s `superRefine`, and the branch rendering the refusal as `role="alert"` — **and `factor-picker.tsx`'s `searchStatusRef` focus effect, which nothing had exercised before this line.** The assertion reads `document.activeElement`, so it proves the refusal *holds focus* rather than merely being announced |
+| search never mutates | the pair's coverage row, read before and after all three searches, is unchanged |
+
+Every locator is an accessible role or visible text. The class names are settled
+design output and a test must not pin them.
+
+**Nothing here asserts a timing, a similarity score or a band threshold.**
+Prompt 76 measured 299–723 ms warm against a scale-to-zero database (§7.3); a
+threshold on that is a flake generator and would be a judgement dressed as a
+measurement (§12 rule 4). `0.10` is a recorded product judgement, so the
+assertion is that *a* band label renders, never that a given query lands in a
+given band.
+
+### Two comparisons that needed care, and why they are written the way they are
+
+- **The coverage comparison blanks every digit run** before comparing. The two
+  browser projects run the same walk against the same organisation
+  concurrently, so a record count moving between two reads is the other project
+  committing — never a mutation the searches caused, which is the only thing
+  that comparison is about. Mapped-or-not, the factor's label, its source and
+  who chose it all survive the blanking.
+- **Waiting on a URL *pattern* would not wait at all.** `waitForURL` resolves
+  immediately when the current URL already matches, and every search lands back
+  on `/activity/mappings`. The predicate form compares against the URL the page
+  was on, so it waits for the real navigation.
+
+### The counted relations, and the blob
+
+`COUNTED_TABLES` gains **six**, not the four prompt 77 named. `site` and
+`activity_import_row` are the two it did not: `commitImport` upserts a `site`
+per distinct normalised name (`lib/db/activity-queries.ts:468`) and the staging
+path writes one `activity_import_row` per parsed line (`:604`). The list is
+widened rather than the count narrowed — a relation missing from it is a
+leftover row nothing would fail on.
+
+`activity_factor_mapping` and `activity_emission` are counted even though this
+walk may write neither: nothing on the read paths it visits calls
+`recalculateOrganization`. Counting them is what would catch that changing.
+
+**The blob is deleted before the row that names it.** A committed import keeps
+its uploaded CSV — only a discard deletes it — so without this the walk would
+leave one private file per run in the store forever, which is §8.3 rule 5 read
+backwards. The package's own `del` is called with the token passed explicitly,
+**not** `lib/storage/activity-import.ts`, which carries `import "server-only"`
+and is a boundary a test may not route around (§6.2), exactly as the fixture's
+pool is not `lib/db/client.ts`. It is best-effort and silent: a delete failure
+must not replace the teardown's real outcome — the counted readback — with a
+secondary one, and there is nothing loggable there that is not a customer's
+data.
+
+### What the walk found, and is reporting rather than fixing
+
+Both are test-authoring findings, both were fixed in this file, and neither is a
+defect in the application:
+
+1. **`Not mapped` is the empty option of every one of the six mapping selects**,
+   so it is present six times on a fully mapped import. An assertion that its
+   count was zero failed the first run — on the test, not on the application.
+   The page's own summary sentence and the six resolved select values are
+   asserted instead.
+2. **The commit needs a wait budget, and the default 5 s expired mid-commit** —
+   with the button still reading "Committing..." — on both projects on the
+   second run. The commit is one transaction against a scale-to-zero database,
+   the two projects run it concurrently, and `router.refresh()` re-renders the
+   page afterwards. `COMMIT_WAIT` is 45 s and the test timeout is raised to
+   120 s so the budget is reported as the assertion it belongs to rather than as
+   a test timeout. **Nothing claims the commit takes any particular time.**
+
+Also observed, and not a finding about this change: **the first `npm run build`
+of this session failed on `next/font/google`** with
+`Module not found: Can't resolve '@vercel/turbopack-next/internal/font/google/font'`.
+That is a font fetch with no network, not a code fault; the two builds after it
+were clean with zero `Module not found` lines. Recorded because a session that
+hits it once should not go looking for a regression.
+
+**Neither of prompt 74's two open findings was touched** — `/reports/[reportId]`
+answering an absent report at 200, and the one-off `/activity` 500. Both remain
+open, both are changes to shipped behaviour with their own decisions, and this
+walk visits neither route.
+
+### Which of prompt 76's gaps this closes
+
+Prompt 76 left two, and named them as environment limitations rather than
+passes:
+
+| gap | state now |
+| --- | --- |
+| the four authenticated browser cases, and the interactive focus behaviour | **closed.** All four are asserted, and the focus effect is read from `document.activeElement` |
+| WebKit | **still open, unchanged.** `scripts/playwright-webkit.sh` exits with `Podman is required for WebKit on Arch Linux.`, as on every prompt since 71 |
+
+### Prerender, trust, secrets
+
+**Prerender impact: none, verified.** The route table is unchanged — `/`,
+`/about`, `/careers`, `/journal`, `/design-system`, `/forgot-password`,
+`/reset-password`, `/sign-in`, `/sign-up`, `/verify-email` and `/_not-found`
+static; `/article/[slug]` (6) and `/job-listing/[slug]` (3) SSG; everything else
+dynamic. After normalising the build id, both chunk-name patterns and the RSC
+flight payloads, **0 of 21 prerendered HTML files differed**, and the CSS
+compared **68,506 → 68,506 bytes, 0 rules added and 0 removed** against prompt
+76's baseline. The comparison was re-run *after* this section and the prompt
+file were written, because Tailwind v4 scans `prompts/` and `docs/` and a rare
+word in prose can ship dead CSS on every page — it has fired twice before, once
+from prompt 74's own file.
+
+**Trust boundary: no new request path, and no existing one changed.** No Server
+Action, Route Handler, schema or form was added or altered. No authorisation
+check was relaxed, parameterised or given a test-only branch: there is no
+`NODE_ENV` or `E2E` conditional in `lib/auth/`, in `proxy.ts` or on any page,
+and neither `disableCSRFCheck` nor `disableOriginCheck` appears. What crosses
+from the browser in this walk — a CSV part and a column mapping to
+`stageImport`, an import id to `commitImport`, and `category` / `unit` / `q` /
+`mode` as an authenticated GET — is already validated server-side by the shared
+Zod schemas, and each already resolves its organisation from the session rather
+than from the request. **The one write the fixture may not obtain honestly
+remains the single `email_verified` update prompt 74 recorded; this prompt adds
+no second one.** `checkActivityCommitLimit` was not tripped: one import per run
+per identity sits well inside it.
+
+**Secrets and data.** No new environment variable and no change to
+`.env.example`; the fixture reads `DATABASE_URL_UNPOOLED` and, for the blob
+cleanup, `BLOB_READ_WRITE_TOKEN`, both already present, and
+`BETTER_AUTH_URL` / `RESEND_API_KEY` stay overridden for the test run only. No
+`NEXT_PUBLIC_*`. No secret is echoed — key names only. No real personal data:
+the CSV's site name, description and quantities are synthetic and the identities
+stay prompt 74's run-scoped `example.com` addresses. Nothing is logged — not an
+address, not a cookie, not a search term, not a figure (§8.3 rule 2). No model
+is called. Worth stating plainly: these rows are written to the project's one
+real Neon database, as prompt 74's already are, and the teardown's counted
+readback is what keeps that acceptable.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output, exit 0 |
+| `npm run typecheck` | clean, no output, exit 0 |
+| `npm test` | **215 passed, 10 files** — unmoved from prompt 76; `lib/domain/` is untouched |
+| `npm run build` | exit 0, 0 `Module not found` lines, route table above (see the font observation) |
+| prerender comparison | **0 of 21 differed**; CSS 68,506 → 68,506, 0 rules changed |
+| `npm run test:e2e:local` | **54 passed**, twice — **2.7 min** and **2.5 min** wall-clock, each including a production build. 48 before, so the three new tests × two projects account for all six |
+| row-count readback | **zero delta on all thirteen counted relations, on both runs.** The teardown asserts each relation back to its before-count, so its pass *is* the measurement |
+| `npm run test:e2e:webkit` | **did not run** — `Podman is required for WebKit on Arch Linux.` An environment gap, not a pass (§12 rule 3) |
+| `npm run db:generate` | **not run.** The schema is untouched, and saying so is part of the record |
+
+On warm versus cold (§7.3): the second run began immediately after the first and
+its database was warm. The first followed a build with no database traffic
+earlier in the session, so its opening query was plausibly cold — that is a
+judgement, not a measurement, and the 0.2 min between the two runs is well
+inside the noise of two production builds either way.
+
+### What prompt 77 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| an E2E walk of `/submissions` and the staff/admin roles | §11.1's roles are orthogonal to tenant membership and want their own identity with a granted `user.role`. Named by prompt 74, named again here, and still the obvious follow-up |
+| fixing prompt 74's finding 1, `/reports/[reportId]` answering an absent report at 200 | a change to shipped behaviour with its own decision. This walk touches neither route |
+| chasing prompt 74's finding 2, the one-off `/activity` 500 | not reproducible in three attempts and no trace was captured |
+| asserting a similarity score, a band threshold or a query latency | judgements and warm-database timings; see above |
+| exercising the customer-supplied factor path, superseding, or retirement | prompts 66, 67 and 71's surfaces. This walk is prompt 76's gap, and widening it buries the result |
+| the deletion lock, the restore control or the purge sweep | prompt 73's purge deletes blobs when it runs; a real want and a separate decision |
+| a CI workflow | nothing in this repository runs CI today |
+| any change to `app/`, `lib/`, a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | §8.1 and the front matter's settled surfaces |
+
 ## Step 9 — activity-data ingestion
 
 Implemented by prompt 57 on 10 Aug 2026. CSV import, staged rows, validation

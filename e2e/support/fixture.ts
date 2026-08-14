@@ -30,6 +30,20 @@ export const ORPHAN_STATE_PATH = path.join(AUTH_DIR, "orphan.json");
  * rather than an assertion about the deletes we happened to write.
  *
  * `rate_limit` is deliberately absent — see `support/database.ts`.
+ *
+ * **The six activity relations arrived with prompt 77**, whose walk stages and
+ * commits one import so `/activity/mappings` has a pair to search against.
+ * Four of them are the ones that prompt named; `site` and `activity_import_row`
+ * are the two it did not, and they are here because `commitImport` in
+ * `lib/db/activity-queries.ts` upserts a `site` per distinct normalised name
+ * and `createStagedImport` writes one `activity_import_row` per parsed line.
+ * The list is widened rather than the count narrowed: a relation missing from
+ * here is a leftover row nothing would fail on.
+ *
+ * `activity_factor_mapping` and `activity_emission` are counted even though
+ * this walk may write neither — nothing on the read paths it visits calls
+ * `recalculateOrganization`, and only `setFactorMapping` and the cron sweep do.
+ * Counting them is what would catch that changing.
  */
 export const COUNTED_TABLES = [
   "user",
@@ -39,6 +53,12 @@ export const COUNTED_TABLES = [
   "organization",
   "member",
   "invitation",
+  "site",
+  "activity_import",
+  "activity_import_row",
+  "activity_record",
+  "activity_factor_mapping",
+  "activity_emission",
 ] as const;
 
 export type CountedTable = (typeof COUNTED_TABLES)[number];
