@@ -22,10 +22,14 @@ import {
   activityFactorMapping,
   activityRecord,
   emissionFactor,
+  emissionFactorLabelSql,
   emissionFactorSet,
 } from "./schema";
 import type { ActivityCategory, ActivityUnit } from "../validation/activity";
 import { DEFAULT_FACTOR_MAPPINGS } from "../domain/defra";
+import {
+  factorMatchSourceText,
+} from "../domain/factor-match";
 import {
   admissibleFactorUnits,
   aggregate,
@@ -1293,11 +1297,7 @@ export async function hasAnyFactorMapping(
 /** The publisher's own description of a factor row, assembled the one way
     `listFactorMappings` already assembles it, so the picker, the coverage list
     and the calculation seam all name a row identically. */
-function factorLabelOf(
-  parts: readonly (string | null)[],
-): string {
-  return parts.filter(Boolean).join(" · ");
-}
+const factorLabelOf = factorMatchSourceText;
 
 /**
  * "This record is mapped, and no visible set's window contains its date" — in
@@ -1632,6 +1632,78 @@ export async function searchFactorsForPair(
     sourceUrl: row.sourceUrl,
     sourceReference: row.sourceReference,
     customerSupplied: row.setOrganizationId !== null,
+  }));
+}
+
+export type FuzzyFactorSearchRow = FactorSearchRow & {
+  similarity: number;
+};
+
+/**
+ * Character-trigram wording search for one admissible activity pair. It keeps
+ * the lexical picker's five eligibility rules and includes visible customer
+ * rows: all ranking happens inside the tenant-scoped Postgres query.
+ */
+export async function searchFactorsByWording(
+  organizationId: string,
+  unit: ActivityUnit,
+  query: string,
+): Promise<FuzzyFactorSearchRow[]> {
+  const admissible = admissibleFactorUnits(unit);
+  if (admissible.length === 0) return [];
+
+  const label = emissionFactorLabelSql(emissionFactor);
+  const similarity = sql<number>`similarity(${label}, ${query.trim()})`;
+
+  const rows = await getDb()
+    .select({
+      id: emissionFactor.id,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+      publishedUom: emissionFactor.publishedUom,
+      scope: emissionFactor.scope,
+      gas: emissionFactor.gas,
+      value: emissionFactor.value,
+      source: emissionFactorSet.source,
+      datasetVersion: emissionFactorSet.datasetVersion,
+      licence: emissionFactorSet.licence,
+      licenceUrl: emissionFactorSet.licenceUrl,
+      sourceUrl: emissionFactorSet.sourceUrl,
+      sourceReference: emissionFactorSet.sourceReference,
+      setOrganizationId: emissionFactorSet.organizationId,
+      similarity,
+    })
+    .from(emissionFactor)
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .where(
+      and(
+        visibleFactorScope(organizationId),
+        isNull(emissionFactor.deletedAt),
+        isNull(emissionFactorSet.deletedAt),
+        isNull(emissionFactorSet.supersededBySetId),
+        eq(emissionFactor.resultUnit, "kg_co2e"),
+        inArray(emissionFactor.activityUnit, admissible),
+      ),
+    )
+    .orderBy(desc(similarity), asc(emissionFactor.id))
+    .limit(FACTOR_SEARCH_LIMIT);
+
+  return rows.map((row) => ({
+    id: row.id,
+    label: factorLabelOf([row.level2, row.level3, row.columnText]),
+    publishedUom: row.publishedUom,
+    scope: row.scope,
+    gas: row.gas,
+    value: row.value,
+    source: row.source,
+    datasetVersion: row.datasetVersion,
+    licence: row.licence,
+    licenceUrl: row.licenceUrl,
+    sourceUrl: row.sourceUrl,
+    sourceReference: row.sourceReference,
+    customerSupplied: row.setOrganizationId !== null,
+    similarity: row.similarity,
   }));
 }
 

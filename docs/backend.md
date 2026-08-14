@@ -6544,6 +6544,147 @@ at all.
 | a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
 
+## Provider-free fuzzy factor matching, prompt 76
+
+Prompt 75 reached its first Vercel AI Gateway embedding request and received
+`AI Gateway requires a valid credit card on file to service requests.` The user
+declined adding a card. No embedding was produced: the live
+`emission_factor_embedding` count was read before recovery and was **0**.
+Prompt 76 therefore supersedes the uncommitted provider path with PostgreSQL
+character-trigram matching. It is deliberately described as wording matching,
+not AI, semantic understanding, confidence or synonym matching.
+
+### Finished read path
+
+`/activity/mappings` keeps its escaped, case-insensitive substring search and
+adds **Find close wording**. The Server Component awaits `searchParams`, parses
+`q` and `mode` through the shared Zod schema, and resolves the Better Auth
+membership before calling the data layer. `lexical` remains the default;
+`fuzzy` requires a non-empty query; both trim input and cap it at 120
+characters. Invalid input becomes a focus-managed visible result rather than an
+exception.
+
+The fuzzy query uses PostgreSQL `similarity()` over one shared expression made
+from `level_2`, `level_3` and `column_text`. Exact substring results remain first
+in their existing deterministic sequence. Other results follow by descending
+trigram similarity and then factor id. All five eligibility rules remain on the
+database query: tenant visibility; factor and set not deleted; set not
+superseded; `result_unit = kg_co2e`; an admissible activity unit. Visible
+customer-supplied rows participate under the same tenant predicate. Nothing
+leaves Postgres and nothing is logged.
+
+Rows say **Exact text match**, **Close wording**, or **Weak wording match** in
+text. The result retains source, dataset version, licence, published unit,
+value, scope and gas. The page says that character-group comparison can miss
+synonyms. Selection still goes through the existing owner-authorised mapping
+action and deterministic recalculation; search never selects, checks or saves a
+factor.
+
+### Pure ranking judgement
+
+`lib/domain/factor-match.ts` clamps PostgreSQL's documented zero-to-one score,
+orders ties by id and assigns the two wording bands. **0.10 is a product
+judgement, not a probability or a fitted accuracy claim.** The first 0.30
+judgement was rejected after the behavior probe because a misspelled diesel
+query against the publisher's longer label scored 0.147 while nonsense scored
+0.030. There is no labelled customer corpus from which to measure precision or
+recall. Tests cover the 0.10/0.099 boundary, score clamping, source-label
+assembly and stable ordering.
+
+### Migration 0013/0014 recovery
+
+Migration 0013 remains immutable because it had already been applied. It
+installs `vector` and creates the embedding table. Migration
+`0014_supreme_polaris.sql` then:
+
+1. installs `pg_trgm` before any trigram operator class is referenced;
+2. drops the verified-empty embedding table;
+3. creates `emission_factor_label_trgm_idx`, a GIN expression index using
+   `gin_trgm_ops` over the exact label expression used by the query.
+
+The expression does not use `concat_ws`: PostgreSQL reports that function as
+stable, and an expression index requires immutable functions. The shipped
+expression uses immutable `nullif`, `coalesce`, conditional expressions and
+text concatenation, preserving the same omission of null/empty label parts as
+the TypeScript presenter. The whole expression is parenthesised before the
+operator class; without that grouping PostgreSQL rejects the generated SQL near
+the first concatenation operator.
+
+Both `npm run db:migrate` and the documented IPv4-first CLI retry exited 0 but
+applied nothing on this machine. Readback caught it. Drizzle's installed
+programmatic migrator, using the direct URL and the existing 2.5-second address
+attempt budget, applied the same generated migration files successfully.
+
+Live readback after apply:
+
+- `pg_trgm` installed at **1.6**;
+- `emission_factor_embedding` resolves to **null**;
+- `emission_factor_label_trgm_idx` exists with the full label expression and
+  `gin_trgm_ops`;
+- `vector` remains installed at **0.8.0**, idle as required.
+
+### Warm behavior probes
+
+Measured 14 Aug 2026 after one direct connection was established, against
+eligible published `litres` → `kg_co2e` rows. These are warm database timings,
+not threshold-fit or end-to-end page measurements:
+
+| query | elapsed | top score and shipped band |
+| --- | ---: | --- |
+| `diesel` | 474.9 ms | 0.280, close wording (the UI's substring pass labels exact rows first) |
+| `diesal` | 723.2 ms | 0.147, close wording |
+| `zzqv nowhere` | 299.2 ms | 0.030, weak wording match |
+
+Neon network time is included; connection establishment is not. Duplicate
+labels across dataset revisions are expected and the factor-id tail keeps their
+sequence deterministic.
+
+### Prerender, trust, secrets and checks
+
+**Prerender impact: none, verified.** Both isolated builds retained the same
+route table with `/activity/mappings` dynamic. After normalising the build id,
+JavaScript/CSS chunk names and RSC flight payloads, **0 of 21 prerendered HTML
+files differed**. The first CSS comparison found one 33-byte width utility; the
+picker was changed to reuse the existing width. **Final CSS: 68,506 → 68,506
+bytes, delta 0; 0 rules added and 0 removed.**
+
+Trust boundary: the browser supplies `category`, `unit`, `q` and `mode` through
+an authenticated GET. Category/unit are narrowed against the existing enums;
+the shared Zod schema validates query/mode. The server session plus membership
+row chooses the organisation, and the data query applies tenant visibility.
+There is no BotID or Upstash read: this is an authenticated local database read,
+with no provider spend or new Redis key.
+
+Secrets/data: no new environment variable and no `NEXT_PUBLIC_*` value. The app
+uses the existing pooled `DATABASE_URL`; migration/readback use the direct URL.
+The search text, factor labels, user/session and organisation id are sent to no
+new party, stored nowhere new and not logged. `.env.example` and `package.json`
+are unchanged. The abandoned provider modules, embedding backfill, model ids
+and suggestion limiter are absent from the finished tree.
+
+Checks completed before the final docs rebuild:
+
+| check | result |
+| --- | --- |
+| embedding-row precheck | exactly 0 |
+| `npm run db:generate` | generated `0014_supreme_polaris.sql` from 24 tables |
+| generated migration apply | programmatic Drizzle fallback applied; CLI limitation above |
+| database readback | extension/table/index/vector results above |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **215 passed, 10 files** |
+| `npm run build` | compiled; 32 static-generation entries; route modes unchanged |
+| prerender/CSS comparison | 0 of 21 HTML files changed; CSS 68,506 → 68,506 bytes; 0 rules changed |
+| `npm run test:e2e:local` | no test result: sandbox port binding failed, then the escalation reviewer timed out twice before startup |
+| `npm run test:e2e:webkit` | did not run: `Podman is required for WebKit on Arch Linux.` |
+| manual authenticated picker | not run: both installed browser-control skills lacked their required binaries (`agent-browser` and `browser-use`) |
+
+The browser gaps are environment limitations, not passes. The database query,
+schema, validation, pure ranking and production compilation were exercised;
+interactive focus behavior and the four authenticated browser cases remain to
+be checked when a browser-control binary or the Playwright local-server approval
+is available.
+
 ## Step 14 — scheduled recalculation and threshold alerts
 
 Built from `prompts/62-scheduled-recalculation-and-threshold-alerts.md`. **The

@@ -300,3 +300,28 @@ export const FACTOR_MAPPING_ERRORS = {
   notOwner:
     "Only an owner can change an emission factor. A factor choice moves every figure in a disclosure.",
 } as const;
+
+export const FACTOR_SEARCH_MODES = ["lexical", "fuzzy"] as const;
+
+/** A request-time GET still crosses the browser/server boundary. It is parsed
+    before it reaches the database, and 120 characters remains the cap the
+    mapping page had before close-wording search existed. */
+export const factorSearchSchema = z
+  .object({
+    q: z
+      .string()
+      .trim()
+      .max(120, { error: "Use 120 characters or fewer." }),
+    mode: z.enum(FACTOR_SEARCH_MODES).catch("lexical"),
+  })
+  .superRefine((value, context) => {
+    if (value.mode === "fuzzy" && value.q === "") {
+      context.addIssue({
+        code: "custom",
+        path: ["q"],
+        message: "Enter a description before finding close wording.",
+      });
+    }
+  });
+
+export type FactorSearchInput = z.infer<typeof factorSearchSchema>;

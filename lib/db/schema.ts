@@ -686,6 +686,10 @@ export const emissionFactor = pgTable(
     uniqueIndex("emission_factor_set_row_key").on(t.setId, t.sourceRowId),
     index("emission_factor_organization_scope_idx").on(t.organizationId, t.scope),
     index("emission_factor_set_scope_idx").on(t.setId, t.scope),
+    index("emission_factor_label_trgm_idx").using(
+      "gin",
+      sql`(${emissionFactorLabelSql(t)}) gin_trgm_ops`,
+    ),
     /* A half-declared supersession is a row that silently supersedes nothing:
        the source alone matches no sibling key, and the row id alone would match
        across publishers. */
@@ -705,6 +709,19 @@ export const emissionFactor = pgTable(
     ),
   ],
 );
+
+/**
+ * The publisher label as one Postgres expression. The trigram index and fuzzy
+ * query both call this helper so a future label change cannot silently leave
+ * the query searching a different projection from the one the index stores.
+ */
+export function emissionFactorLabelSql(factor: {
+  level2: AnyPgColumn;
+  level3: AnyPgColumn;
+  columnText: AnyPgColumn;
+}) {
+  return sql`coalesce(nullif(${factor.level2}, ''), '') || case when nullif(${factor.level2}, '') is not null and (nullif(${factor.level3}, '') is not null or nullif(${factor.columnText}, '') is not null) then ' · ' else '' end || coalesce(nullif(${factor.level3}, ''), '') || case when nullif(${factor.level3}, '') is not null and nullif(${factor.columnText}, '') is not null then ' · ' else '' end || coalesce(nullif(${factor.columnText}, ''), '')`;
+}
 
 /**
  * The organisation's chosen factor for one `(category, unit)` pair — **the

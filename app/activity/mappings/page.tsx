@@ -7,13 +7,20 @@ import { Button } from "../../_components/primitives";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
 import {
+  type FactorSearchRow,
   listFactorCoverage,
   listFactorSets,
+  searchFactorsByWording,
   searchFactorsForPair,
 } from "../../../lib/db/emission-queries";
 import {
+  rankFactorMatches,
+  type RankedFactorMatch,
+} from "../../../lib/domain/factor-match";
+import {
   ACTIVITY_CATEGORIES,
   ACTIVITY_UNITS,
+  factorSearchSchema,
   type ActivityCategory,
   type ActivityUnit,
 } from "../../../lib/validation/activity";
@@ -37,6 +44,17 @@ export const metadata: Metadata = {
 };
 
 type RawSearchParams = Record<string, string | string[] | undefined>;
+
+type PresentedFactor = FactorSearchRow & {
+  exactTextMatch?: boolean;
+  wordingMatch?: Pick<RankedFactorMatch, "band">;
+};
+
+type SearchPresentation = {
+  factors: PresentedFactor[];
+  message: string;
+  invalid: boolean;
+};
 
 function first(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -64,6 +82,76 @@ function pairHref(
   return `/activity/mappings?${params.toString()}`;
 }
 
+async function presentSearch(
+  organizationId: string,
+  unit: ActivityUnit,
+  rawQ: string,
+  rawMode: string,
+): Promise<SearchPresentation & { q: string; mode: "lexical" | "fuzzy" }> {
+  const checked = factorSearchSchema.safeParse({ q: rawQ, mode: rawMode });
+  if (!checked.success) {
+    const issue =
+      checked.error.issues[0]?.message ?? "Check the search and try again.";
+    return {
+      q: rawQ.slice(0, 120),
+      mode: rawMode === "fuzzy" ? "fuzzy" : "lexical",
+      factors: [],
+      message: issue,
+      invalid: true,
+    };
+  }
+
+  const { q, mode } = checked.data;
+  const lexical = await searchFactorsForPair(organizationId, unit, q);
+  if (mode === "lexical") {
+    return {
+      q,
+      mode,
+      factors:
+        q === ""
+          ? lexical
+          : lexical.map((factor) => ({ ...factor, exactTextMatch: true })),
+      message: "",
+      invalid: false,
+    };
+  }
+
+  const fuzzy = await searchFactorsByWording(organizationId, unit, q);
+  const ranked = rankFactorMatches(
+    fuzzy.map((factor) => ({
+      id: factor.id,
+      similarity: factor.similarity,
+    })),
+  );
+  const fuzzyById = new Map(fuzzy.map((factor) => [factor.id, factor]));
+  const exactIds = new Set(lexical.map((factor) => factor.id));
+  const exact = lexical.map((factor) => ({
+    ...factor,
+    exactTextMatch: true,
+  }));
+  const wordingMatches = ranked
+    .filter((match) => !exactIds.has(match.id))
+    .flatMap((match) => {
+      const factor = fuzzyById.get(match.id);
+      return factor
+        ? [
+            {
+              ...factor,
+              wordingMatch: { band: match.band },
+            },
+          ]
+        : [];
+    });
+  return {
+    q,
+    mode,
+    factors: [...exact, ...wordingMatches],
+    message:
+      "Close-wording ranking compares character groups and can miss synonyms. Review every factor's source, dataset version, licence, unit, value, scope and gas before choosing.",
+    invalid: false,
+  };
+}
+
 export default async function ActivityMappingsPage({
   searchParams,
 }: {
@@ -87,14 +175,20 @@ export default async function ActivityMappingsPage({
     coverage.find((pair) => pair.mapping === null) ??
     coverage[0] ??
     null;
-  const q = first(query.q).slice(0, 120);
-  const factors = selected
-    ? await searchFactorsForPair(
+  const search = selected
+    ? await presentSearch(
         membership.organization.id,
         selected.unit,
-        q,
+        first(query.q),
+        first(query.mode),
       )
-    : [];
+    : {
+        q: "",
+        mode: "lexical" as const,
+        factors: [],
+        message: "",
+        invalid: false,
+      };
 
   const unmapped = coverage.filter((pair) => pair.mapping === null).length;
   const recordsBehindGaps = coverage
@@ -267,7 +361,9 @@ export default async function ActivityMappingsPage({
                 <FactorPicker
                   category={selected.category}
                   unit={selected.unit}
-                  factors={factors}
+                  factors={search.factors}
+                  searchMessage={search.message}
+                  searchInvalid={search.invalid}
                 >
                   <form method="get" className="mt-8 border-y border-border py-6">
                     <input
@@ -287,14 +383,36 @@ export default async function ActivityMappingsPage({
                       <input
                         id="factor-search"
                         name="q"
-                        defaultValue={q}
+                        defaultValue={search.q}
+                        maxLength={120}
                         className="h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-muted/70 focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)]"
                         placeholder="Diesel, electricity, landfill..."
                       />
-                      <Button type="submit" bullet={false}>
-                        Search
-                      </Button>
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          type="submit"
+                          name="mode"
+                          value="lexical"
+                          bullet={false}
+                        >
+                          Search exact text
+                        </Button>
+                        <Button
+                          type="submit"
+                          name="mode"
+                          value="fuzzy"
+                          size="secondary"
+                          bullet={false}
+                        >
+                          Find close wording
+                        </Button>
+                      </div>
                     </div>
+                    <p className="mt-3 max-w-[40rem] font-mono text-[11px] leading-[18px] text-muted">
+                      Close-wording search compares character groups in this
+                      database. It can help with misspellings, but it can miss
+                      synonyms and does not choose a factor for you.
+                    </p>
                   </form>
                 </FactorPicker>
               </section>

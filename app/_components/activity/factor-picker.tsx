@@ -27,6 +27,10 @@ type SearchFactor = {
   sourceUrl: string | null;
   sourceReference: string | null;
   customerSupplied: boolean;
+  exactTextMatch?: boolean;
+  wordingMatch?: {
+    band: "close" | "weak";
+  };
 };
 
 /**
@@ -45,15 +49,20 @@ export function FactorPicker({
   category,
   unit,
   factors,
+  searchMessage,
+  searchInvalid,
   children,
 }: {
   category: ActivityCategory;
   unit: ActivityUnit;
   factors: SearchFactor[];
+  searchMessage: string;
+  searchInvalid: boolean;
   children: ReactNode;
 }) {
   const router = useRouter();
   const statusRef = useRef<HTMLDivElement>(null);
+  const searchStatusRef = useRef<HTMLDivElement>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<
@@ -63,6 +72,10 @@ export function FactorPicker({
   useEffect(() => {
     if (message) statusRef.current?.focus();
   }, [message]);
+
+  useEffect(() => {
+    if (searchMessage) searchStatusRef.current?.focus();
+  }, [searchMessage]);
 
   async function choose(factorId: string) {
     setMessage("");
@@ -108,6 +121,18 @@ export function FactorPicker({
     <>
       {children}
 
+      {searchMessage ? (
+        <div
+          ref={searchStatusRef}
+          role={searchInvalid ? "alert" : "status"}
+          aria-live={searchInvalid ? "assertive" : "polite"}
+          tabIndex={-1}
+          className="mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none"
+        >
+          {searchMessage}
+        </div>
+      ) : null}
+
       <div
         ref={statusRef}
         role="alert"
@@ -124,10 +149,12 @@ export function FactorPicker({
       </div>
 
       {factors.length === 0 ? (
-        <p className="mt-8 max-w-[40rem] font-serif text-p2 text-muted">
-          No eligible factors match this search. Try a publisher term, fuel
-          family or unit wording from the source dataset.
-        </p>
+        searchInvalid ? null : (
+          <p className="mt-8 max-w-[40rem] font-serif text-p2 text-muted">
+            No eligible factors match this search. Try a publisher term, fuel
+            family or unit wording from the source dataset.
+          </p>
+        )
       ) : (
         <ul className="mt-8" aria-label="Eligible emission factors">
           {factors.map((factor) => {
@@ -141,6 +168,17 @@ export function FactorPicker({
                   <p className="wrap-anywhere font-sans text-[17px] leading-6 font-bold text-ink">
                     {factor.label}
                   </p>
+                  {factor.wordingMatch ? (
+                    <p className="mt-2 font-mono text-[11px] leading-[18px] text-ink uppercase">
+                      {factor.wordingMatch.band === "close"
+                        ? "Close wording"
+                        : "Weak wording match"}
+                    </p>
+                  ) : factor.exactTextMatch ? (
+                    <p className="mt-2 font-mono text-[11px] leading-[18px] text-ink uppercase">
+                      Exact text match
+                    </p>
+                  ) : null}
                   <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <MiniDetail label="Unit">{factor.publishedUom}</MiniDetail>
                     <MiniDetail label="Value">{factor.value}</MiniDetail>
@@ -154,6 +192,12 @@ export function FactorPicker({
                       ? ` · ${factor.sourceReference}`
                       : ""}
                   </p>
+                  {factor.wordingMatch ? (
+                    <p className="mt-2 max-w-[40rem] font-mono text-[11px] leading-[18px] text-muted">
+                      Ranked only by wording in the label shown above. This can
+                      miss synonyms and is not a mapping or a default.
+                    </p>
+                  ) : null}
                 </div>
                 <Button
                   type="button"

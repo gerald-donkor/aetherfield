@@ -993,6 +993,53 @@ import { Client } from "pg";
 **Always read the schema back from `information_schema` after a migration on
 this machine. A clean exit is not evidence.**
 
+### A trigram extension must precede its generated expression index
+
+Drizzle can declare and generate a trigram operator class, but the extension is
+not represented in `schema.ts`. After `npm run db:generate`, insert this before
+the first trigram index statement in the generated migration:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+--> statement-breakpoint
+```
+
+Then apply and read back all three facts: the installed extension version, the
+relation added/removed by the migration, and the full `pg_indexes.indexdef`.
+Prompt 76's first two CLI attempts exited 0 while all three readbacks still
+showed the old schema.
+
+Two PostgreSQL constraints are easy to discover only at apply time:
+
+- every function in an index expression must be immutable; `concat_ws` is
+  stable, so build the label from immutable null/empty handling and text
+  concatenation instead;
+- a compound expression needs its own parentheses before `gin_trgm_ops`, or the
+  operator class binds to the final operand and PostgreSQL rejects the SQL.
+
+If both the normal CLI and the IPv4-first retry apply nothing, use Drizzle's
+installed programmatic migrator over the direct URL; this still applies the
+generated files rather than issuing ad-hoc DDL:
+
+```bash
+node_modules/.bin/dotenv -e .env.local -- node -e '
+const net=require("node:net");
+net.setDefaultAutoSelectFamilyAttemptTimeout(2500);
+const {Pool}=require("pg");
+const {drizzle}=require("drizzle-orm/node-postgres");
+const {migrate}=require("drizzle-orm/node-postgres/migrator");
+(async()=>{const pool=new Pool({
+  connectionString:process.env.DATABASE_URL_UNPOOLED,
+  connectionTimeoutMillis:15000,
+});try{
+  await migrate(drizzle(pool),{migrationsFolder:"lib/db/migrations"});
+}finally{await pool.end()}})().catch(error=>{
+  console.error(error);process.exit(1);
+});'
+```
+
+Read back again after the fallback. Its successful exit is not evidence either.
+
 ## Three source files are `data` to `file(1)`, and `grep` skips them silently
 
 `grep` finds **nothing** in `lib/db/emission-queries.ts` or
