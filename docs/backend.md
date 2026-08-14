@@ -5583,7 +5583,17 @@ Exercised, all twelve assertions passing:
   this repository. The lock is one `if` in each of the two chokepoints plus the
   five direct call sites listed above, all type-checked, and the data those
   branches read was exercised above; that is weaker than a walk-through and is
-  recorded as such;
+  recorded as such.
+
+  > **Corrected at prompt 74** (§12 rule 8). The last sentence of that bullet
+  > is no longer true: an authenticated fixture now exists — `e2e/auth.setup.ts`
+  > and `e2e/authenticated.spec.ts` — and all eight `requireOrganization()`
+  > pages are walked by a browser holding a real session, in both the member
+  > and the member-less branch. **What is still not walked is the lock itself**:
+  > prompt 74's fixture creates no `organization_deletion` row, so the
+  > `pendingDeletion` redirect and the `authorizeOrganization` refusal remain
+  > type-checked and unit-covered rather than driven. See "An authenticated E2E
+  > fixture, prompt 74" below;
 - **the purge itself has never run.** No blob was deleted and no cascade was
   executed against real data. The `onDelete` enumeration is read from the schema
   and the ordering argument is reasoned, not observed;
@@ -5659,7 +5669,7 @@ about another tenant.
 | an admin-side control to delete another tenant's organisation | §11.1's orthogonality — staff are not members, and a staff bypass is the failure `lib/auth/organization.ts:23-35` exists to prevent |
 | a data export before deletion | genuinely wanted, genuinely separate: step 13's report export exists, and "download everything" is its own prompt with its own format decisions |
 | an email on the purge itself | there is no workspace to link to by then, and the date was already given |
-| an authenticated E2E fixture | it would be the right way to walk the eight redirects, and it is a prompt of its own — the gap is recorded above rather than papered over |
+| an authenticated E2E fixture | it would be the right way to walk the eight redirects, and it is a prompt of its own — the gap is recorded above rather than papered over. **Built by prompt 74**; this row is left standing as the reason it was a separate prompt |
 | changing the 02:00 recalculation sweep's schedule or logic | beyond excluding locked organisations from `listAllOrganizationIds()`, which was required |
 | set-metadata editing, retiring a set from the UI, bulk CSV import, market-based scope 2 | untouched prior deferrals |
 | AI factor matching | §5.3 sanctions it and does not schedule it; deferred by prompts 65, 68, 69, 70 and still deferred |
@@ -5796,6 +5806,269 @@ normalised out — the chunk is content-hashed and the HTML carries the hash onl
 | the same treatment on the other twelve `Field` consumers | none was reported, and each carries its own prerender question |
 | the local `SelectField` | it renders no hint, so its controls already aligned |
 | anything behind the form — the action, the schema, the queries, prompt 71's supersession behaviour | untouched. No migration; `npm run db:generate` was not run |
+
+## An authenticated E2E fixture, prompt 74
+
+Implemented on 14 Aug 2026. Until this change, **every phase-two surface was
+verified by type-checking, by `npm test` over `lib/domain/`, and by hand — never
+by a browser holding a session.** `e2e/home.spec.ts` could assert only that a
+signed-out caller is turned away. That was the weakest link in this
+repository's verification story, and prompt 73's own record named it as the gap
+every later prompt would inherit.
+
+### What was added
+
+| file | what it is |
+| --- | --- |
+| `e2e/support/fixture.ts` | the run-scoped identity, the paths under `e2e/.auth/`, and the record the three halves share |
+| `e2e/support/database.ts` | the fixture's own `pg` pool over `DATABASE_URL_UNPOOLED`, the one direct write, the row-count readback and the deletes |
+| `e2e/auth.setup.ts` | a Playwright *setup* project that provisions three identities and two organisations |
+| `e2e/auth.teardown.ts` | the matching *teardown* project — deletes, then reads the row counts back |
+| `e2e/authenticated.spec.ts` | the walk |
+| `playwright.config.ts` | the setup/teardown projects, and two test-run environment values |
+| `.gitignore` | `/e2e/.auth/`, which holds live session cookies |
+
+`e2e/home.spec.ts` is **unchanged**, and the saved sessions are applied
+per-`describe` rather than as a project-wide default, so its five
+unauthenticated assertions still mean what they said.
+
+### How the fixture is built, and the one direct write
+
+Through the application's own HTTP surface, in this order, per identity:
+
+1. `POST /api/auth/sign-up/email` — so the password is hashed by Better Auth's
+   own hasher and the `account` row is shaped by the library;
+2. **`UPDATE "user" SET "email_verified" = true`** over the direct connection;
+3. `POST /api/auth/sign-in/email`;
+4. `POST /api/auth/organization/create`, which makes the caller the **owner**
+   (`creatorRole: "owner"`) and runs the real `allowUserToCreateOrganization`
+   verified-only gate rather than bypassing it — which is why step 2 has to come
+   first;
+5. `context.storageState()` to a gitignored path.
+
+**Step 2 is the only row the fixture may not obtain honestly.** Verification
+arrives by email and §8.3 forbids a test reaching into a mailbox. It is a
+developer-run script write with no request path, exactly like `db:seed:factors`.
+Everything else is the library's business: a hand-written `account` row would
+need Better Auth's scrypt output and a hand-written `member` row the plugin's
+role vocabulary, and a fixture that fabricates either stops testing the thing it
+exists to test the moment the library changes shape (§12 rule 6).
+
+`lib/auth/server.ts` is **not** imported by the setup script — it carries
+`import "server-only"`, which throws outside the `react-server` condition, and
+§6.2's boundary is not something a test may route around.
+
+The three identities: an **owner** of one organisation; an **unaffiliated**
+verified user with no organisation at all; and a **neighbour** owning a second
+organisation that nothing ever signs into, so the tenant-boundary assertion
+excludes a name that really is in the database rather than one that never
+existed.
+
+### The origin resolution, as it actually landed
+
+`.env.local`'s `BETTER_AUTH_URL` names `http://localhost:<port>`; Playwright
+serves on `http://127.0.0.1:3100`, and **those are different origins.** Better
+Auth seeds its trusted origins from `BETTER_AUTH_URL` and validates the `origin`
+header on any auth `POST` that carries a cookie
+(`api/middlewares/origin-check.mjs`, `validateOrigin` — the check is skipped
+only when no cookie is present, which is why the first sign-up would have
+succeeded and everything after it failed).
+
+**Resolved by `webServer.env` in `playwright.config.ts`**, a test-run value for
+a variable that already exists. **Not** by editing `.env.local`, and **not** by
+`advanced.disableCSRFCheck` or `disableOriginCheck` — both are flagged as
+security risks by `better-auth-security-best-practices`, and both would weaken
+the shipped application to suit a test. `.env.example` is unchanged and no new
+variable exists.
+
+Two consequences worth writing down, both verified in `node_modules/` rather
+than recalled:
+
+- Playwright merges `webServer.env` **over** `process.env`
+  (`playwright/lib/runner/index.js`), and `@next/env` never applies a `.env`
+  value to a key already present in `process.env`, so the override wins in
+  `next start`.
+- Better Auth derives cookie security from the base URL's scheme, not from
+  `NODE_ENV` (`cookies/index.mjs`), so an `http://` base URL yields non-secure
+  cookies and the session survives a production build served over plain HTTP.
+
+### The email decision: suppressed, not accepted
+
+`sendOnSignUp` is on, so each sign-up would hand a synthetic address to a real
+provider. **`RESEND_API_KEY` is emptied for the test run**, alongside the
+`BETTER_AUTH_URL` override. `lib/email/send.ts` throws on an unset key and
+`lib/email/auth.ts` catches it, so suppression costs nothing and changes no code
+path under test — the observed server line is
+`[email] account-verification failed: account-verification:transport-failed`,
+which names a template and no address (§8.3 rule 2).
+
+Letting the sends run would have bought nothing: `lib/email/config.ts`'s sender
+is Resend's sandbox address, which delivers only to the Resend account's own
+address and refuses every other recipient. So the mail could not have arrived,
+and a run that generates provider traffic for no observation is a
+deliverability cost with no return (`email-best-practices`). The fixture's
+address is under `example.com`, reserved by RFC 2606, so it could not reach a
+person even if a send escaped.
+
+### Teardown, and what "left as it found it" is measured against
+
+The setup project counts every relation it could reach **before** writing
+anything; the teardown project deletes in dependency order and counts them
+again, asserting each delta is zero. Across three full runs the seven counted
+relations — `user`, `session`, `account`, `verification`, `organization`,
+`member`, `invitation` — came back identical every time; the teardown assertion
+is what proves it, and a leftover row fails the run rather than sitting
+unnoticed. The run-scoped suffix means a crashed run cannot collide with the
+next one.
+
+Two deliberate exclusions, stated rather than papered over:
+
+- **`verification` is counted but never deleted.** Better Auth's email
+  verification is a signed JWT (`createEmailVerificationToken` in
+  `api/routes/email-verification.mjs`) and writes no row at all, and this
+  fixture never requests a password reset — the flow that does write one, keyed
+  by its token rather than by an address. There is nothing to target by run id,
+  and the readback is what proves the count did not move.
+- **`rate_limit` is neither deleted nor asserted on.** Its key is `<ip>|<path>`
+  (`@better-auth/core/utils/ip.mjs`, `createRateLimitKey`) and carries no user
+  reference, so a row this run caused cannot be told apart from one any other
+  local request caused. Better Auth prunes them itself once the window passes.
+  The delta is **printed** by the teardown project instead — observed 2 → 5 on
+  the first run and 3 → 3 on the two after it. Inventing a scope for the delete
+  would be worse than naming the gap.
+
+### Rate limiting, and why the fixture signs in once
+
+`/sign-in*` and `/sign-up*` carry Better Auth's own special rule of **three
+requests per ten seconds**, per IP and per path
+(`api/rate-limiter/index.mjs`, `getDefaultSpecialRules`), with
+`storage: "database"` in `lib/auth/server.ts`. The run makes exactly three of
+each, which sits on the boundary, so `authPost` honours a 429's `X-Retry-After`
+rather than treating it as a failure. Signing in **once** per identity and
+reusing `storageState` across the browser projects is what keeps it to three; a
+per-test sign-in would trip the limiter and produce a flake that reads as an
+auth bug.
+
+### What is now exercised
+
+48 tests per full local run — the five pre-existing unauthenticated ones plus
+new ones, across Chromium and Firefox:
+
+| assertion | branch it enters |
+| --- | --- |
+| the six id-less `requireOrganization()` pages return 200 with one `h1` for a member | the pass branch, on `/dashboard`, `/targets`, `/reports`, `/activity`, `/activity/mappings`, `/activity/factors` |
+| `/activity/<absent id>` answers 404, not a sign-in redirect | the seventh call site, past the gate and into the page's own not-found path |
+| `/reports/<absent id>` answers the not-found markup, not a sign-in redirect | the eighth call site — see the status finding below |
+| `/account` renders for the owner | the surface a locked or member-less caller is sent to |
+| a member-less user is sent from all six pages to `/account`, never to `/sign-in` | **`requireOrganization`'s second branch, which no test had ever entered** — and the one an ordinary new signup meets |
+| the owner's dashboard names its own organisation and never the neighbouring one | the tenant edge. `resolveTenant` accepts no organisation id from the request, so there is no id to tamper with; the assertion is on what a non-member sees |
+| a forged session cookie is turned away with a redirect to `/sign-in?callbackURL=%2Fdashboard` | **§7.3's `getSessionCookie()` trap, asserted rather than trusted.** `proxy.ts` lets the forged cookie straight through by design; the database-backed check is what catches it. The cookie names are read from the real saved session rather than written out, so the assertion cannot drift from what Better Auth actually sets |
+
+### Two findings this walk produced
+
+**1. `/reports/[reportId]` answers an absent report at HTTP 200, where
+`/activity/[importId]` answers 404.** Measured on both Chromium and Firefox; the
+not-found markup renders correctly in both cases, only the status differs. The
+mechanism is `app/reports/loading.tsx`: the `/reports` segment has a Suspense
+boundary, so the shell — and with it the status — is committed before
+`notFound()` runs inside it. `app/activity` has no `loading.tsx` and so
+completes its render before the status is sent.
+
+This is a real defect for a crawler or an API client and a non-issue for a
+person reading the page. **It is reported, not fixed**: fixing it is a separate
+change and needs its own decision, so `e2e/authenticated.spec.ts` asserts what
+the gate is for — no sign-in redirect, not-found markup rendered — and
+deliberately does not lock the status in either way. The reasoning is recorded
+at the test itself.
+
+**2. `/activity` returned HTTP 500 once, on Chromium, during the first full
+run**, with the application's own error surface and an error digest. **The cause
+was not captured and is not known.** It did not recur in a targeted 3×
+re-run at four workers, nor in either of the two subsequent full runs. A
+cold-compute effect on the first burst after `npm run build` is *plausible*
+given Neon's scale-to-zero (§7.3) but is a **hypothesis, not a measurement** —
+no server-side trace was taken, and the digest was not resolved to a stack.
+Recorded here so a recurrence is recognised rather than met fresh.
+
+### Prerender impact
+
+`none — no route changes`, **verified, not assumed** (§8.1). Built per
+`docs/automation.md`'s procedure against `HEAD`:
+
+- **0 of 21 prerendered HTML files differed** after normalising `BUILD_ID`, both
+  chunk-name patterns and the flight-data scripts; the file sets are identical.
+- **CSS: 68,506 bytes on both sides — delta 0**, and no rule added or removed.
+- `npm run build` reports the same route table: `/` and the other marketing
+  routes still `○`, the six articles and three job listings still `●`, 32 static
+  pages generated.
+
+**The Tailwind prose trap fired, and it fired from the prompt file.** The first
+comparison showed +219 bytes and one added filter-utility rule, traced to a bare
+English verb in `prompts/74-authenticated-e2e-fixture.md`'s non-goals — Tailwind
+v4 scans `prompts/` too. The first reword then **re-shipped the same rule by
+quoting the offending word while explaining the fix**, which is exactly the
+extension `docs/automation.md` records. Describing the token instead of
+spelling it brought the delta to zero. Three builds were needed to reach a clean
+result; the check is only trustworthy when re-run after the documentation is
+written, not only after the code is.
+
+### Trust boundary
+
+**No new request path, and no change to any existing one.** No Server Action, no
+Route Handler, no form, no schema. **No authorisation check is relaxed,
+parameterised or given a test-only branch** — there is no `NODE_ENV` or `E2E`
+conditional anywhere in `lib/auth/`, `proxy.ts` or any page, `proxy.ts`'s
+matcher is untouched, and neither `disableCSRFCheck` nor `disableOriginCheck`
+appears. The fixture is an ordinary client of the existing public auth
+endpoints holding an ordinary session, and can do nothing a real signed-in user
+could not — with the single stated exception of the direct `email_verified`
+write above.
+
+### Secrets and data
+
+- **No new environment variable.** The fixture reads `DATABASE_URL_UNPOOLED`,
+  already present; `BETTER_AUTH_URL` and `RESEND_API_KEY` are overridden **for
+  the test run only**. `.env.example` is unchanged.
+- **No `NEXT_PUBLIC_*`.**
+- **No secret is echoed.** Key names only, here and in the code.
+- **No real personal data.** The addresses are synthetic and run-scoped, the
+  password is generated per run and never committed, and `e2e/.auth/` is
+  gitignored because **`storageState` holds a live session cookie and is a
+  credential** — the teardown project removes the directory along with the rows
+  it authenticates against.
+- **Nothing is logged** — not an address, not a cookie, not a password. The
+  shape of the fixture address is recorded above; no instance of one is.
+- **No model is called.**
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | 9 files, 210 tests passed — unchanged; nothing in `lib/domain/` was touched |
+| `npm run build` | compiled successfully, 32/32 static pages, same route table |
+| prerender diff | **0 of 21 differed**, CSS delta 0 |
+| `npm run test:e2e:local` | **48 passed** (Chromium + Firefox), ~1.5 min wall-clock per run against a warm database; three full runs, the first of which produced finding 2 above |
+| `npm run test:e2e:webkit` | **did not run — Podman is absent on this machine**, and `scripts/playwright-webkit.sh` says so and exits. Chromium and Firefox only, as prompt 71's record also reported. `scripts/playwright-webkit.sh` and the Containerfile are unchanged |
+| row-count readback | zero delta on all seven counted relations, every run |
+
+No migration was generated and `npm run db:generate` was **not** run — the
+schema is untouched.
+
+### What prompt 74 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| **AI factor matching** | §5.3 sanctions it and does not schedule it. Deferred by prompts 65, 68, 69, 70 and 73, and deferred again here for the sixth time: it sits on the path that decides a filed disclosure figure, and putting a model near factor selection while the authenticated surfaces had no browser-level verification at all was the wrong order. That objection is now answered, which makes it the strongest remaining candidate |
+| fixing finding 1, the report not-found status | a separate change with its own decision; papering over it in the test would have been worse |
+| chasing finding 2, the one-off 500 | not reproducible in three attempts and no trace was captured; inventing a cause would be worse than recording the observation |
+| seeding activity records, imports, factors, targets or reports | the walk is of the **gates**, not of the workspaces' contents. A data-bearing fixture is a much larger prompt and would bury the authorisation result it exists to expose |
+| walking the deletion lock, the restore control or the purge sweep | prompt 73's purge has still never run, and making it run in a test deletes blobs — a real want and a separate decision. The corrected bullet in that section says so explicitly |
+| an E2E walk of `/submissions` and the staff/admin roles | §11.1's roles are orthogonal to tenant membership and need their own fixture with a granted `user.role`. The obvious follow-up, named rather than smuggled in |
+| a CI workflow | nothing in this repository runs CI today; adding one is its own decision |
+| a new `package.json` script | none was needed. The existing three E2E scripts pick the new projects up through `dependencies` |
+| any change to a marketing route, `SiteNav`, `SiteFooter` or any GSAP surface | §8.1 and the front matter's settled surfaces |
 
 ## Step 9 — activity-data ingestion
 

@@ -831,6 +831,75 @@ rather than shipping the utility.
   documentation of the fix reintroduces the defect and the check that would have
   caught it has already been run.
 
+**A third extension, found at prompt 74: `prompts/` is inside the scan root
+too.** A bare English verb in a prompt file's non-goals table — untracked, so
+present on the implementation side of the comparison and absent from the base —
+shipped a filter utility to every marketing page, +219 bytes. The prompt file
+is committed, so this is permanent, not a working-tree artefact. **Check the
+prompt file's own prose with the rule diff, not only the code's**, and expect
+to build three times: once to find it, once to discover the reword re-spelled
+the token while explaining the fix, and once to confirm zero.
+
+### An authenticated Playwright run needs two environment overrides, and both belong in `webServer.env`
+
+Worked out at prompt 74. Neither is a new variable and neither touches
+`.env.local` or `.env.example`.
+
+```ts
+// playwright.config.ts
+webServer: {
+  command: "npm run build && npm run start -- -p 3100",
+  env: {
+    BETTER_AUTH_URL: "http://127.0.0.1:3100",  // trusted-origin, see below
+    RESEND_API_KEY: "",                        // suppress the run's sends
+  },
+},
+```
+
+- **`BETTER_AUTH_URL` is the origin trap.** `.env.local` names
+  `http://localhost:<port>`; Playwright serves on `http://127.0.0.1:3100`, and
+  **those are different origins.** Better Auth seeds its trusted origins from
+  that variable and validates the `origin` header on any auth `POST` that
+  carries a cookie (`api/middlewares/origin-check.mjs`, `validateOrigin`) — so
+  the *first* sign-up succeeds, having no cookie yet, and everything after it
+  fails with a 403. The fix is this override, never `disableCSRFCheck` or
+  `disableOriginCheck`.
+- **The override actually wins**, through two behaviours worth knowing:
+  Playwright merges `webServer.env` over `process.env`
+  (`playwright/lib/runner/index.js`), and `@next/env` never applies a `.env`
+  value to a key already present in `process.env`. So `next start` sees the
+  override, not `.env.local`.
+- **A production build over plain HTTP still gets usable cookies.** Better Auth
+  derives cookie security from the base URL's scheme, not from `NODE_ENV`
+  (`cookies/index.mjs`), so an `http://` base URL yields non-secure cookies and
+  the saved `storageState` works.
+- **Sign in once per run.** `/sign-in*` and `/sign-up*` carry a special rule of
+  three requests per ten seconds per IP and per path
+  (`api/rate-limiter/index.mjs`, `getDefaultSpecialRules`), and this project
+  stores them in the database. Reuse `storageState` across browser projects and
+  honour a 429's `X-Retry-After`; a per-test sign-in trips the limiter and reads
+  as an auth bug.
+- **Nothing but Next.js auto-loads `.env.local`**, and the Playwright runner is
+  not Next.js. Use Node's built-in `process.loadEnvFile()` rather than
+  `dotenv` — `dotenv` is present only as a transitive of `dotenv-cli`, and
+  depending on a transitive is a break waiting for an unrelated install.
+
+### Reading a fixture's rows back, rather than claiming the database is clean
+
+Also prompt 74. Count every relation the run can reach **before** it writes
+anything, delete in dependency order, then count again and assert each delta is
+zero — a leftover row fails the run instead of sitting unnoticed. `e2e/auth.setup.ts`
+stores the "before" counts in a gitignored record; `e2e/auth.teardown.ts` reads
+them back.
+
+**Two relations cannot participate, and saying so is part of the result.**
+Better Auth's email verification is a signed JWT and writes no `verification`
+row at all, so there is nothing to target there — the readback is the proof.
+And `rate_limit` is keyed `<ip>|<path>` with no user reference, so a row this
+run caused cannot be told apart from any other local request's; print the delta
+rather than inventing a scope for a delete. Better Auth prunes those rows itself
+once the window passes.
+
 ### A stale `tsconfig.tsbuildinfo` masks a `tsconfig.json` change
 
 Raising `target` at step 10 had no effect on `npm run typecheck`, which kept
