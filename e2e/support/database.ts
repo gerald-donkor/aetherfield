@@ -6,7 +6,7 @@ import { Pool } from "pg";
 import {
   COUNTED_TABLES,
   type CountedTable,
-  type RunRecord,
+  type FixtureCleanupRecord,
   type TableCounts,
 } from "./fixture";
 
@@ -98,6 +98,42 @@ export async function markEmailVerified(email: string): Promise<string> {
 }
 
 /**
+ * **The fixture's second direct write, added by prompt 78, and the only other
+ * row it may not obtain honestly.**
+ *
+ * What it writes: `user.role`, on a single id, and nothing else.
+ *
+ * Why the application cannot. AGENTS.md 11.2 rule 3 states that `staff` and
+ * `admin` are admin-granted only, and the code enforces it in two places:
+ * `changeStaffRole` in `app/submissions/actions.ts` requires the actor to
+ * already hold `admin`, and `setStaffRole` in `lib/db/auth-queries.ts` takes a
+ * `role` of `"staff" | null` and so cannot write `admin` at all. The **first**
+ * admin therefore has no honest path through the application, by design.
+ * Bootstrapping one is out-of-band work exactly as `db:seed:factors` is.
+ *
+ * The id is always one this fixture created through the real sign-up endpoint
+ * moments earlier and recorded for teardown; nothing here can name a row it did
+ * not make. **No authorisation check in the application is relaxed,
+ * parameterised or given a test-only branch** — the point of the walk is that
+ * the real gate turns the wrong callers away, and granting `staff` through
+ * `StaffRoleControl` stays the application's own path, asserted rather than
+ * reproduced.
+ */
+export async function setStaffRoleDirectly(
+  userId: string,
+  role: "staff" | "admin",
+): Promise<void> {
+  const result = await getPool().query(
+    'UPDATE "user" SET "role" = $2 WHERE "id" = $1',
+    [userId, role],
+  );
+
+  if (result.rowCount !== 1) {
+    throw new Error("The fixture user to be given a staff role does not exist.");
+  }
+}
+
+/**
  * Deletes the private CSVs this run's imports uploaded — prompt 77.
  *
  * **Not `lib/storage/activity-import.ts`.** That module carries
@@ -160,6 +196,14 @@ async function countOne(name: CountedTable | "rate_limit"): Promise<number> {
  * `user`, so the deletes stand on their own rather than relying on a cascade
  * to cover a row this function forgot.
  *
+ * **Prompt 78's five new identities need nothing new here**, and that is the
+ * design rather than an oversight: `admin`, `staff` and the per-project grant
+ * targets are pushed onto `record.users` as they are created, so they leave by
+ * the same recorded-id path as every user before them — never by a `LIKE` over
+ * an address pattern. The grant is an `UPDATE` on one of those rows and writes
+ * nothing to delete, and `user`, `session` and `account` are already counted,
+ * so the readback measures the new rows as it measured the old ones.
+ *
  * **`verification` is counted but not deleted**, deliberately. Better Auth's
  * email verification is a signed JWT (`createEmailVerificationToken` in
  * `api/routes/email-verification.mjs`) and writes no row at all, and this
@@ -176,7 +220,9 @@ async function countOne(name: CountedTable | "rate_limit"): Promise<number> {
  * the window has passed. The delta is reported instead of restored, because
  * inventing a scope for the delete would be worse than naming the gap.
  */
-export async function removeFixture(record: RunRecord): Promise<void> {
+export async function removeFixture(
+  record: Pick<FixtureCleanupRecord, "users" | "organizations">,
+): Promise<void> {
   const userIds = record.users.map((user) => user.id);
   const organizationIds = record.organizations.map((org) => org.id);
 

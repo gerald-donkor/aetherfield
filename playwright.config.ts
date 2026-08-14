@@ -6,6 +6,17 @@ const baseURL = "http://127.0.0.1:3100";
     projects must not pick them up as ordinary tests as well. */
 const AUTH_LIFECYCLE = /auth\.(setup|teardown)\.ts$/;
 
+/**
+ * The two lifecycle projects, named once — prompt 78.
+ *
+ * `e2e/support/fixture.ts` derives the **browser** project list from
+ * `projects` below by removing these two, because prompt 78's walk provisions
+ * one grant target per browser project and a target list that restated the
+ * browsers would silently leave a new project without one.
+ */
+export const SETUP_PROJECT = "setup";
+export const TEARDOWN_PROJECT = "teardown";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -23,12 +34,12 @@ export default defineConfig({
        on with database storage, and a per-test sign-in would trip it and
        produce a flake that reads as an auth bug. */
     {
-      name: "setup",
+      name: SETUP_PROJECT,
       testMatch: /auth\.setup\.ts$/,
-      teardown: "teardown",
+      teardown: TEARDOWN_PROJECT,
     },
     {
-      name: "teardown",
+      name: TEARDOWN_PROJECT,
       testMatch: /auth\.teardown\.ts$/,
     },
     {

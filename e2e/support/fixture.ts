@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import config, { SETUP_PROJECT, TEARDOWN_PROJECT } from "../../playwright.config";
+
 /**
  * The authenticated E2E fixture's shared vocabulary — prompt 74.
  *
@@ -18,11 +20,47 @@ import path from "node:path";
 
 export const AUTH_DIR = path.join(__dirname, "..", ".auth");
 export const RUN_RECORD_PATH = path.join(AUTH_DIR, "run.json");
+/** Written incrementally during setup, so teardown still has exact ids if a
+    later provisioning step fails before `run.json` can be completed. */
+export const CLEANUP_RECORD_PATH = path.join(AUTH_DIR, "cleanup.json");
 
 /** The organisation owner's session — a member, and the `owner` tenant role. */
 export const OWNER_STATE_PATH = path.join(AUTH_DIR, "owner.json");
 /** A verified user who belongs to no organisation at all. */
 export const ORPHAN_STATE_PATH = path.join(AUTH_DIR, "orphan.json");
+
+/** Aetherfield's own `admin` — AGENTS.md 11.1. Prompt 78. */
+export const ADMIN_STATE_PATH = path.join(AUTH_DIR, "admin.json");
+/** Aetherfield's own `staff`, so the two roles are asserted from two live
+    sessions rather than one session and an inference. Prompt 78. */
+export const STAFF_STATE_PATH = path.join(AUTH_DIR, "staff.json");
+
+/**
+ * The browser projects, read from `playwright.config.ts` rather than restated
+ * — prompt 78.
+ *
+ * The walk's grant/revoke case is a **mutation**, and the browser projects run
+ * in parallel against one database. One shared grant target mutated by two
+ * projects at once is a flake that reads as an authorisation bug, so setup
+ * provisions one target per project and each test resolves its own through
+ * `test.info().project.name`. Deriving the list here is what stops a project
+ * added to the config later from silently running without a target.
+ */
+export function browserProjectNames(): string[] {
+  const names = (config.projects ?? [])
+    .map((project) => project.name)
+    .filter(
+      (name): name is string =>
+        typeof name === "string" &&
+        name !== SETUP_PROJECT &&
+        name !== TEARDOWN_PROJECT,
+    );
+
+  if (names.length === 0) {
+    throw new Error("playwright.config.ts defines no browser projects.");
+  }
+  return names;
+}
 
 /**
  * The tables this fixture can touch. Counted whole before setup and again
@@ -88,11 +126,27 @@ export type RunRecord = {
       it; it exists so the tenant-boundary assertion excludes a name that
       really is in the database, rather than one that never existed. */
   neighbourOrganization: FixtureOrganization;
+  /** The `admin` and `staff` identities of AGENTS.md 11.1 — prompt 78. Both
+      hold a role no sign-up can grant itself (11.2 rule 3); see
+      `setStaffRoleDirectly` in `support/database.ts`. */
+  adminUser: FixtureUser;
+  staffUser: FixtureUser;
+  /** One grant target per browser project, keyed by that project's name, so
+      the parallel projects never mutate the same row. Each is an ordinary
+      verified account with no role at all — the state a public sign-up leaves
+      a user in. */
+  grantTargets: Record<string, FixtureUser>;
   /** Whole-relation counts taken before the first fixture row was written. */
   before: TableCounts;
   /** `rate_limit`'s count before setup, reported rather than restored. */
   rateLimitBefore: number;
 };
+
+/** The subset teardown needs, persisted before the complete run record exists. */
+export type FixtureCleanupRecord = Pick<
+  RunRecord,
+  "users" | "organizations" | "before" | "rateLimitBefore"
+>;
 
 /**
  * A run-scoped synthetic address.
@@ -124,6 +178,11 @@ export function writeRunRecord(record: RunRecord): void {
   writeFileSync(RUN_RECORD_PATH, JSON.stringify(record, null, 2), "utf8");
 }
 
+export function writeCleanupRecord(record: FixtureCleanupRecord): void {
+  mkdirSync(AUTH_DIR, { recursive: true });
+  writeFileSync(CLEANUP_RECORD_PATH, JSON.stringify(record, null, 2), "utf8");
+}
+
 /**
  * **Never call this at a spec's module scope.** Playwright loads every test
  * file to enumerate tests *before* the setup project runs, so the record does
@@ -131,4 +190,10 @@ export function writeRunRecord(record: RunRecord): void {
  */
 export function readRunRecord(): RunRecord {
   return JSON.parse(readFileSync(RUN_RECORD_PATH, "utf8")) as RunRecord;
+}
+
+export function readCleanupRecord(): FixtureCleanupRecord {
+  return JSON.parse(
+    readFileSync(CLEANUP_RECORD_PATH, "utf8"),
+  ) as FixtureCleanupRecord;
 }

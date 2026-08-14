@@ -9,10 +9,16 @@ import {
   removeFixture,
 } from "./support/database";
 import {
+  ADMIN_STATE_PATH,
   AUTH_DIR,
+  CLEANUP_RECORD_PATH,
   COUNTED_TABLES,
+  ORPHAN_STATE_PATH,
+  OWNER_STATE_PATH,
   RUN_RECORD_PATH,
   readRunRecord,
+  readCleanupRecord,
+  STAFF_STATE_PATH,
 } from "./support/fixture";
 
 /**
@@ -27,15 +33,18 @@ import {
 teardown("removes the authenticated fixture", async () => {
   teardown.setTimeout(120_000);
 
-  if (!existsSync(RUN_RECORD_PATH)) {
-    /* Setup never got far enough to write a record, so there is nothing this
-       project can identify. Say so; do not pretend the database is clean. */
+  if (!existsSync(RUN_RECORD_PATH) && !existsSync(CLEANUP_RECORD_PATH)) {
+    /* Setup never got far enough to write even the incremental record, so no
+       fixture row was created and there is nothing exact to target. */
     throw new Error(
-      "No fixture record was written, so no fixture rows can be identified for removal.",
+      "No fixture or cleanup record was written, so no fixture rows can be identified for removal.",
     );
   }
 
-  const record = readRunRecord();
+  const record = existsSync(RUN_RECORD_PATH)
+    ? readRunRecord()
+    : readCleanupRecord();
+  let cleaned = false;
 
   try {
     await removeFixture(record);
@@ -56,10 +65,25 @@ teardown("removes the authenticated fixture", async () => {
     console.log(
       `[e2e] rate_limit rows: ${record.rateLimitBefore} before, ${rateLimitAfter} after (not restored — keyed by ip and path, self-pruning).`,
     );
+    cleaned = true;
   } finally {
     await closePool();
-    /* The saved sessions are credentials. Remove them with the rows they
-       authenticate against, so a stale cookie cannot outlive its user. */
-    rmSync(AUTH_DIR, { recursive: true, force: true });
+    if (cleaned) {
+      /* The saved sessions are credentials. Remove them with the rows they
+         authenticate against, so a stale cookie cannot outlive its user. */
+      rmSync(AUTH_DIR, { recursive: true, force: true });
+    } else {
+      /* A failed delete keeps the two non-secret id journals so teardown can
+         be retried exactly. Live session files are still credentials and are
+         removed immediately; no stale cookie survives the failed cleanup. */
+      for (const statePath of [
+        OWNER_STATE_PATH,
+        ORPHAN_STATE_PATH,
+        ADMIN_STATE_PATH,
+        STAFF_STATE_PATH,
+      ]) {
+        rmSync(statePath, { force: true });
+      }
+    }
   }
 });

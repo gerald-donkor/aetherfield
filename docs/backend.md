@@ -6758,6 +6758,234 @@ at all.
 | a CSV parsing package, XLSX support, delimiter sniffing | stated grammar, stated bounds; anything else is a parse failure with a line number |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
 
+## An E2E walk of /submissions and the staff roles, prompt 78
+
+Implemented on 14 Aug 2026. `/submissions` was the last authenticated surface
+with no browser-level verification, despite being the only route that reads all
+three phase-one personal-data relations and the only route that can mint a
+signed CV URL. This walk closes that gap without changing anything under
+`app/` or `lib/`.
+
+### What changed
+
+| file | change |
+| --- | --- |
+| `e2e/submissions.spec.ts` | 22 browser cases covering the submissions gate, the staff/admin difference, the CV branch and admin grant/revoke |
+| `e2e/auth.setup.ts` | provisions admin, staff and one grant target per configured browser project; saves the two new sessions once |
+| `e2e/support/database.ts` | one narrow direct role update for fixture-owned ids and the existing exact-id cleanup path |
+| `e2e/support/fixture.ts` | the two role sessions, project-derived target map and an incremental exact-id cleanup journal |
+| `e2e/auth.teardown.ts` | can clean a partial setup from that journal; on a failed delete it removes live session files but preserves the non-secret id records for an exact retry |
+| `playwright.config.ts` | names setup and teardown once, so the browser project list can be derived instead of copied |
+
+No package script, schema, migration, application route, Server Action or
+environment variable was added.
+
+### The identities, and the two direct writes
+
+The fixture still obtains the password hash, account row, sessions and
+organisation memberships through Better Auth's real endpoints. Prompt 78 adds
+five identities to prompt 74's three: an Aetherfield admin, an Aetherfield
+staff member, and a role-less grant target for each of Chromium, Firefox and
+WebKit. The targets are keyed by the names read from `playwright.config.ts`, so
+a new browser project cannot silently run without one.
+
+There are now exactly two kinds of direct fixture write:
+
+1. `email_verified = true`, retained from prompt 74 because verification
+   arrives by email and the walk must not enter a mailbox;
+2. `role = 'admin' | 'staff'` on an id the fixture just created through
+   sign-up. The first admin has no honest application path: public sign-up
+   grants no staff role, `changeStaffRole` already requires an admin actor, and
+   `setStaffRole` cannot write admin.
+
+The second write is one parameterised update over one recorded id. No
+application authorisation check was relaxed or given a test condition. The
+grant/revoke case then uses `StaffRoleControl` and `changeStaffRole`, so the
+application's own mutation path is the path under test.
+
+### What the 22 cases per browser assert
+
+| assertion | branch exercised |
+| --- | --- |
+| signed out on `/submissions` and on an absent CV | `proxy.ts` sends the caller to sign-in with the requested path preserved |
+| a forged saved cookie with `view=applications&page=2` | the proxy admits the cookie-shaped value, the database-backed account check rejects it, and `requestedCallback` preserves both parameters |
+| owner and unaffiliated sessions on both routes | `requireSubmissionsAccount`'s signed-in/no-staff branch sends both to `/account`; tenant membership is not the deciding fact |
+| staff on the index | 200, three views, no Staff view |
+| staff requesting `view=staff` | total fallback to Leads |
+| staff on leads, subscribers and applications | no removal control, whether each real relation happens to be empty or populated |
+| admin on the index | 200 and all four views |
+| admin on the three submission relations | one removal control per rendered row; no control is operated |
+| invalid `view` and `page`, for both roles | Leads and page 1 from the shared total-fallback parsers |
+| admin's own Staff row | listed as Admin with no self-role control |
+| the per-project grant target | Customer → Staff → Customer through the real action, ending at its provisioned null role |
+| staff on absent and malformed CV ids | past the staff gate and into the not-found markup; the malformed value is rejected before the storage read |
+
+The suite count is **98**: prompt 77's 54 plus **22 new cases × 2 browser
+projects = 44**. Setup and teardown remain one case each. The prompt described
+13 logical cases; the executable count is larger because role-less membership
+has two identities, the three submission views are separate cases, parameter
+fallback is asserted for both staff roles, and both CV id shapes are separate.
+
+No assertion reads a real submission's name, address, employer, message or CV.
+Row counts are used only to compare control counts. No removal control is
+operated. The only row content located is a run-scoped `example.com` address
+created by this fixture.
+
+### CV status: a second instance of the known streamed-status finding
+
+Both an absent well-formed id and a malformed id render the correct not-found
+heading. On Chromium and Firefox, on both successful full runs, the navigation
+response was **HTTP 200**. That is four observations per run.
+
+This is the same mechanism prompt 74 measured on `/reports/[reportId]`:
+`app/submissions/loading.tsx` lets the shell commit before `notFound()` runs in
+the page below it, so the markup is correct after the status has already been
+sent. Prompt 78 reports the second instance and deliberately does not fix or
+lock it into the assertion. A crawler still receives 200 for a missing CV
+route; changing that shipped behavior needs its own decision.
+
+`ROLE_GATE_WAIT` is 20 seconds for the database-backed redirect destination.
+It is a wait budget, not a performance assertion: the streamed shell can appear
+before the role read finishes, and Lakebase Postgres can be cold. The expected
+destination remains exact, and a server error still fails.
+
+### Failure-path findings, and the cleanup hardening they required
+
+The first parallel repeat exposed a setup failure that prompt 74's fixture
+could not recover: sign-up had created a row, the next direct query met a TCP
+timeout, and `run.json` did not exist yet. Teardown correctly refused to guess
+which row to delete. An exact recovery found **2 synthetic users and 1
+synthetic organisation** for that run and removed them; the exact-id readback
+was zero.
+
+The fixture now writes `cleanup.json` before the first sign-up and rewrites it
+immediately with the id Better Auth returns after every successful user and
+organisation creation. The response field was verified in the installed
+Better Auth endpoint source. If setup later fails, teardown reads that journal
+and uses the same exact-id deletion path as a complete run — never an address
+pattern.
+
+A later parallel run hit the same transport condition during teardown before
+its first delete. The old `finally` removed the whole auth directory, including
+the only exact-id record. That run was recovered by its exact synthetic run id:
+**8 users and 2 organisations**, then zero exact users remaining. Teardown now
+removes the directory only after deletion and the 13-relation readback succeed.
+If cleanup fails, it deletes all four saved session files immediately but keeps
+`run.json` and `cleanup.json`, neither of which contains a password or cookie,
+so the exact cleanup can be retried.
+
+The failed parallel runs also made an existing logging defect visible. When a
+database read failed, provider/database error output included query parameters;
+one Better Auth session lookup therefore printed a live fixture session token.
+The token is not reproduced here. Its session row and user were deleted by the
+exact recovery, so it is no longer valid. **This prompt does not change the
+application logger**, but the finding remains open: a production database
+failure must not print session tokens or personal-data query parameters.
+
+### The local TCP condition and the successful run shape
+
+Four-worker attempts became broadly unstable across existing and new tests:
+the captured causes were `ETIMEDOUT` / `timeout exceeded when trying to
+connect`, affecting Better Auth session reads, factor reads, actions and
+teardown. This was not inferred from a failed locator; the server printed the
+database causes. The same suite had passed once at four workers before the
+network degraded, **98 passed in 3.5 minutes**, but that run preceded the
+failure-journal hardening and is not one of the final two measurements.
+
+The final two complete runs used the repository's documented happy-eyeballs
+workaround as a process-only setting and one worker:
+
+```sh
+NODE_OPTIONS=--network-family-autoselection-attempt-timeout=1000 \
+  npm run test:e2e:local -- --workers=1
+```
+
+Node 26's `--help` lists that option and a readback from
+`net.getDefaultAutoSelectFamilyAttemptTimeout()` returned **1000**. It is not
+committed to `playwright.config.ts`, is not an application environment
+variable, and changes no assertion. Both final runs were warm: each followed
+database traffic by much less than Neon's five-minute idle-suspend window, and
+the second began immediately after the first. One worker is a verification
+condition, not a product claim; every one of the 98 tests still ran.
+
+### Prerender impact
+
+`none — no route changes`, verified rather than assumed. The final comparison
+was run after this section and the prompt file were present. A clean build of
+`HEAD` and a clean build of the implementation produced the same **21**
+prerendered HTML files; after normalising the build id, CSS/JavaScript chunk
+names and the inline RSC transport, **0 of 21 differed**. Compiled CSS was
+**74,718 → 74,718 bytes**, with **0 rules added and 0 removed**.
+
+The prompt carried 68,506 bytes as the expected CSS floor from the previous
+record. The clean base build itself measured 74,718, so 68,506 was stale rather
+than a change caused by this work. The before/after equality and rule-set diff
+are the comparison used here.
+
+### Trust boundary
+
+No request path changed. What crosses the existing paths remains:
+
+- `view` and `page` on an authenticated GET, parsed by the shared total-fallback
+  functions;
+- the CV id path segment, checked by `submissionIdSchema` after the staff gate;
+- `{ userId, role }` to `changeStaffRole`, checked by `staffMutationSchema` and
+  authorised against a freshly read database role.
+
+Inspection found **no `NODE_ENV` or `E2E` conditional** in `lib/auth/`,
+`proxy.ts` or `app/submissions`, and neither `disableCSRFCheck` nor
+`disableOriginCheck` appears there. Rejected callers still receive the existing
+sign-in redirect, account redirect, not-found branch or typed forbidden action
+result. The fixture's only extra privilege is the narrow direct role update
+described above.
+
+### Secrets and data
+
+- No new environment variable and no `.env.example` change. The fixture reads
+  the existing direct database URL; the test server still overrides only the
+  existing Better Auth base URL and Resend key.
+- No `NEXT_PUBLIC_*`, and no model call.
+- The committed code logs only the two CV case labels and status numbers. It
+  logs no id, address, row, cookie or request body.
+- Saved sessions remain gitignored credentials. Successful teardown removes
+  them with the rows; failed teardown removes them even while retaining the
+  non-secret exact-id journals.
+- The transient provider-log disclosure above is an observed open finding, not
+  silently folded into the claim that nothing logged.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, exit 0 |
+| `npm run typecheck` | clean, exit 0 |
+| `npm test` | **10 files, 215 tests passed** (906 ms), unchanged |
+| `npm run build` | exit 0, compiled in 7.8 s, 32/32 static pages, expected route table |
+| final prerender comparison | **0/21 HTML files differed** after normalisation; CSS **74,718 → 74,718 bytes**, **0 rules added / 0 removed** |
+| final E2E run 1 | **98 passed in 8.4 minutes**, Chromium + Firefox, one worker |
+| final E2E run 2 | **98 passed in 8.5 minutes**, Chromium + Firefox, one worker |
+| row-count readback | zero delta on all **13** counted relations on both final runs; `rate_limit` **3 → 3** on both |
+| CV status observation | absent and malformed ids both **HTTP 200**, Chromium and Firefox, both final runs |
+| `npm run test:e2e:webkit` | did not run: `Podman is required for WebKit on Arch Linux.` Environment gap, not a pass |
+| `npm run db:generate` | not run; schema untouched |
+
+The first plain `npm run build` attempt in the sandbox failed because all three
+configured Google Font requests were blocked. Re-running with network access
+compiled cleanly; that is an environment failure, not a code regression.
+
+### What prompt 78 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| fix the streamed 200 status on missing reports or CVs | shipped behavior and a separate decision |
+| add database retries to application queries | a product-wide resilience decision; the walk reports the observed transport failures instead |
+| change provider/database error logging | the disclosed session parameter makes this important, but changing production logging is outside the approved E2E-only scope |
+| operate a submission removal control or download a real CV | real people's data; presence and authorization only |
+| assert tenant access for staff | Aetherfield staff and tenant membership remain orthogonal; tenant authorization has its own walk |
+| add a CI workflow or commit the local TCP setting | neither was approved, and the latter is environment-specific |
+| add a migration | no schema changed |
+| change any marketing route, `SiteNav`, `SiteFooter` or GSAP surface | §8.1 and the settled-site contract |
+
 ## Provider-free fuzzy factor matching, prompt 76
 
 Prompt 75 reached its first Vercel AI Gateway embedding request and received
