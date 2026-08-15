@@ -138,10 +138,15 @@ export const EMISSION_SCOPE_LABELS: Record<EmissionScope, string> = {
  *   what multiplies, and that is captured; the certificate itself is not
  *   stored, so nothing in this product evidences a claim;
  * - **a residual-mix fallback — deliberately absent, not merely unbuilt.** No
- *   residual mix is shipped and no grid average is ever substituted into a
- *   market-based figure. A scope 2 record with no market-based mapping
- *   produces no market-based figure and the coverage is stated beside the
- *   number.
+ *   residual mix (rung 4) is shipped, and no grid average is ever substituted
+ *   into a market-based figure *silently*. Since prompt 86 a reporter may
+ *   choose the Guidance's rung 5 for a pair explicitly, and that choice is
+ *   recorded as {@link SCOPE2_MARKET_BASES}' `grid_average`. **This sentence
+ *   previously said "no grid average is ever substituted", full stop.** That is
+ *   no longer true and is corrected here rather than left standing (AGENTS.md
+ *   12 rule 8): what remains true is that nothing substitutes one on the
+ *   reporter's behalf, and that a figure resting on one is labelled as such
+ *   everywhere it is shown.
  */
 export const SCOPE2_METHODS = ["location_based", "market_based"] as const;
 
@@ -150,6 +155,40 @@ export type Scope2Method = (typeof SCOPE2_METHODS)[number];
 export const SCOPE2_METHOD_LABELS: Record<Scope2Method, string> = {
   location_based: "location-based",
   market_based: "market-based",
+};
+
+/**
+ * What a market-based figure rests on — the rung of the Scope 2 Guidance's own
+ * market-based data hierarchy the reporter asserted for that pair (prompt 86).
+ *
+ * **Named from the Guidance's vocabulary, not invented here.** Table 6.3,
+ * "Market-based scope 2 data hierarchy examples", is quoted in full in
+ * `docs/backend.md`; rungs 1–3 are energy attribute certificates, contracts for
+ * electricity and supplier/utility rates, which §1.5.1 collectively calls
+ * "contractual instruments" ("markets providing product or supplier-specific
+ * data in the form of contractual instruments"), and **rung 5 is "Other
+ * grid-average emission factors (subnational or national) — see location-based
+ * data"**. Hence the two members below.
+ *
+ * **Rung 4, residual mix, is deliberately not a member.** Its dataset — the AIB
+ * European Residual Mixes — is separately licensed and is not shipped, so a
+ * value here would be a name with no way to be populated. Add it with the
+ * dataset, never before it.
+ *
+ * **This is a reporter's assertion and is stored as one**, on the mapping and
+ * on every figure computed from it, rather than derived at read time from
+ * `emission_factor.scope2_method`. `lib/db/schema.ts` records the two reasons.
+ */
+export const SCOPE2_MARKET_BASES = [
+  "contractual_instrument",
+  "grid_average",
+] as const;
+
+export type Scope2MarketBasis = (typeof SCOPE2_MARKET_BASES)[number];
+
+export const SCOPE2_MARKET_BASIS_LABELS: Record<Scope2MarketBasis, string> = {
+  contractual_instrument: "contractual instrument",
+  grid_average: "grid average",
 };
 
 /* -------------------------------------------------------------------------- */

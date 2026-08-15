@@ -162,11 +162,13 @@ test.describe.serial("market-based scope 2, dual reported", () => {
 
     const row = coverageRow(page);
     await expect(row.getByText("Market-based lane")).toBeVisible();
-    /* The whole point of D5, in the reporter's own view: an absent contractual
-       rate says so, and says that nothing was substituted for it. */
+    /* The whole point of D5, in the reporter's own view: an absent market-based
+       rate says so, and says that nothing was substituted for it. Prompt 86
+       adds a *stated* rung-5 fallback below this sentence; the sentence itself
+       still refuses the silent substitution, which is what it is here for. */
     await expect(
       row.getByText(
-        "No contractual rate is mapped, so this pair contributes to the location-based figure only.",
+        "No market-based rate is mapped, so this pair contributes to the location-based figure only.",
         { exact: false },
       ),
     ).toBeVisible();
@@ -232,7 +234,7 @@ test.describe.serial("market-based scope 2, dual reported", () => {
        implied to be complete. */
     await expect(
       figure(page, "Scope 2 (market-based)").getByText(
-        "no grid average is substituted for them",
+        "a market-based rate mapped",
         { exact: false },
       ),
     ).toBeVisible();

@@ -11,6 +11,7 @@ import {
   type ActivityUnit,
   type FactorMappingField,
 } from "../../../lib/validation/activity";
+import type { Scope2MarketBasis } from "../../../lib/validation/emissions";
 import { Button } from "../primitives";
 
 type SearchFactor = {
@@ -49,6 +50,7 @@ export function FactorPicker({
   category,
   unit,
   lane,
+  basis,
   factors,
   searchMessage,
   searchInvalid,
@@ -59,6 +61,10 @@ export function FactorPicker({
   /** Which reporting lane the chosen factor is mapped on — prompt 85. `null` is
       the default lane; `"market_based"` is the second scope 2 lane. */
   lane: "market_based" | null;
+  /** And which rung of the market-based hierarchy the choice asserts — prompt
+      86. Sent only on the market lane; the shared schema refuses it on the
+      default lane and refuses its absence on the market one. */
+  basis: Scope2MarketBasis;
   factors: SearchFactor[];
   searchMessage: string;
   searchInvalid: boolean;
@@ -85,7 +91,13 @@ export function FactorPicker({
     setMessage("");
     setErrors({});
 
-    const input = { category, unit, factorId, scope2Method: lane };
+    const input = {
+      category,
+      unit,
+      factorId,
+      scope2Method: lane,
+      scope2MarketBasis: lane === "market_based" ? basis : null,
+    };
     const checked = factorMappingSchema.safeParse(input);
     if (!checked.success) {
       setMessage(FACTOR_MAPPING_ERRORS.invalid);
@@ -101,6 +113,9 @@ export function FactorPicker({
         scope2Method: checked.error.issues.find((issue) =>
           issue.path.includes("scope2Method"),
         )?.message,
+        scope2MarketBasis: checked.error.issues.find((issue) =>
+          issue.path.includes("scope2MarketBasis"),
+        )?.message,
       });
       return;
     }
@@ -110,9 +125,11 @@ export function FactorPicker({
       const result = await setFactorMapping(checked.data);
       if (result.ok) {
         setMessage(
-          lane === "market_based"
-            ? "Market-based rate saved. The organisation's figures have been recalculated on both lanes."
-            : "Factor saved. The organisation's figures have been recalculated.",
+          lane !== "market_based"
+            ? "Factor saved. The organisation's figures have been recalculated."
+            : basis === "grid_average"
+              ? "Grid-average fallback saved. This pair's market-based figure is a grid average, recorded as the hierarchy's rung 5 and labelled as a fallback wherever it is shown. The organisation's figures have been recalculated on both lanes."
+              : "Market-based rate saved. The organisation's figures have been recalculated on both lanes.",
         );
         router.refresh();
         setPendingId(null);
@@ -156,6 +173,9 @@ export function FactorPicker({
         {message}
         {errors.factorId ? (
           <span className="mt-2 block">{errors.factorId}</span>
+        ) : null}
+        {errors.scope2MarketBasis ? (
+          <span className="mt-2 block">{errors.scope2MarketBasis}</span>
         ) : null}
       </div>
 

@@ -37,6 +37,7 @@ function months(
       scope: "scope_1" as const,
       scope3Category: null,
       scope2Method: null,
+      scope2MarketBasis: null,
       gwpSet: "AR5" as const,
       biogenic: false,
       outsideOfScopes: false,

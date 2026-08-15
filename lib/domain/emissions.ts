@@ -68,6 +68,7 @@ import {
   type FactorResultUnit,
   type GhgGas,
   type GwpSet,
+  type Scope2MarketBasis,
   type Scope2Method,
   type Scope3Category,
 } from "../validation/emissions";
@@ -105,8 +106,17 @@ import { lookupGwp } from "./gwp";
  * label on a stored row is what says which engine produced it. Existing rows
  * are not rewritten: they were produced by 1.1.0 and stay labelled as such
  * until the next recalculation restates them.
+ *
+ * **`1.3.0` — prompt 86, the reporter-chosen grid-average fallback.** A pair
+ * mapped on the market lane with the `grid_average` basis now produces a
+ * market-based figure from a grid-average factor, where 1.2.0 produced none for
+ * it. That adds figures a previous run did not produce and moves
+ * `scope2MarketBased` and `totalMarketBased` for any organisation that chooses
+ * it — which is exactly what this field exists to label. No location-based
+ * figure changes value. Existing rows keep 1.2.0 until the next recalculation
+ * restates them, as D8 established.
  */
-export const ENGINE_VERSION = "1.2.0";
+export const ENGINE_VERSION = "1.3.0";
 
 /* -------------------------------------------------------------------------- */
 /*  Inputs                                                                     */
@@ -257,7 +267,12 @@ export type EmissionRefusal =
   | "unreadable_factor"
   | "factor_is_not_an_emission"
   | "unit_mismatch"
-  | "gas_not_priceable";
+  | "gas_not_priceable"
+  /** A market-based basis was asserted for a factor that is not a scope 2 row —
+      prompt 86. The action refuses this at the boundary, so reaching it means
+      a mapping written before the check existed or around it; the engine
+      refuses rather than mislabelling a scope 1 or 3 figure as market-based. */
+  | "basis_off_scope_2";
 
 /** Stated once and read by both {@link calculateRecordEmission} and
     {@link factorEligibility}, so the picker's rejection and the engine's are
@@ -274,6 +289,9 @@ export type RecordEmission = {
   scope: EmissionScope;
   scope3Category: Scope3Category | null;
   scope2Method: Scope2Method | null;
+  /** Which rung of the market-based hierarchy this figure rests on — prompt 86.
+      Non-null exactly when `scope2Method` is `"market_based"`. */
+  scope2MarketBasis: Scope2MarketBasis | null;
   gwpSet: GwpSet;
   biogenic: boolean;
   outsideOfScopes: boolean;
@@ -295,11 +313,30 @@ export type RecordEmissionResult =
  * **No intermediate rounding.** The product of a `numeric(18, 6)` quantity, a
  * 17-place factor and a one-place GWP is carried at 24 places until something
  * asks for it rounded.
+ *
+ * @param marketBasis Present only on the market lane — prompt 86. It is the
+ * rung of the Scope 2 Guidance's market-based hierarchy the *reporter* asserted
+ * for this pair, and it is what labels the figure, because the factor row alone
+ * cannot: on the `grid_average` basis the factor is a grid average whose own
+ * `scope2Method` says `location_based`, and the figure it produces is
+ * nevertheless the market-based reading of that consumption. **Nothing is
+ * inferred here** — a caller that passes nothing gets the factor's own method,
+ * exactly as before this parameter existed.
  */
 export function calculateRecordEmission(
   record: ActivityInput,
   factor: FactorInput,
+  marketBasis: Scope2MarketBasis | null = null,
 ): RecordEmissionResult {
+  if (marketBasis && factor.scope !== "scope_2") {
+    return {
+      ok: false,
+      refusal: "basis_off_scope_2",
+      reason:
+        "A market-based basis applies to scope 2 only. This factor is not a scope 2 row, so no market-based figure is produced for it.",
+    };
+  }
+
   if (factor.resultUnit !== "kg_co2e") {
     return {
       ok: false,
@@ -342,7 +379,11 @@ export function calculateRecordEmission(
       factorId: factor.id,
       scope: factor.scope,
       scope3Category: factor.scope3Category,
-      scope2Method: factor.scope2Method,
+      /* On the market lane the lane labels the figure, not the factor row. That
+         is a no-op on the contractual basis — the row is already
+         `market_based` — and it is the whole point on the grid-average one. */
+      scope2Method: marketBasis ? "market_based" : factor.scope2Method,
+      scope2MarketBasis: marketBasis,
       gwpSet: factor.gwpSet,
       biogenic: factor.biogenic,
       outsideOfScopes: factor.scope === "outside_of_scopes",
@@ -507,13 +548,27 @@ export type ScopeTotals = {
       market lane. **Comparable to `total` only where the market lane covers
       every scope 2 record**; the count is carried by
       {@link scope2MarketBasedRecords} and stated beside the figure on every
-      surface, because no residual mix and no grid average is ever substituted
-      for a record with no contractual rate. */
+      surface. **A record with no market-lane mapping is still substituted for
+      by nothing** — since prompt 86 a reporter may map the grid average as an
+      explicit rung-5 fallback, and where they have,
+      {@link scope2MarketBasedFallback} says how much of this figure rests on
+      it. Nothing is ever substituted on their behalf. */
   totalMarketBased: Decimal;
   /** How many scope 2 figures each lane holds, so a surface can state the
       market lane's coverage rather than implying it is complete. */
   scope2Records: number;
   scope2MarketBasedRecords: number;
+  /**
+   * How much of {@link scope2MarketBased} rests on the Guidance's rung 5 — the
+   * reporter-chosen grid-average fallback (prompt 86). **An addend of
+   * `scope2MarketBased`, not a third lane**: the hierarchy's rungs are all
+   * market-based data, and a figure resting on rung 5 is still the market-based
+   * reading of that consumption. It is carried separately so a surface can say
+   * *how much* of the market-based total is a fallback rather than only how
+   * many records are.
+   */
+  scope2MarketBasedFallback: Decimal;
+  scope2MarketBasedFallbackRecords: number;
 };
 
 export type AggregateResult = {
@@ -529,7 +584,14 @@ export type AggregateResult = {
 export type FactorGap = "no_mapping" | "out_of_period";
 
 export type FactorResolution =
-  | { ok: true; factor: FactorInput }
+  | {
+      ok: true;
+      factor: FactorInput;
+      /** The lane's own assertion, when the resolver is a market-lane one —
+          prompt 86. Absent on the default lane, and absent is not a default:
+          it means "this figure is whatever the factor row says it is". */
+      marketBasis?: Scope2MarketBasis | null;
+    }
   | { ok: false; gap: FactorGap };
 
 /**
@@ -598,7 +660,11 @@ export function aggregate(
       continue;
     }
 
-    const result = calculateRecordEmission(record, resolution.factor);
+    const result = calculateRecordEmission(
+      record,
+      resolution.factor,
+      resolution.marketBasis ?? null,
+    );
     if (!result.ok) {
       const existing = refusals.get(result.refusal);
       if (existing) {
@@ -690,6 +756,11 @@ export function totalsOf(emissions: readonly RecordEmission[]): ScopeTotals {
   const scope2 = byScope("scope_2");
   const scope3 = byScope("scope_3");
   const scope2MarketBased = sum(marketBased.map((e) => e.kgCo2e));
+  /* Rung 5's own share of that figure — prompt 86. Inside the market total,
+     never beside it. */
+  const fallback = marketBased.filter(
+    (e) => e.scope2MarketBasis === "grid_average",
+  );
 
   const categories = new Map<Scope3Category, Decimal>();
   for (const emission of primary) {
@@ -720,6 +791,8 @@ export function totalsOf(emissions: readonly RecordEmission[]): ScopeTotals {
     totalMarketBased: sum([scope1, scope2MarketBased, scope3]),
     scope2Records: primary.filter((e) => e.scope === "scope_2").length,
     scope2MarketBasedRecords: marketBased.length,
+    scope2MarketBasedFallback: sum(fallback.map((e) => e.kgCo2e)),
+    scope2MarketBasedFallbackRecords: fallback.length,
   };
 }
 

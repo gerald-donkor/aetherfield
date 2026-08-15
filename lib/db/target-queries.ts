@@ -239,6 +239,7 @@ async function readTargetEvidenceImpl(
       scope: row.scope,
       scope3Category: row.scope3Category,
       scope2Method: row.scope2Method,
+      scope2MarketBasis: row.scope2MarketBasis,
       gwpSet: row.gwpSet,
       biogenic: row.biogenic,
       outsideOfScopes: row.outsideOfScopes,

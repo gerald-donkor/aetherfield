@@ -26,6 +26,10 @@ import {
   type ActivityCategory,
   type ActivityUnit,
 } from "../../../lib/validation/activity";
+import {
+  SCOPE2_MARKET_BASIS_LABELS,
+  type Scope2MarketBasis,
+} from "../../../lib/validation/emissions";
 
 /**
  * The factor-mapping surface — prompt 65.
@@ -56,6 +60,10 @@ type SearchPresentation = {
   factors: PresentedFactor[];
   message: string;
   invalid: boolean;
+  /** Whether close-wording ranking is offered for this lane and basis — see
+      {@link presentSearch}, which derives it. The form reads it rather than
+      re-deriving the rule beside the button. */
+  lexicalOnly: boolean;
 };
 
 function first(value: string | string[] | undefined): string {
@@ -84,15 +92,28 @@ function laneOf(value: string): Lane {
   return value === "market" ? "market_based" : null;
 }
 
+/** The basis, on the same footing as the lane — prompt 86. `fallback` is the
+    only value that means anything other than a contractual instrument, and
+    anything else reads as the contractual basis, which is the one a reporter
+    reaching the market lane would have got anyway. The action re-derives it
+    from its own input and re-checks the factor against it regardless. */
+function basisOf(value: string): Scope2MarketBasis {
+  return value === "fallback" ? "grid_average" : "contractual_instrument";
+}
+
 function pairHref(
   category: ActivityCategory,
   unit: ActivityUnit,
   q = "",
   lane: Lane = null,
+  basis: Scope2MarketBasis = "contractual_instrument",
 ): string {
   const params = new URLSearchParams({ category, unit });
   if (q.trim() !== "") params.set("q", q.trim());
-  if (lane === "market_based") params.set("lane", "market");
+  if (lane === "market_based") {
+    params.set("lane", "market");
+    if (basis === "grid_average") params.set("basis", "fallback");
+  }
   return `/activity/mappings?${params.toString()}`;
 }
 
@@ -102,6 +123,7 @@ async function presentSearch(
   rawQ: string,
   rawMode: string,
   lane: Lane,
+  basis: Scope2MarketBasis,
 ): Promise<SearchPresentation & { q: string; mode: "lexical" | "fuzzy" }> {
   const checked = factorSearchSchema.safeParse({ q: rawQ, mode: rawMode });
   if (!checked.success) {
@@ -113,18 +135,34 @@ async function presentSearch(
       factors: [],
       message: issue,
       invalid: true,
+      lexicalOnly: lane === "market_based" && basis !== "grid_average",
     };
   }
 
   const { q, mode: requested } = checked.data;
-  /* **The market lane is lexical only** — prompt 85. Close-wording ranking
-     exists to find one row among 7,035 published ones; the market lane's
-     candidates are the handful of contractual rates this tenant has entered
-     itself, and a fuzzy pass over them would rank a list a reporter can read
-     whole. `searchFactorsByWording` also has no lane predicate, so running it
-     here would offer rows the action then refuses. */
-  const mode = lane === "market_based" ? ("lexical" as const) : requested;
-  const lexical = await searchFactorsForPair(organizationId, unit, q, lane);
+  /* **The contractual basis is lexical only; the fallback is not** — prompt 85,
+     re-derived by prompt 86 rather than copied either way.
+
+     Prompt 85 gave two reasons for refusing close-wording ranking on the market
+     lane, and prompt 86 removes one and finds the other does not hold on the
+     new basis. The removed one: `searchFactorsByWording` had no lane predicate,
+     so it would have offered rows the action refuses — it takes the lane and
+     the basis now, through the same `marketLaneScope` predicate the lexical
+     picker uses. The one that does not carry over: a contractual rate is one of
+     the handful this tenant entered itself, and ranking a list a reporter can
+     read whole helps nobody — but rung 5's candidates are the same thousands of
+     published scope 2 rows the default lane searches, which is the haystack
+     close-wording ranking was built for. So it stays off for the contractual
+     basis and is offered for the fallback. */
+  const lexicalOnly = lane === "market_based" && basis !== "grid_average";
+  const mode = lexicalOnly ? ("lexical" as const) : requested;
+  const lexical = await searchFactorsForPair(
+    organizationId,
+    unit,
+    q,
+    lane,
+    basis,
+  );
   if (mode === "lexical") {
     return {
       q,
@@ -135,10 +173,17 @@ async function presentSearch(
           : lexical.map((factor) => ({ ...factor, exactTextMatch: true })),
       message: "",
       invalid: false,
+      lexicalOnly,
     };
   }
 
-  const fuzzy = await searchFactorsByWording(organizationId, unit, q);
+  const fuzzy = await searchFactorsByWording(
+    organizationId,
+    unit,
+    q,
+    lane,
+    basis,
+  );
   const ranked = rankFactorMatches(
     fuzzy.map((factor) => ({
       id: factor.id,
@@ -171,24 +216,31 @@ async function presentSearch(
     message:
       "Close-wording ranking compares character groups and can miss synonyms. Review every factor's source, dataset version, licence, unit, value, scope and gas before choosing.",
     invalid: false,
+    lexicalOnly,
   };
 }
 
 /**
- * One pair's market-based lane — prompt 85.
+ * One pair's market-based lane — prompt 85, extended by prompt 86.
  *
- * **A mapped rate and an unmapped lane read as two different states, and
- * neither reads as an error.** An absent contractual rate is the expected state
- * for most reporters, so the sentence says what the lane is for rather than
- * naming a gap; no grid average is offered in its place, because substituting
- * one would put a rate the reporter never contracted for into a market-based
- * figure.
+ * **Three states, and the panel says which**: a mapped contractual rate, a
+ * mapped grid-average fallback, and an unmapped lane. None of them reads as an
+ * error — an absent market-based rate is the expected state for most reporters.
+ *
+ * **The fallback is a second, separately-worded choice, never a toggle that
+ * silently changes what the picker returns.** It is the Scope 2 Guidance's
+ * rung 5, and offering it wordlessly beside rung 1–3 would be exactly the
+ * silent substitution prompt 85's D5 refuses. So it is named, its consequence
+ * is stated in the same sentence as the offer, and choosing it records an
+ * assertion rather than picking a filter.
  */
 function MarketLane({
   mapping,
   href,
+  fallbackHref,
 }: {
   mapping: {
+    basis: Scope2MarketBasis;
     factorLabel: string;
     source: string;
     datasetVersion: string;
@@ -196,7 +248,9 @@ function MarketLane({
     chosenBy: string | null;
   } | null;
   href: string;
+  fallbackHref: string;
 }) {
+  const fallback = mapping?.basis === "grid_average";
   return (
     <div className="mt-5 border-t border-border pt-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -216,17 +270,41 @@ function MarketLane({
             {mapping.factorLabel}
           </p>
           <p className="mt-2 font-mono text-[11px] leading-[18px] text-muted">
+            {SCOPE2_MARKET_BASIS_LABELS[mapping.basis]} ·{" "}
             {mapping.source} {mapping.datasetVersion}
             {mapping.customerSupplied ? " · customer-supplied" : ""}
             {mapping.chosenBy ? ` · chosen by ${mapping.chosenBy}` : ""}
           </p>
+          {fallback ? (
+            <p className="mt-3 max-w-[34rem] border-l-2 border-ink py-1 pl-4 font-mono text-[11px] leading-[18px]">
+              This pair&apos;s market-based figure is a grid average, recorded
+              as the hierarchy&apos;s rung 5. It is labelled as a fallback
+              wherever it is shown and in the report&apos;s caveats. Map a
+              contractual rate to replace it.
+            </p>
+          ) : null}
         </>
       ) : (
-        <p className="mt-3 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
-          No contractual rate is mapped, so this pair contributes to the
-          location-based figure only. The market-based figure states its own
-          coverage; no grid average is substituted for it.
-        </p>
+        <>
+          <p className="mt-3 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
+            No market-based rate is mapped, so this pair contributes to the
+            location-based figure only. Nothing is substituted for it.
+          </p>
+          <p className="mt-3 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
+            If you hold no contract, certificate or supplier rate for this
+            consumption, you can report the grid average on the market lane as
+            the hierarchy&apos;s rung 5. It is a statement that no better
+            instrument exists, it is labelled as a fallback everywhere it
+            appears, and it does not make the market-based figure comparable to
+            a procured one.{" "}
+            <Link
+              href={fallbackHref}
+              className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              Use the grid-average fallback
+            </Link>
+          </p>
+        </>
       )}
     </div>
   );
@@ -269,6 +347,13 @@ export default async function ActivityMappingsPage({
     selected && offersMarketLane(selected.category)
       ? laneOf(first(query.lane))
       : null;
+  /* And the basis, under the same rule: it is read only where the lane is, and
+     a forged value selects the contractual basis a reporter reaching the market
+     lane would have got anyway. */
+  const basis: Scope2MarketBasis =
+    lane === "market_based"
+      ? basisOf(first(query.basis))
+      : "contractual_instrument";
   const search = selected
     ? await presentSearch(
         membership.organization.id,
@@ -276,6 +361,7 @@ export default async function ActivityMappingsPage({
         first(query.q),
         first(query.mode),
         lane,
+        basis,
       )
     : {
         q: "",
@@ -283,6 +369,7 @@ export default async function ActivityMappingsPage({
         factors: [],
         message: "",
         invalid: false,
+        lexicalOnly: false,
       };
 
   const unmapped = coverage.filter((pair) => pair.mapping === null).length;
@@ -446,11 +533,23 @@ export default async function ActivityMappingsPage({
                               `${pair.category}.${pair.unit}`,
                             ) ?? null
                           }
+                          /* "Change rate" lands on the basis the pair is
+                             already mapped under, so changing a fallback does
+                             not silently offer a contractual list. */
                           href={pairHref(
                             pair.category,
                             pair.unit,
                             "",
                             "market_based",
+                            marketByPair.get(`${pair.category}.${pair.unit}`)
+                              ?.basis ?? "contractual_instrument",
+                          )}
+                          fallbackHref={pairHref(
+                            pair.category,
+                            pair.unit,
+                            "",
+                            "market_based",
+                            "grid_average",
                           )}
                         />
                       ) : null}
@@ -466,14 +565,18 @@ export default async function ActivityMappingsPage({
                   id="factor-picker-heading"
                   className="font-sans text-[28px] leading-8 font-bold"
                 >
-                  {lane === "market_based"
-                    ? "Choose a market-based rate"
-                    : "Choose a factor"}
+                  {lane !== "market_based"
+                    ? "Choose a factor"
+                    : basis === "grid_average"
+                      ? "Choose a grid-average factor as the fallback"
+                      : "Choose a market-based rate"}
                 </h2>
                 <p className="mt-4 max-w-[700px] font-serif text-p2 text-muted">
-                  {lane === "market_based"
-                    ? `Showing scope 2 factors recorded as market-based whose denominator can calculate activity measured in ${selected.unit}. A market-based rate comes from a contract, a supplier disclosure or an energy attribute certificate you hold. Add one under Add customer factor if the rate you need is not listed.`
-                    : `Showing factors whose denominator can calculate activity measured in ${selected.unit}. Search the publisher level and column descriptions to narrow the list.`}
+                  {lane !== "market_based"
+                    ? `Showing factors whose denominator can calculate activity measured in ${selected.unit}. Search the publisher level and column descriptions to narrow the list.`
+                    : basis === "grid_average"
+                      ? `Showing scope 2 grid-average factors whose denominator can calculate activity measured in ${selected.unit} — the same published factors the location-based lane uses. Choosing one records that no contract, certificate or supplier rate covers this consumption, and reports the grid average on the market lane as the hierarchy's rung 5. It is labelled as a fallback on every surface and in the report's caveats.`
+                      : `Showing scope 2 factors recorded as market-based whose denominator can calculate activity measured in ${selected.unit}. A market-based rate comes from a contract, a supplier disclosure or an energy attribute certificate you hold. Add one under Add customer factor if the rate you need is not listed.`}
                 </p>
                 {offersMarketLane(selected.category) ? (
                   <p className="mt-4 font-sans text-nav font-bold">
@@ -490,12 +593,38 @@ export default async function ActivityMappingsPage({
                         ? "Choose the location-based factor instead"
                         : "Choose the market-based rate instead"}
                     </Link>
+                    {/* The two bases are two choices, not a filter toggle: each
+                        link says what the other one asserts. */}
+                    {lane === "market_based" ? (
+                      <>
+                        <span className="mx-4 font-mono text-caption text-muted">
+                          /
+                        </span>
+                        <Link
+                          href={pairHref(
+                            selected.category,
+                            selected.unit,
+                            "",
+                            "market_based",
+                            basis === "grid_average"
+                              ? "contractual_instrument"
+                              : "grid_average",
+                          )}
+                          className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        >
+                          {basis === "grid_average"
+                            ? "Map a contractual rate instead"
+                            : "Use the grid-average fallback instead"}
+                        </Link>
+                      </>
+                    ) : null}
                   </p>
                 ) : null}
                 <FactorPicker
                   category={selected.category}
                   unit={selected.unit}
                   lane={lane}
+                  basis={basis}
                   factors={search.factors}
                   searchMessage={search.message}
                   searchInvalid={search.invalid}
@@ -511,6 +640,10 @@ export default async function ActivityMappingsPage({
                         the default lane on every submit. */}
                     {lane === "market_based" ? (
                       <input type="hidden" name="lane" value="market" />
+                    ) : null}
+                    {/* And the basis with it, for the same reason. */}
+                    {lane === "market_based" && basis === "grid_average" ? (
+                      <input type="hidden" name="basis" value="fallback" />
                     ) : null}
                     <label
                       htmlFor="factor-search"
@@ -537,7 +670,7 @@ export default async function ActivityMappingsPage({
                         >
                           Search exact text
                         </Button>
-                        {lane === "market_based" ? null : (
+                        {search.lexicalOnly ? null : (
                           <Button
                             type="submit"
                             name="mode"
@@ -551,7 +684,7 @@ export default async function ActivityMappingsPage({
                       </div>
                     </div>
                     <p className="mt-3 max-w-[40rem] font-mono text-[11px] leading-[18px] text-muted">
-                      {lane === "market_based"
+                      {search.lexicalOnly
                         ? "This list holds only the market-based rates recorded in this workspace, so it is searched by exact text."
                         : "Close-wording search compares character groups in this database. It can help with misspellings, but it can miss synonyms and does not choose a factor for you."}
                     </p>

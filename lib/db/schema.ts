@@ -29,6 +29,7 @@ import {
   FACTOR_RESULT_UNITS,
   GHG_GASES,
   GWP_SETS,
+  SCOPE2_MARKET_BASES,
   SCOPE2_METHODS,
   SCOPE3_CATEGORIES,
 } from "../validation/emissions";
@@ -458,6 +459,14 @@ export const scope3Category = pgEnum("scope3_category", [...SCOPE3_CATEGORIES]);
 
 export const scope2Method = pgEnum("scope2_method", [...SCOPE2_METHODS]);
 
+/**
+ * Prompt 86's ninth enum, on the same arrangement: built from
+ * `lib/validation/emissions.ts`, never restated here.
+ */
+export const scope2MarketBasis = pgEnum("scope2_market_basis", [
+  ...SCOPE2_MARKET_BASES,
+]);
+
 export const gwpSet = pgEnum("gwp_set", [...GWP_SETS]);
 
 export const ghgGas = pgEnum("ghg_gas", [...GHG_GASES]);
@@ -774,6 +783,28 @@ export const activityFactorMapping = pgTable(
      * `lib/validation/activity.ts` refuses it at the boundary.
      */
     scope2Method: scope2Method("scope2_method"),
+    /**
+     * Which rung of the market-based data hierarchy this mapping asserts —
+     * prompt 86. **Non-null only where `scope2_method = 'market_based'`**;
+     * `lib/validation/activity.ts` refuses every other combination at the
+     * boundary, and there is no default.
+     *
+     * **It is stored rather than derived, and the derivation would be wrong.**
+     * A market-lane mapping pointing at a grid-average factor row is *visibly*
+     * rung 5, so this column looks redundant against
+     * `emission_factor.scope2_method`. Two reasons it is not:
+     *
+     * - **a filed figure's provenance must not move.** The factor row can be
+     *   corrected or superseded later, and a derived basis would silently
+     *   restate what a past disclosure was said to rest on;
+     * - **rung 5 is a reporter's assertion** — that no better instrument exists
+     *   for that consumption — and an assertion has to be recorded as one.
+     *   Deriving it would make the product look as though it decided, which is
+     *   the substitution prompt 85's D5 refuses to make silently.
+     *
+     * **Rung 4, residual mix, is not a value.** See `SCOPE2_MARKET_BASES`.
+     */
+    scope2MarketBasis: scope2MarketBasis("scope2_market_basis"),
     /** Who chose it, for the provenance line. Null for the seeded defaults,
         which no person chose. */
     createdBy: text("created_by").references(() => user.id, {
@@ -821,8 +852,8 @@ export const activityFactorMapping = pgTable(
  * produced, and `activity_record.import_id` already says which uploaded row it
  * came from. Storing only the total would make a restatement a guess.
  *
- * **`scope`, `scope3_category`, `scope2_method`, `biogenic` and
- * `outside_of_scopes` are denormalised from the factor deliberately.** They are
+ * **`scope`, `scope3_category`, `scope2_method`, `scope2_market_basis`,
+ * `biogenic` and `outside_of_scopes` are denormalised deliberately.** They are
  * what the figure was computed under, and a later revision of the factor row
  * must not retroactively move a filed number into a different scope.
  *
@@ -861,6 +892,12 @@ export const activityEmission = pgTable(
     scope: emissionScope("scope").notNull(),
     scope3Category: scope3Category("scope3_category"),
     scope2Method: scope2Method("scope2_method"),
+    /** The hierarchy rung the market-based figure rests on — prompt 86,
+        denormalised at calculation time for the reason the docblock above
+        gives for `scope2_method` itself: it is what the figure was computed
+        under, and a later change to the mapping must not restate a filed
+        number's provenance. Null on every figure that is not market-based. */
+    scope2MarketBasis: scope2MarketBasis("scope2_market_basis"),
     gwpSet: gwpSet("gwp_set").notNull(),
     biogenic: boolean("biogenic").notNull(),
     outsideOfScopes: boolean("outside_of_scopes").notNull(),

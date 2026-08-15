@@ -50,6 +50,7 @@ import {
 import type {
   CreateCustomFactorInput,
   EditFactorSetInput,
+  Scope2MarketBasis,
   Scope2Method,
 } from "../validation/emissions";
 import { readSqlState, withSafeQueryErrors } from "./query-error";
@@ -950,6 +951,9 @@ export type ResolvedMapping = {
       column, **not** the factor's own `scope2Method`. `null` is the default
       lane; `"market_based"` is prompt 85's second scope 2 lane. */
   lane: Scope2Method | null;
+  /** What the reporter asserted the market-lane figure rests on — prompt 86.
+      Null on the default lane; non-null on every market-lane mapping. */
+  marketBasis: Scope2MarketBasis | null;
   factor: FactorInput;
   /** The publisher's own description of the chosen row, for the surface. */
   factorLabel: string;
@@ -1078,6 +1082,7 @@ async function listFactorMappingsImpl(
          lane says which figure this mapping feeds, the factor's method says
          what the published row is. */
       lane: activityFactorMapping.scope2Method,
+      marketBasis: activityFactorMapping.scope2MarketBasis,
       id: emissionFactor.id,
       scope: emissionFactor.scope,
       scope3Category: emissionFactor.scope3Category,
@@ -1118,6 +1123,7 @@ async function listFactorMappingsImpl(
     category: row.category,
     unit: row.unit,
     lane: row.lane,
+    marketBasis: row.marketBasis,
     factorLabel: [row.level2, row.level3, row.columnText]
       .filter(Boolean)
       .join(" · "),
@@ -1329,9 +1335,23 @@ export function buildFactorResolver(
       record.activityDate,
     );
 
-    return factor
-      ? { ok: true, factor }
-      : { ok: false, gap: "out_of_period" };
+    if (!factor) return { ok: false, gap: "out_of_period" };
+
+    /* **The lane's assertion travels with the figure** — prompt 86. On the
+       market lane the basis is what labels the result, because on the
+       `grid_average` basis the chosen row is a grid average whose own method
+       says `location_based`. A market-lane mapping with no basis is a row from
+       before the column existed; the backfill gave every one of them
+       `contractual_instrument`, which is what they were by construction, and
+       the fallback here says the same thing rather than producing an
+       unlabelled market figure. */
+    return lane === "market_based"
+      ? {
+          ok: true,
+          factor,
+          marketBasis: mapping.marketBasis ?? "contractual_instrument",
+        }
+      : { ok: true, factor };
   };
 }
 
@@ -1387,6 +1407,7 @@ export type StoredEmission = {
   scope: FactorInput["scope"];
   scope3Category: FactorInput["scope3Category"];
   scope2Method: FactorInput["scope2Method"];
+  scope2MarketBasis: Scope2MarketBasis | null;
   gwpSet: FactorInput["gwpSet"];
   biogenic: boolean;
   outsideOfScopes: boolean;
@@ -1441,6 +1462,7 @@ async function replaceEmissionsImpl(
           scope: emission.scope,
           scope3Category: emission.scope3Category,
           scope2Method: emission.scope2Method,
+          scope2MarketBasis: emission.scope2MarketBasis,
           gwpSet: emission.gwpSet,
           biogenic: emission.biogenic,
           outsideOfScopes: emission.outsideOfScopes,
@@ -1535,11 +1557,17 @@ async function recalculateOrganizationImpl(
      Guidance's dual reporting.
 
      It runs over the subset of records whose `(category, unit)` carries a
-     market-based mapping, and its own coverage report is discarded: a record
-     with no contractual rate is not a gap, it is the expected state, and this
-     product substitutes no residual mix and no grid average for it. What is
-     *not* discarded is the figure — and `outOfPeriodYears` on this lane is the
-     same gap the default lane already reports, through the same predicate.
+     market-based mapping, and its own coverage report is discarded: a pair with
+     no market-lane mapping is not a gap, it is the expected state, and nothing
+     is substituted for it. What is *not* discarded is the figure — and
+     `outOfPeriodYears` on this lane is the same gap the default lane already
+     reports, through the same predicate.
+
+     **Which rung the figure rests on is the mapping's, not the factor's** —
+     prompt 86. `buildFactorResolver` reads `marketBasis` off the market-lane
+     mapping and hands it to the engine, so a pair mapped on the `grid_average`
+     basis produces a market-based figure from a grid-average row and carries
+     the basis that says so onto the stored row. That is still no extra query.
 
      No extra query: the mappings and the siblings are already loaded, the
      resolver issues none, and both lanes' figures go to `replaceEmissions` in
@@ -1569,6 +1597,7 @@ async function recalculateOrganizationImpl(
       scope: emission.scope,
       scope3Category: emission.scope3Category,
       scope2Method: emission.scope2Method,
+      scope2MarketBasis: emission.scope2MarketBasis,
       gwpSet: emission.gwpSet,
       biogenic: emission.biogenic,
       outsideOfScopes: emission.outsideOfScopes,
@@ -1590,6 +1619,10 @@ export type PersistedEmission = {
   scope: FactorInput["scope"];
   scope3Category: FactorInput["scope3Category"];
   scope2Method: FactorInput["scope2Method"];
+  /** The rung the stored market-based figure was computed under — prompt 86.
+      Null on every other figure, and null on a market-based row written before
+      the column existed. */
+  scope2MarketBasis: Scope2MarketBasis | null;
   gwpSet: FactorInput["gwpSet"];
   biogenic: boolean;
   outsideOfScopes: boolean;
@@ -1621,6 +1654,7 @@ async function listEmissionsImpl(
       scope: activityEmission.scope,
       scope3Category: activityEmission.scope3Category,
       scope2Method: activityEmission.scope2Method,
+      scope2MarketBasis: activityEmission.scope2MarketBasis,
       gwpSet: activityEmission.gwpSet,
       biogenic: activityEmission.biogenic,
       outsideOfScopes: activityEmission.outsideOfScopes,
@@ -1992,6 +2026,10 @@ async function listFactorCoverageImpl(
 export type MarketBasedMapping = {
   category: ActivityCategory;
   unit: ActivityUnit;
+  /** Which rung the reporter asserted — prompt 86. A row written before the
+      column existed reads as `contractual_instrument`, which is what the lane
+      check permitted at the time it was written. */
+  basis: Scope2MarketBasis;
   factorId: string;
   factorLabel: string;
   source: string;
@@ -2027,6 +2065,7 @@ async function listMarketBasedMappingsImpl(
     .select({
       category: activityFactorMapping.category,
       unit: activityFactorMapping.unit,
+      basis: activityFactorMapping.scope2MarketBasis,
       factorId: activityFactorMapping.factorId,
       chosenAt: activityFactorMapping.updatedAt,
       chosenBy: user.name,
@@ -2060,6 +2099,7 @@ async function listMarketBasedMappingsImpl(
   return rows.map((row) => ({
     category: row.category,
     unit: row.unit,
+    basis: row.basis ?? "contractual_instrument",
     factorId: row.factorId,
     factorLabel: factorLabelOf([row.level2, row.level3, row.columnText]),
     source: row.source,
@@ -2106,6 +2146,28 @@ function escapeLike(text: string): string {
 }
 
 /**
+ * What the market lane may offer, per basis — prompt 86, and **stated once** so
+ * the lexical and the close-wording picker cannot narrow differently.
+ *
+ * `is distinct from` rather than `<>` on the fallback half: the column is null
+ * on every row that is not scope 2, and `null <> 'market_based'` is null rather
+ * than true. The scope predicate already excludes those rows, and the idiom is
+ * kept because the two predicates should not depend on each other to be safe.
+ */
+function marketLaneScope(
+  lane: Scope2Method | null,
+  basis: Scope2MarketBasis | null,
+) {
+  if (lane !== "market_based") return undefined;
+  return and(
+    eq(emissionFactor.scope, "scope_2"),
+    basis === "grid_average"
+      ? sql`${emissionFactor.scope2Method} is distinct from 'market_based'`
+      : eq(emissionFactor.scope2Method, "market_based"),
+  );
+}
+
+/**
  * The factors that can be offered for one `(category, unit)` pair.
  *
  * **Narrowed by the engine's own rule, not by a second copy of it.**
@@ -2142,11 +2204,13 @@ async function searchFactorsForPairImpl(
   organizationId: string,
   unit: ActivityUnit,
   query: string,
-  /** The lane the result will be mapped on — prompt 85. On the market lane the
-      list is narrowed to scope 2 rows whose own method is `market_based`, so
-      the picker cannot offer a grid average for a market-based figure. The
-      action re-checks it regardless; this is the courtesy half. */
+  /** The lane the result will be mapped on — prompt 85. */
   lane: Scope2Method | null = null,
+  /** And, on the market lane, which rung it will be mapped under — prompt 86.
+      The two bases narrow to disjoint halves of scope 2, so the picker cannot
+      offer a grid average for a contractual claim or a contractual rate for a
+      stated fallback. The action re-checks both; this is the courtesy half. */
+  basis: Scope2MarketBasis | null = null,
 ): Promise<FactorSearchRow[]> {
   const admissible = admissibleFactorUnits(unit);
   if (admissible.length === 0) return [];
@@ -2182,12 +2246,7 @@ async function searchFactorsForPairImpl(
         isNull(emissionFactorSet.supersededBySetId),
         eq(emissionFactor.resultUnit, "kg_co2e"),
         inArray(emissionFactor.activityUnit, admissible),
-        lane === "market_based"
-          ? and(
-              eq(emissionFactor.scope, "scope_2"),
-              eq(emissionFactor.scope2Method, "market_based"),
-            )
-          : undefined,
+        marketLaneScope(lane, basis),
         pattern
           ? or(
               ilike(emissionFactor.level2, pattern),
@@ -2232,6 +2291,15 @@ export type FuzzyFactorSearchRow = FactorSearchRow & {
  * Character-trigram wording search for one admissible activity pair. It keeps
  * the lexical picker's five eligibility rules and includes visible customer
  * rows: all ranking happens inside the tenant-scoped Postgres query.
+ *
+ * **It now takes the lane and the basis too** — prompt 86. It had no lane
+ * predicate at all, and prompt 85 recorded that as one of the two reasons the
+ * market lane was lexical-only: running it would have offered rows the action
+ * then refuses. That reason is removed here rather than worked around, because
+ * the *other* reason does not hold on the fallback basis: rung 5's candidates
+ * are not the handful of rates a tenant entered itself, they are the same
+ * thousands of published scope 2 rows the default lane searches, which is
+ * precisely the haystack close-wording ranking exists for.
  */
 export const searchFactorsByWording = withSafeQueryErrors(
   "emission-queries.searchFactorsByWording",
@@ -2242,6 +2310,8 @@ async function searchFactorsByWordingImpl(
   organizationId: string,
   unit: ActivityUnit,
   query: string,
+  lane: Scope2Method | null = null,
+  basis: Scope2MarketBasis | null = null,
 ): Promise<FuzzyFactorSearchRow[]> {
   const admissible = admissibleFactorUnits(unit);
   if (admissible.length === 0) return [];
@@ -2278,6 +2348,7 @@ async function searchFactorsByWordingImpl(
         isNull(emissionFactorSet.supersededBySetId),
         eq(emissionFactor.resultUnit, "kg_co2e"),
         inArray(emissionFactor.activityUnit, admissible),
+        marketLaneScope(lane, basis),
       ),
     )
     .orderBy(desc(similarity), asc(emissionFactor.id))
@@ -2398,11 +2469,18 @@ async function setFactorMappingImpl(input: {
   factorId: string;
   /** `null` is the default lane; `"market_based"` is the second scope 2 lane. */
   lane: Scope2Method | null;
+  /** Which rung the market lane asserts — prompt 86. Null on the default lane.
+      **Part of the updated row, not of the conflict target**: a pair has one
+      market-lane mapping and changing its basis changes that mapping rather
+      than adding a second one. The four-column index is unchanged and still
+      the one inferred. */
+  marketBasis: Scope2MarketBasis | null;
   /** The person who chose it, for the provenance line. */
   userId: string;
 }): Promise<void> {
   const set = {
     factorId: input.factorId,
+    scope2MarketBasis: input.marketBasis,
     createdBy: input.userId,
     updatedAt: new Date(),
     deletedAt: null,
@@ -2415,6 +2493,7 @@ async function setFactorMappingImpl(input: {
       category: input.category,
       unit: input.unit,
       scope2Method: input.lane,
+      scope2MarketBasis: input.marketBasis,
       factorId: input.factorId,
       createdBy: input.userId,
     });

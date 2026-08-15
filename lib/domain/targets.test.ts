@@ -84,6 +84,7 @@ describe("target coverage", () => {
     scope: "scope_1",
     scope3Category: null,
     scope2Method: null,
+    scope2MarketBasis: null,
     gwpSet: "AR5",
     biogenic: false,
     outsideOfScopes: false,

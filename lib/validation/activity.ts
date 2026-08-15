@@ -1,5 +1,6 @@
 import * as z from "zod";
 
+import { SCOPE2_MARKET_BASES } from "./emissions";
 import type { SubmitResult } from "./result";
 
 /**
@@ -301,18 +302,52 @@ export type ActivityImportActionResult = SubmitResult;
  * default lane already carries the location-based figure, and admitting the
  * string would create a third lane that means the same thing as `null` and
  * silently split one pair's mapping in two.
+ *
+ * **The basis is a fourth field and the market lane has no default one** —
+ * prompt 86. It says which rung of the Scope 2 Guidance's market-based data
+ * hierarchy the reporter is asserting: a contractual instrument (rungs 1–3) or
+ * the grid-average fallback (rung 5). The two cross-field rules below are the
+ * same idiom `lib/validation/emissions.ts`'s custom-factor schema already uses
+ * for `scope`/`scope2Method`:
+ *
+ * - a basis on the **default** lane is refused. That lane has one meaning and a
+ *   basis on it would create a fourth lane;
+ * - a **missing** basis on the market lane is refused rather than defaulted.
+ *   The whole point of rung 5 is that the reporter chose it, and a default
+ *   would make the product choose.
  */
-export const factorMappingSchema = z.object({
-  category: z.enum(ACTIVITY_CATEGORIES, {
-    error: "Choose a category.",
-  }),
-  unit: z.enum(ACTIVITY_UNITS, { error: "Choose a unit." }),
-  factorId: z.uuid({ error: "Choose a factor from the list." }),
-  scope2Method: z
-    .literal("market_based", { error: "Choose a reporting lane." })
-    .nullish()
-    .transform((value) => value ?? null),
-});
+export const factorMappingSchema = z
+  .object({
+    category: z.enum(ACTIVITY_CATEGORIES, {
+      error: "Choose a category.",
+    }),
+    unit: z.enum(ACTIVITY_UNITS, { error: "Choose a unit." }),
+    factorId: z.uuid({ error: "Choose a factor from the list." }),
+    scope2Method: z
+      .literal("market_based", { error: "Choose a reporting lane." })
+      .nullish()
+      .transform((value) => value ?? null),
+    scope2MarketBasis: z
+      .enum(SCOPE2_MARKET_BASES, { error: "Choose what this rate rests on." })
+      .nullish()
+      .transform((value) => value ?? null),
+  })
+  .superRefine((value, context) => {
+    if (value.scope2Method === "market_based" && !value.scope2MarketBasis) {
+      context.addIssue({
+        code: "custom",
+        message: FACTOR_MAPPING_ERRORS.basisMissing,
+        path: ["scope2MarketBasis"],
+      });
+    }
+    if (value.scope2Method !== "market_based" && value.scope2MarketBasis) {
+      context.addIssue({
+        code: "custom",
+        message: FACTOR_MAPPING_ERRORS.basisOnDefaultLane,
+        path: ["scope2MarketBasis"],
+      });
+    }
+  });
 
 export type FactorMappingInput = z.infer<typeof factorMappingSchema>;
 
@@ -332,14 +367,26 @@ export const FACTOR_MAPPING_ERRORS = {
     "That factor is not available. It may have been superseded since the list was loaded.",
   notOwner:
     "Only an owner can change an emission factor. A factor choice moves every figure in a disclosure.",
-  /* The market lane's own refusal — prompt 85. A grid-average factor mapped on
-     the market lane would put an uncontracted rate into a market-based
-     disclosure figure, which is the one substitution this product refuses to
-     make silently. */
+  /* The market lane's own refusals — prompt 85, rewritten by prompt 86.
+
+     **`notMarketBased` used to say the reporter's only option was to add a
+     contractual rate.** That was true while the market lane had one basis; the
+     lane now has two, and a sentence naming one of them is incomplete
+     (AGENTS.md 12 rule 8). It names both. */
   notMarketBased:
-    "That factor is not a market-based scope 2 rate. The market-based lane takes a contractual rate you hold — add it under Add customer factor, with its method set to market-based.",
+    "That factor is not a market-based scope 2 rate. Add the contractual rate you hold under Add customer factor, with its method set to market-based — or, if you hold no better instrument for this consumption, map this pair on the grid-average fallback instead and it will be labelled as one.",
   marketBasedOnDefaultLane:
     "That is a market-based scope 2 rate. It belongs on the market-based lane for this pair, beside the grid-average factor, not in place of it.",
+  /* The fallback's own refusal — prompt 86. The substitution is permitted only
+     on the basis the reporter chose, and only with the kind of factor that
+     basis names. */
+  notGridAverage:
+    "The grid-average fallback takes a scope 2 grid-average factor — the same kind of factor the location-based lane uses. A market-based rate is a contractual instrument: map it on this lane as one instead.",
+  /* The two the shared schema raises before any of the above — prompt 86. */
+  basisMissing:
+    "Say what this market-based rate rests on: a contractual instrument you hold, or the grid average as a stated fallback. There is no default.",
+  basisOnDefaultLane:
+    "A market-based basis does not apply to the location-based lane. That lane carries the grid-average figure already.",
 } as const;
 
 export const FACTOR_SEARCH_MODES = ["lexical", "fuzzy"] as const;

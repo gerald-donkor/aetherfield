@@ -50,6 +50,7 @@ function emission(
     scope: "scope_1",
     scope3Category: null,
     scope2Method: null,
+    scope2MarketBasis: null,
     gwpSet: "AR5",
     biogenic: false,
     outsideOfScopes: false,
@@ -649,6 +650,101 @@ describe("reportSections", () => {
     ).toBe("Scope 2 (location-based)");
     const market = sections.find((s) => s.key === "market-based");
     expect(market?.rows.map((row) => row.value)).toContain("0.250");
+  });
+
+  /* Prompt 86 — the fallback is the thing that must not be silent. Each of
+     these guards a sentence that was true before it and is false after. */
+  describe("the rung-5 fallback", () => {
+    const withFallback = buildReportEvidence(
+      input({
+        emissions: [
+          emission("2026-01-10", "1000", {
+            scope: "scope_2",
+            scope2Method: "location_based",
+          }),
+          emission("2026-01-10", "1000", {
+            scope: "scope_2",
+            scope2Method: "market_based",
+            scope2MarketBasis: "grid_average",
+          }),
+        ],
+        committedRecords: 1,
+      }),
+    );
+
+    it("carries the fallback's figure and count into the evidence", () => {
+      expect(withFallback.marketBased?.fallbackScope2).toBe("1.000");
+      expect(withFallback.marketBased?.fallbackRecords).toBe(1);
+    });
+
+    it("names the substitution, its count and its rung in the caveats", () => {
+      const caveat = withFallback.caveats.find((line) =>
+        line.includes("grid-average emission factor"),
+      );
+      expect(caveat).toBeDefined();
+      expect(caveat).toContain("rung 5");
+      expect(caveat).toContain("1 of the 1");
+    });
+
+    it("stops claiming no grid average has been substituted", () => {
+      for (const caveat of withFallback.caveats) {
+        expect(caveat).not.toContain("no residual mix or grid average has been");
+      }
+      const market = reportSections(withFallback).find(
+        (section) => section.key === "market-based",
+      );
+      for (const note of market?.notes ?? []) {
+        expect(note).not.toContain("No residual mix or grid average");
+      }
+    });
+
+    it("still makes that claim where no fallback was chosen", () => {
+      const contractual = buildReportEvidence(
+        input({
+          emissions: [
+            emission("2026-01-10", "1000", {
+              scope: "scope_2",
+              scope2Method: "location_based",
+            }),
+            emission("2026-01-11", "1000", {
+              scope: "scope_2",
+              scope2Method: "location_based",
+            }),
+            emission("2026-01-10", "250", {
+              scope: "scope_2",
+              scope2Method: "market_based",
+              scope2MarketBasis: "contractual_instrument",
+            }),
+          ],
+          committedRecords: 2,
+        }),
+      );
+      expect(contractual.marketBased?.fallbackRecords).toBe(0);
+      expect(
+        contractual.caveats.some((line) =>
+          line.includes("no residual mix or grid average has been substituted"),
+        ),
+      ).toBe(true);
+    });
+
+    it("admits the fallback's figures in the narrative allowlist", () => {
+      const allowed = allowedNumberTokens(withFallback);
+      expect(allowed.has("1.000")).toBe(true);
+      expect(allowed.has("1")).toBe(true);
+      expect(
+        validateNarrative(
+          "1 scope 2 record rests on a grid-average factor, contributing 1.000 tCO2e.",
+          withFallback,
+          500,
+        ).ok,
+      ).toBe(true);
+    });
+
+    it("keeps the fallback inside the market-based total, not beside it", () => {
+      expect(withFallback.marketBased?.scope2).toBe("1.000");
+      expect(withFallback.totals.scope2).toBe("1.000");
+      expect(withFallback.totals.total).toBe("1.000");
+    });
   });
 
   it("renders every figure it emits as a string, never a number", () => {

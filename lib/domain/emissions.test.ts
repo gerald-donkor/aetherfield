@@ -164,6 +164,54 @@ describe("calculateRecordEmission", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.emission.outsideOfScopes).toBe(true);
   });
+
+  /* Prompt 86 — the market basis labels the figure, because on rung 5 the
+     factor row cannot: it is a grid average whose own method says
+     location-based. */
+  describe("the market-based basis", () => {
+    const gridAverage = factor({
+      scope: "scope_2",
+      scope2Method: "location_based",
+    });
+
+    it("labels a rung-5 figure market-based and records the basis", () => {
+      const result = calculateRecordEmission(
+        record(),
+        gridAverage,
+        "grid_average",
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.emission.scope2Method).toBe("market_based");
+        expect(result.emission.scope2MarketBasis).toBe("grid_average");
+      }
+    });
+
+    it("leaves the same factor location-based when no basis is asserted", () => {
+      const result = calculateRecordEmission(record(), gridAverage);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.emission.scope2Method).toBe("location_based");
+        expect(result.emission.scope2MarketBasis).toBeNull();
+      }
+    });
+
+    it("does not change the value the fallback produces", () => {
+      expect(kg(calculateRecordEmission(record(), gridAverage))).toBe(
+        kg(calculateRecordEmission(record(), gridAverage, "grid_average")),
+      );
+    });
+
+    it("refuses a basis on a factor that is not scope 2", () => {
+      const result = calculateRecordEmission(
+        record(),
+        factor({ scope: "scope_1" }),
+        "grid_average",
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.refusal).toBe("basis_off_scope_2");
+    });
+  });
 });
 
 describe("factorEligibility", () => {
@@ -257,6 +305,7 @@ describe("totalsOf", () => {
     scope: "scope_1",
     scope3Category: null,
     scope2Method: null,
+    scope2MarketBasis: null,
     gwpSet: "AR5",
     biogenic: false,
     outsideOfScopes: false,
@@ -407,6 +456,54 @@ describe("totalsOf", () => {
       expect(periods).toHaveLength(1);
       expect(toDecimalString(periods[0]!.totals.total)).toBe("150");
       expect(toDecimalString(periods[0]!.totals.scope2MarketBased)).toBe("25");
+    });
+
+    /* Prompt 86 — the reporter-chosen rung-5 fallback. What each of these
+       guards against is a grid average reaching a market-based figure without
+       being separable from a contractual one afterwards. */
+    describe("the grid-average fallback", () => {
+      const withFallback = () => [
+        ...dual(),
+        emission({
+          scope: "scope_2",
+          scope2Method: "market_based",
+          scope2MarketBasis: "grid_average",
+          kgCo2e: decimal("60"),
+        }),
+      ];
+
+      it("counts the fallback inside the market-based figure, not beside it", () => {
+        const totals = totalsOf(withFallback());
+        expect(toDecimalString(totals.scope2MarketBased)).toBe("85");
+        expect(toDecimalString(totals.scope2MarketBasedFallback)).toBe("60");
+        expect(totals.scope2MarketBasedRecords).toBe(2);
+        expect(totals.scope2MarketBasedFallbackRecords).toBe(1);
+      });
+
+      it("keeps the fallback out of scope 2 and out of the location-based total", () => {
+        const totals = totalsOf(withFallback());
+        expect(toDecimalString(totals.scope2)).toBe("100");
+        expect(toDecimalString(totals.total)).toBe("150");
+      });
+
+      it("reports zero, not absence, when the market lane carries no fallback", () => {
+        const totals = totalsOf(dual());
+        expect(toDecimalString(totals.scope2MarketBasedFallback)).toBe("0");
+        expect(totals.scope2MarketBasedFallbackRecords).toBe(0);
+      });
+
+      it("does not count a contractual market figure as a fallback", () => {
+        const totals = totalsOf([
+          emission({
+            scope: "scope_2",
+            scope2Method: "market_based",
+            scope2MarketBasis: "contractual_instrument",
+            kgCo2e: decimal("25"),
+          }),
+        ]);
+        expect(totals.scope2MarketBasedFallbackRecords).toBe(0);
+        expect(toDecimalString(totals.scope2MarketBased)).toBe("25");
+      });
     });
   });
 });
@@ -571,6 +668,24 @@ describe("aggregate, out of period", () => {
       "2024",
     ]);
   });
+
+  /* Prompt 86 — the lane's assertion has to survive the resolver seam, or the
+     fallback would be stored as a location-based figure and collide with the
+     primary one. */
+  it("carries a resolver's market basis onto every figure it produces", () => {
+    const result = aggregate([record()], () => ({
+      ok: true,
+      factor: factor({ scope: "scope_2", scope2Method: "location_based" }),
+      marketBasis: "grid_average",
+    }));
+    expect(result.emissions).toHaveLength(1);
+    expect(result.emissions[0]!.scope2Method).toBe("market_based");
+    expect(result.emissions[0]!.scope2MarketBasis).toBe("grid_average");
+    expect(toDecimalString(result.totals.scope2MarketBasedFallback)).toBe(
+      toDecimalString(result.totals.scope2MarketBased),
+    );
+    expect(toDecimalString(result.totals.scope2)).toBe("0");
+  });
 });
 
 describe("periods", () => {
@@ -583,6 +698,7 @@ describe("periods", () => {
       scope: "scope_1",
       scope3Category: null,
       scope2Method: null,
+      scope2MarketBasis: null,
       gwpSet: "AR5",
       biogenic: false,
       outsideOfScopes: false,

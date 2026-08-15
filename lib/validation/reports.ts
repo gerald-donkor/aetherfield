@@ -200,9 +200,9 @@ export const reportEvidenceSchema = z.object({
    * A stored `report.evidence` snapshot is immutable and every report filed
    * before this field existed must keep parsing, so its absence means "this
    * report was generated before the second lane existed", not "zero". It is
-   * also absent on a report whose period carries no contractual rate at all,
-   * which is the honest reading: no residual mix and no grid average is
-   * substituted for a record without one.
+   * also absent on a report whose period carries no market-lane mapping at
+   * all, which is the honest reading: nothing is substituted for a record
+   * without one.
    *
    * `scope2` and `total` above keep meaning the location-based figures, which
    * is what stops an already-filed target or reading from restating.
@@ -216,6 +216,17 @@ export const reportEvidenceSchema = z.object({
           on is carried in the snapshot rather than recomputed at render. */
       scope2Records: count,
       scope2MarketBasedRecords: count,
+      /**
+       * How much of the market-based figure rests on the Guidance's rung 5, the
+       * reporter-chosen grid-average fallback — prompt 86, and **optional
+       * inside an optional block for D9's reason**: a report filed between
+       * prompt 85 and prompt 86 carries `marketBased` without these two, and it
+       * must keep parsing. Absent therefore means "this report predates the
+       * fallback", and zero means "the fallback exists and this period uses
+       * none of it". The two are different claims and are not collapsed.
+       */
+      fallbackScope2: figure.optional(),
+      fallbackRecords: count.optional(),
     })
     .optional(),
   scope3ByCategory: z.array(

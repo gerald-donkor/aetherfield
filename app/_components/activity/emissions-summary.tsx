@@ -92,6 +92,7 @@ export async function EmissionsSummary({
       scope: row.scope,
       scope3Category: row.scope3Category,
       scope2Method: row.scope2Method,
+      scope2MarketBasis: row.scope2MarketBasis,
       gwpSet: row.gwpSet,
       biogenic: row.biogenic,
       outsideOfScopes: row.outsideOfScopes,
@@ -116,6 +117,9 @@ export async function EmissionsSummary({
      only one of them. */
   const scope2Label = SCOPE2_METHOD_LABELS.location_based;
   const marketBased = totals.scope2MarketBasedRecords > 0;
+  /* Rung 5's share of that figure — prompt 86. Zero is the common case and it
+     is a different statement from "no market-based figure at all". */
+  const fallbackRecords = totals.scope2MarketBasedFallbackRecords;
 
   return (
     <section className="mt-20" aria-labelledby={headingId}>
@@ -230,16 +234,33 @@ export async function EmissionsSummary({
               <Figure
                 label={`${EMISSION_SCOPE_LABELS.scope_2} (${SCOPE2_METHOD_LABELS.market_based})`}
                 value={tonnes(totals.scope2MarketBased)}
+                /* **This note used to end "and no grid average is substituted
+                   for them", unconditionally.** Since prompt 86 a reporter can
+                   map the grid average as an explicit rung-5 fallback, so the
+                   claim is made only where it is true and the split is stated
+                   where it is not (AGENTS.md 12 rule 8). */
                 note={`Dual reporting. ${totals.scope2MarketBasedRecords.toLocaleString(
                   "en-GB",
                 )} of ${totals.scope2Records.toLocaleString("en-GB")} scope 2 ${
                   totals.scope2Records === 1 ? "record has" : "records have"
-                } a contractual rate mapped. Records without one produce no market-based figure and no grid average is substituted for them.`}
+                } a market-based rate mapped. ${
+                  fallbackRecords === 0
+                    ? "Records without one produce no market-based figure and no grid average is substituted for them."
+                    : `Of those, ${fallbackRecords.toLocaleString("en-GB")} ${
+                        fallbackRecords === 1 ? "rests" : "rest"
+                      } on a grid-average factor chosen here as the hierarchy's rung 5, contributing ${tonnes(
+                        totals.scope2MarketBasedFallback,
+                      )} tCO2e. Records with no market-based rate mapped produce no market-based figure.`
+                }`}
               />
               <Figure
                 label="Total, scopes 1-3 (market-based)"
                 value={tonnes(totals.totalMarketBased)}
-                note="The same inventory read on the market lane. It is comparable to the total above only where every scope 2 record carries a contractual rate."
+                note={
+                  fallbackRecords === 0
+                    ? "The same inventory read on the market lane. It is comparable to the total above only where every scope 2 record carries a contractual rate."
+                    : "The same inventory read on the market lane. Where it rests on a grid-average factor it restates the location-based reading rather than measuring a procurement decision, so read it against the split beside it."
+                }
               />
             </dl>
           ) : null}

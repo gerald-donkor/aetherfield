@@ -712,10 +712,17 @@ export async function setFactorMapping(
         unit: fieldErrors.unit?.[0],
         factorId: fieldErrors.factorId?.[0],
         scope2Method: fieldErrors.scope2Method?.[0],
+        scope2MarketBasis: fieldErrors.scope2MarketBasis?.[0],
       },
     };
   }
-  const { category, unit, factorId, scope2Method: lane } = parsed.data;
+  const {
+    category,
+    unit,
+    factorId,
+    scope2Method: lane,
+    scope2MarketBasis: basis,
+  } = parsed.data;
 
   // -- d. Authorise --------------------------------------------------------
   if (membership.role !== "owner") {
@@ -746,32 +753,61 @@ export async function setFactorMapping(
       };
     }
 
-    /* **The lane and the factor's own method have to agree** — prompt 85, and
-       this is the check that keeps a grid average out of a market-based
-       disclosure figure. Both directions are refused:
+    /* **The lane, the basis and the factor's own method have to agree** —
+       prompt 85, widened by prompt 86 into a three-case matrix. This is the
+       check that decides whether a grid average may reach a market-based
+       disclosure figure, and the answer is now "only on the basis the reporter
+       chose, and labelled as that basis":
 
-       - a factor that is not a market-based scope 2 row cannot be mapped on the
-         market lane, because the market-based figure would then be a rate the
-         reporter never contracted for;
-       - a market-based row cannot be mapped on the default lane, because
-         `totalsOf` partitions market-based figures out of `scope2` and `total`
-         and the pair's contribution would silently vanish from the
-         location-based reading.
+       | lane    | basis                  | the factor must be              |
+       | ------- | ---------------------- | ------------------------------- |
+       | default | absent (schema)        | *not* a market-based row        |
+       | market  | contractual_instrument | a scope 2 `market_based` row    |
+       | market  | grid_average           | a scope 2 row that is *not*     |
+
+       The default row is prompt 85's, unchanged, and its reason is unchanged:
+       `totalsOf` partitions market-based figures out of `scope2` and `total`,
+       so a market-based row on that lane would make the pair's contribution
+       vanish from the location-based reading.
+
+       The third row is the substitution prompt 85 refused. It is the Scope 2
+       Guidance's rung 5 — "Other grid-average emission factors (subnational or
+       national) — see location-based data", Table 6.3, "Market-based scope 2
+       data hierarchy examples", quoted in `docs/backend.md` — and the Guidance
+       permits it where "no other market-based method data are available". What
+       this product refuses is making that assertion *for* the reporter; the
+       basis is what records that they made it.
 
        The picker's list is narrowed the same way, and that narrowing is a
        courtesy: this is the check. */
     const factorIsMarketBased =
       factor.scope === "scope_2" && factor.scope2Method === "market_based";
-    if (factorIsMarketBased !== (lane === "market_based")) {
+    const factorIsGridAverage =
+      factor.scope === "scope_2" && factor.scope2Method !== "market_based";
+
+    if (lane !== "market_based") {
+      if (factorIsMarketBased) {
+        return {
+          ok: false,
+          error: FACTOR_MAPPING_ERRORS.invalid,
+          fieldErrors: {
+            factorId: FACTOR_MAPPING_ERRORS.marketBasedOnDefaultLane,
+          },
+        };
+      }
+    } else if (basis === "grid_average") {
+      if (!factorIsGridAverage) {
+        return {
+          ok: false,
+          error: FACTOR_MAPPING_ERRORS.invalid,
+          fieldErrors: { factorId: FACTOR_MAPPING_ERRORS.notGridAverage },
+        };
+      }
+    } else if (!factorIsMarketBased) {
       return {
         ok: false,
         error: FACTOR_MAPPING_ERRORS.invalid,
-        fieldErrors: {
-          factorId:
-            lane === "market_based"
-              ? FACTOR_MAPPING_ERRORS.notMarketBased
-              : FACTOR_MAPPING_ERRORS.marketBasedOnDefaultLane,
-        },
+        fieldErrors: { factorId: FACTOR_MAPPING_ERRORS.notMarketBased },
       };
     }
 
@@ -781,6 +817,7 @@ export async function setFactorMapping(
       unit,
       factorId: factor.id,
       lane,
+      marketBasis: basis,
       userId,
     });
   } catch {

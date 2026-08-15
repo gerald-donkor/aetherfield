@@ -10860,3 +10860,311 @@ fixed in place rather than left standing (§12 rule 8):
 | **AI-assisted anything** | blocked, not deferred — prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, and prompt 76 shipped the provider-free path |
 | **any change to a marketing route, `Container`, `SiteNav`, `SiteFooter` or a GSAP surface** | out of scope entirely (AGENTS.md §8.1) |
 | **a step 15** | §5.2 remains the ordered plan; this is post-sequence work as prompts 63–84 were |
+
+## Rung 5: the reporter-chosen grid-average fallback, prompt 86
+
+Implemented on 15 Aug 2026. It closes the one open item prompt 85 named as
+*newly* open, on the disclosure path, and it closes a stated contradiction
+rather than adding a feature: the section above records that D5's original
+justification was falsified by the Guidance's own text, that the Guidance's
+rung 5 **is** the grid average, and that what survives is a product decision not
+to make the substitution **silently**. This prompt builds the non-silent
+version, and nothing else.
+
+Not a step 15. §5.2 remains the ordered plan; this is post-sequence work on
+step 10's surface, as prompts 63–85 were.
+
+### The standard, verified against the recorded quotation
+
+**Nothing user-facing here was composed from memory** (AGENTS.md §12 rule 2).
+The two sentences that authorise rung 5 were already quoted verbatim into this
+file by prompt 85 and were re-read before any copy was written:
+
+- **Table 6.3, "Market-based scope 2 data hierarchy examples", rung 5** —
+  *"Other grid-average emission factors (subnational or national) — see
+  location-based data"*, with eGRID, the Defra annual grid average and IEA
+  national factors as its examples;
+- **the sentence before Table 6.2** — *"Where contractual instruments do not
+  meet the Scope 2 Quality Criteria requirements, and no other market-based
+  method data are available, the location-based data should be used."*
+
+No live source was consulted this session, so nothing could disagree with the
+recorded quotation; the rung is cited by number and the table by name in the
+code comment that justifies the substitution (`app/activity/actions.ts`, the
+three-case matrix).
+
+### The enum, and where its names come from
+
+`scope2_market_basis`, two values, **named from the Guidance's own vocabulary
+rather than invented**:
+
+| value | rungs | why this word |
+| --- | --- | --- |
+| `contractual_instrument` | 1–3 | §1.5.1's own term for what rungs 1–3 are: *"markets providing product or supplier-specific data in the form of contractual instruments"*, and the Table 6.2 sentence's *"any contractual instrument from which an emission factor is derived"* |
+| `grid_average` | 5 | rung 5's own wording, *"Other grid-average emission factors"* |
+
+**Rung 4, residual mix, is deliberately not a value.** The AIB European Residual
+Mixes dataset is separately licensed and is not shipped, so a value here would
+be a name with no way to be populated — the same class of block as the IEA
+licence at step 10. Recorded in `SCOPE2_MARKET_BASES`' docblock.
+
+### The decisions, E1–E8
+
+Each is a decision, not a measurement (§12 rule 4).
+
+| # | decision | as built |
+| --- | --- | --- |
+| **E1** | the basis is a stored column, never derived from the factor row | `scope2_market_basis` on `activity_factor_mapping` (nullable, non-null only on the market lane) and denormalised onto `activity_emission`. Two reasons in the schema docblock: a factor row can be superseded or corrected later and a filed figure's provenance must not move with it; and rung 5 is a **reporter's assertion**, which has to be recorded as one rather than inferred |
+| **E2** | the market lane has **no default basis** | `factorMappingSchema` refuses a market-lane mapping with no basis and refuses a basis on the default lane, both as field errors. The whole point of rung 5 is that the reporter chose it |
+| **E3** | the lane check becomes a three-case matrix | default lane → the factor must not be market-based (prompt 85's rule, unchanged); market + `contractual_instrument` → a scope 2 `market_based` row; market + `grid_average` → a scope 2 row that is **not** market-based. The third case is the substitution prompt 85 refused, permitted only on the explicit basis |
+| **E4** | the **lane** labels the figure, not the factor row | `calculateRecordEmission` takes the basis and, when it is present, writes `scope2_method = 'market_based'` regardless of the factor's own method. On the contractual basis that is a no-op; on rung 5 it is the point, because the chosen row is a grid average whose own method says `location_based`. A basis on a non-scope-2 factor is a new typed refusal, `basis_off_scope_2` |
+| **E5** | the fallback is **inside** the market-based figure, not a third lane | `ScopeTotals` gains `scope2MarketBasedFallback` and `scope2MarketBasedFallbackRecords`; `scope2MarketBased` and `totalMarketBased` keep meaning the whole market lane, which is what the hierarchy means. `total`, `scope2` and `totalsForCoverage` are untouched, so no filed target, alert or snapshot restates (prompt 85's D4, preserved) |
+| **E6** | `ENGINE_VERSION` bumps to **`1.3.0`**; stored rows are not rewritten | a pair on the fallback now produces a figure where 1.2.0 produced none. Old rows keep 1.2.0 until the next recalculation, as D8 established |
+| **E7** | the snapshot's two new fields are optional **inside** the optional `marketBased` block | a report filed between prompts 85 and 86 carries `marketBased` without them and must keep parsing (D9). Absent means "filed before the fallback existed"; `"0.000"` means "the fallback exists and this period uses none of it". Every snapshot this engine writes carries them |
+| **E8** | close-wording search is **enabled** on the fallback basis and stays off on the contractual one | re-derived, not copied — see below |
+
+### One refusal, not two
+
+The prompt predicted "two new refusals" from the three-case matrix. **There is
+one** — `notGridAverage`, for a factor offered on the fallback basis that is not
+a scope 2 grid average — because the matrix's other direction is already
+`marketBasedOnDefaultLane`, which prompt 85 shipped. Recorded rather than
+padded (§12 rule 8). Two *other* new entries exist for E2's schema refusals,
+`basisMissing` and `basisOnDefaultLane`, so `FACTOR_MAPPING_ERRORS` gains three
+in total.
+
+### E8, re-derived: why the fallback gets close-wording search
+
+Prompt 85 gave **two** reasons for making the market lane lexical-only, and the
+prompt for this change required the question to be re-asked rather than either
+answer copied. One reason is removed and one does not carry over:
+
+- *"`searchFactorsByWording` has no lane predicate, so it would offer rows the
+  action then refuses."* **Removed rather than worked around**: the function now
+  takes the lane and the basis and applies the same `marketLaneScope` predicate
+  the lexical picker uses, stated once so the two pickers cannot narrow
+  differently;
+- *"the market lane's candidates are the handful of contractual rates this
+  tenant has entered itself."* **True of the contractual basis and false of the
+  fallback.** Rung 5's candidates are the same thousands of published scope 2
+  rows the default lane searches, which is precisely the haystack close-wording
+  ranking was built for.
+
+So: lexical-only on `contractual_instrument`, both modes on `grid_average`. The
+mapping page derives it once as `lexicalOnly` and the form reads it rather than
+restating the rule beside the button.
+
+### The migration
+
+`npm run db:generate` produced **`lib/db/migrations/0017_mixed_spacker_dave.sql`**,
+read before it was applied. The three generated statements, verbatim:
+
+```sql
+CREATE TYPE "public"."scope2_market_basis" AS ENUM('contractual_instrument', 'grid_average');--> statement-breakpoint
+ALTER TABLE "activity_emission" ADD COLUMN "scope2_market_basis" "scope2_market_basis";--> statement-breakpoint
+ALTER TABLE "activity_factor_mapping" ADD COLUMN "scope2_market_basis" "scope2_market_basis";
+```
+
+and the backfill, **written by hand into the generated file** rather than run
+against the database (§9 forbids the hand-run `ALTER TABLE`, not a custom
+statement in a generated migration):
+
+```sql
+UPDATE "activity_factor_mapping"
+   SET "scope2_market_basis" = 'contractual_instrument'
+ WHERE "scope2_method" = 'market_based'
+   AND "scope2_market_basis" is null;
+```
+
+**The row count was verified rather than assumed.** Before applying:
+`select scope2_method, count(*) from activity_factor_mapping group by 1` returned
+exactly one row — **`null` → 11**. There are **zero** market-lane mappings on
+this database, so the backfill matched **0 rows here**; it is in the migration
+because it is the correct statement for any environment that has one, and
+because every market-lane row that could exist carries a contractual rate by
+construction — prompt 85's lane check has refused anything else since the lane
+existed.
+
+**`activity_emission` is deliberately not backfilled**, per E6 and D8. A null
+basis on a stored market-based figure reads as "computed before the fallback
+existed", which is true, and the next recalculation restates it under 1.3.0.
+`buildFactorResolver` reads a null basis on a market-lane *mapping* as
+`contractual_instrument` for the same reason, so no unlabelled market figure can
+be produced.
+
+Read back after `npm run db:migrate`:
+
+```
+scope2_market_basis: activity_emission        USER-DEFINED  udt scope2_market_basis  nullable YES
+scope2_market_basis: activity_factor_mapping  USER-DEFINED  udt scope2_market_basis  nullable YES
+enum scope2_market_basis: contractual_instrument, grid_average
+```
+
+**The four partial unique indexes are unchanged, and that was verified rather
+than assumed** (the prompt required it, because `ON CONFLICT` infers a partial
+index only from a repeated predicate). All four still read exactly as prompt 85
+recorded them:
+
+```
+CREATE UNIQUE INDEX activity_emission_record_key ON public.activity_emission USING btree (activity_record_id) WHERE (scope2_method IS DISTINCT FROM 'market_based'::scope2_method)
+CREATE UNIQUE INDEX activity_emission_record_market_key ON public.activity_emission USING btree (activity_record_id) WHERE (scope2_method = 'market_based'::scope2_method)
+CREATE UNIQUE INDEX activity_factor_mapping_default_key ON public.activity_factor_mapping USING btree (organization_id, category, unit) WHERE (scope2_method IS NULL)
+CREATE UNIQUE INDEX activity_factor_mapping_method_key ON public.activity_factor_mapping USING btree (organization_id, category, unit, scope2_method) WHERE (scope2_method IS NOT NULL)
+```
+
+Both predicates are on `scope2_method`, so neither index's inference is affected
+by the new column. `setFactorMapping` therefore keeps both `targetWhere`
+branches unchanged, and the basis rides in the row and in the `set` clause: a
+pair has **one** market-lane mapping, and changing its basis changes that
+mapping rather than adding a second one.
+
+### Measurements
+
+From a throwaway synthetic organisation built, measured and deleted by a scratch
+script — prompt 85's recorded pattern — with **400 records** (200 electricity,
+200 heat, 1,000 kWh each, all dated 2026-05-31), a synthetic contractual rate of
+`0.01234` on the electricity market lane, and the published DESNZ district-heat
+grid average mapped on the heat market lane as the rung-5 fallback. No real
+supplier and no real contractual rate (§8.3).
+
+| what | result |
+| --- | --- |
+| recalculation, both lanes | **11 queries**, 800 figures over 400 records |
+| against prompt 85's recorded 11 | **held — the fallback adds no query.** It rides on mappings already loaded and on the resolver, which issues none |
+| wall clock, first run of the session | **10,089 ms** — a cold resource (free-plan scale-to-zero, §7.3) |
+| wall clock, **warm** — a second identical run in the same process | **6,011 ms**, same 11 queries, same 800 figures |
+| `max_rows_per_record` | **2**, with a fallback mapping present. A pair carrying rung 5 produces no third row |
+| the three-way split, rows | 400 location-based · 200 market-based contractual · **200 market-based fallback** |
+| the three-way split, exact `numeric` sums | **61250.000000000000000000000000 kg** location-based · **2468.000000000000000000000000 kg** contractual · **35058.000000000000000000000000 kg** fallback |
+| the fallback is inside the market total and outside `total` | the market lane sums to 2468 + 35058 = 37526 kg and the location-based total is 61250 kg — neither is an addend of the other, and the fallback's 35058 kg is exactly the heat pair's own location-based contribution (200 × 1000 × 0.17529), which is what rung 5 *means*: it restates the location-based reading on the market lane |
+| `engine_version` on every written row | **`1.3.0`**, one distinct value |
+
+**That last row is the honest reading of the whole feature**, and it is why the
+copy says the market-based total is not comparable to a procured one where it
+rests on rung 5.
+
+#### The double-count traps, re-run against a pair carrying a fallback
+
+Every check in prompt 85's trap table, run over the rig's data, where the heat
+pair carries **both** a default-lane mapping and a rung-5 market-lane mapping:
+
+| trap | result |
+| --- | --- |
+| `listFactorCoverage`'s mapping join | **verified** — 200 for electricity and 200 for heat, not 400. The `isNull(scope2Method)` join predicate still holds |
+| `countOutOfPeriodRecords`'s inner join | **verified** — 400, not 800 |
+| `countPeriodRecords` in `report-evidence.ts` | **verified** — `committed = 400`, `uncalculated = 0`, not 800 committed |
+| `EmissionsSummary`'s `calculated` | **verified** — 400 primary-lane rows against 400 records |
+| `buildReportEvidence`'s `coverage.calculatedRecords` | **verified**, same count and same predicate |
+| `seedDefaultMappings`' existence check | **verified** — the default-lane-scoped count sees 2, so an organisation holding only a market mapping is still seedable |
+| `totalsOf` | **verified in the domain tests** — the fallback lands in `scope2MarketBased` and in `scope2MarketBasedFallback`, and in neither `scope2` nor `total` |
+
+Nothing needed fixing: prompt 85's predicates are all on `scope2_method`, and
+the fallback is a market-lane row like any other to every one of them.
+
+### Corrections made in this change
+
+Four places asserted something this work falsified. Each is fixed in place
+rather than appended to (§12 rule 8):
+
+1. **`lib/domain/reports.ts`'s coverage caveat** said the remainder "carry no
+   contractual instrument rate, and no residual mix or grid average has been
+   substituted for them". The second clause is now conditional on there being no
+   fallback, and a fallback gets **its own caveat naming the count and the
+   rung**;
+2. **`reportSections`' market-based note** made the same claim; same fix, plus a
+   new row stating the fallback's figure and record count;
+3. **`app/_components/activity/emissions-summary.tsx`**'s market-based note made
+   it a third time; it now states the split instead, and the market-lane total's
+   note says the figure restates the location-based reading to the extent it
+   rests on a grid average;
+4. **`SCOPE2_METHODS`' docblock** in `lib/validation/emissions.ts` said "no grid
+   average is ever substituted", full stop. It now says what remains true:
+   nothing substitutes one *on the reporter's behalf*, and a figure resting on
+   one is labelled everywhere it is shown.
+
+`FACTOR_MAPPING_ERRORS.notMarketBased` was rewritten for the same reason: it
+told the reporter their only option was to add a contractual rate, which was
+true with one basis and incomplete with two. It now names both.
+
+### Prerender impact and verification, prompt 86
+
+**None. Verified, not assumed** (§8.1).
+
+A dev server was running, so both sides were built in copies under
+`~/.cache/aetherfield-diff` per `docs/automation.md`'s clean recipe, base at
+`b51c4ea`.
+
+- **Route table**: `/`, `/about`, `/careers`, `/journal`, `/design-system`
+  `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG`; every
+  route this change touches — `/activity`, `/activity/mappings`, `/dashboard`,
+  `/reports*` — already `ƒ` and still `ƒ`.
+- **21 prerendered HTML files on each side, same file set. After normalising
+  `.next/BUILD_ID`, both chunk-name patterns and the RSC flight scripts: 0 of 21
+  differed.**
+- **The CSS chunk is identical by content hash** — `0nfq7xy4zoxgc.css` on both
+  sides, 68,559 bytes. Same hash as prompt 85's, so no new utility and no new
+  prose-scanned rule reached the marketing pages.
+
+### Checks run
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **283 passed, 12 files** — up from 268, so the new domain cases are running |
+| `npm run db:generate` | `0017_mixed_spacker_dave.sql`, read before applying, quoted above with its hand-written backfill |
+| `npm run db:migrate` | applied; the column, the enum and all four partial indexes read back above |
+| `npm run build` | route table above |
+| `npm run test:e2e:local` | **107 passed, 12 skipped, 1 failed** — the failure is `factor-picker.spec.ts` on **Firefox**, which **passes in isolation** (`5 passed`). It is the cross-project contention the market-lane specs' own docblocks describe: the three browser projects share one organisation. Not a regression from this change, and reported rather than smoothed over |
+| the two market-lane specs, Chromium | **9 passed** — `market-based-scope-2.spec.ts` and the new `scope-2-grid-average-fallback.spec.ts` together, including setup and teardown |
+| `npm run test:e2e:webkit` | **did not run** — "Podman is required for WebKit on Arch Linux", the same environment gap prompts 78–85 recorded. **A gap, not a pass** |
+| prerender diff | **0 of 21 differed**, CSS chunk identical by hash |
+
+### Trust boundary and data
+
+- **No new public write path.** `setFactorMapping` is authenticated and
+  owner-gated, checked inside the action after the session, the tenant
+  resolution and the `pendingDeletion` lock. No BotID on an authenticated path,
+  and the stage order is unchanged.
+- **The basis is parsed at stage c** by the shared schema, which runs in the
+  client leaf and again in the action. A value outside the enum, a basis on the
+  default lane and a missing basis on the market lane are all field errors —
+  never a third lane and never a silent default.
+- The factor id stays **a claim**: re-read through `getVisibleFactor` under the
+  tenant predicate, with missing, deleted, superseded and foreign answering one
+  indistinguishable refusal.
+- **The rung-5 permission is narrow by construction**: it admits a scope 2
+  grid-average row and nothing else. A scope 1 or scope 3 factor on the market
+  lane stays refused on both bases, in the action *and* in the engine, which
+  answers `basis_off_scope_2` rather than mislabelling the figure.
+- In the query string, `basis` follows the lane's own rule: `fallback` is the
+  only value that means anything else, and a forged value selects the
+  contractual basis the reporter would have got anyway. The action re-derives it
+  from its own input.
+- **No new environment variable and no `NEXT_PUBLIC_*`.** `DATABASE_URL` through
+  `lib/db/client.ts`; the existing Upstash limiter unchanged.
+- **No personal data.** A reporter's methodology choice is a customer's
+  commercial data: tenant-scoped on every read and write, never logged, never
+  transmitted. `app/activity/actions.ts` still has no `console` call.
+  `emission_factor` keeps its narrow published-data exception and every read
+  keeps the `organization_id is null or = $1` predicate.
+- **No model is called** (§5.3). AI factor matching remains blocked, not
+  deferred.
+
+### What prompt 86 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| **applying the fallback automatically, or defaulting it on** | the entire distinction between this and prompt 85's D5. Silent substitution stays refused, permanently: there is no default basis, and E2 makes its absence a field error rather than a fallback-to-fallback |
+| **rung 4, a residual-mix dataset** | needs the separately licensed AIB European Residual Mixes. Not a value in the enum, because a value with no way to be populated is a fabrication |
+| **REC / GO certificate document capture** | still open. A blob upload, a §8.3 retention decision and an evidence-linking surface |
+| **Scope 2 Quality Criteria enforcement** | Chapter 7's criteria are properties of an instrument this product does not model. Prompt 85's reasoning, unchanged |
+| **backfilling `activity_emission`'s basis** | D8. A stored figure keeps the engine version and the provenance it was produced under until the next recalculation restates it |
+| **re-basing targets or alerts on the market-based figure** | D4 keeps `total` location-based on purpose |
+| **restating filed reports** | D9. The snapshot is immutable and the two new fields are optional so it keeps parsing |
+| **the market lane on categories beyond `electricity` and `heat`** | `SCOPE2_MARKET_LANE_CATEGORIES` unchanged |
+| **un-retiring a factor set** | prompt 84's deferral, still open and untouched |
+| **editing a factor set's metadata** | still open, still wants its own prompt |
+| **AI-assisted anything** | blocked, not deferred |
+| **any change to a marketing route, `Container`, `SiteNav`, `SiteFooter` or a GSAP surface** | out of scope entirely (§8.1), and verified by the prerender diff |
+| **a step 15** | §5.2 remains the ordered plan; this is post-sequence work as prompts 63–85 were |
