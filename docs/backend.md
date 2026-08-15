@@ -2778,6 +2778,28 @@ its guarded update excludes the acting admin, every admin/unknown-role target
 and every unverified account. The first admin remains a trusted database
 bootstrap operation.
 
+**Performed on production, 15 Aug 2026.** The deadlock is real and not
+theoretical: with no admin row, `setStaffRole` cannot grant `staff` either,
+because it re-checks the actor's admin role — so a fresh database has no
+in-app path to any privileged account at all. It was resolved by a one-off
+script, run once and deleted rather than committed, that built its own pool
+from `DATABASE_URL_UNPOOLED` (the `seed-emission-factors.ts` pattern, which
+avoids `server-only`) and set `role = 'admin'` on the single user row by id.
+
+**`staff` would not have been enough, and `admin` is the correct bootstrap
+target.** `lib/auth/server.ts:242` admits either role to `/submissions`, so
+`staff` opens the view — but only `admin` reaches the removal controls and the
+staff tab (`app/submissions/page.tsx:366`), and only an admin can grant
+anything. Granting `admin` once is what makes every later grant an ordinary
+in-app operation; granting `staff` would have left the deadlock in place.
+
+**Any future environment repeats this.** The write is deliberately not a
+committed script: a repeatable `db:grant:admin` would be a standing privilege
+escalation living in the repo, and §11.2 rule 3 exists to keep self-granted
+staff impossible. A one-off, deleted after use, keeps the escalation out of the
+codebase. Whoever does it next needs the target's user id, which is read from
+the `user` table directly.
+
 Lead and subscriber removal stamp `deleted_at` once. Application removal:
 
 1. stamps `deleted_at` and returns only pathname plus the exact timestamp;
