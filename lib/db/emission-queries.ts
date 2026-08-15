@@ -50,6 +50,7 @@ import {
 import type {
   CreateCustomFactorInput,
   EditFactorSetInput,
+  Scope2Method,
 } from "../validation/emissions";
 import { readSqlState, withSafeQueryErrors } from "./query-error";
 
@@ -945,6 +946,10 @@ async function retireTenantFactorSetImpl(input: {
 export type ResolvedMapping = {
   category: ActivityCategory;
   unit: ActivityUnit;
+  /** Which reporting lane this mapping feeds — the `activity_factor_mapping`
+      column, **not** the factor's own `scope2Method`. `null` is the default
+      lane; `"market_based"` is prompt 85's second scope 2 lane. */
+  lane: Scope2Method | null;
   factor: FactorInput;
   /** The publisher's own description of the chosen row, for the surface. */
   factorLabel: string;
@@ -1068,6 +1073,11 @@ async function listFactorMappingsImpl(
     .select({
       category: activityFactorMapping.category,
       unit: activityFactorMapping.unit,
+      /* The mapping's lane, aliased so it cannot be confused with the factor
+         row's own `scope2Method` two lines below. They are different facts: a
+         lane says which figure this mapping feeds, the factor's method says
+         what the published row is. */
+      lane: activityFactorMapping.scope2Method,
       id: emissionFactor.id,
       scope: emissionFactor.scope,
       scope3Category: emissionFactor.scope3Category,
@@ -1107,6 +1117,7 @@ async function listFactorMappingsImpl(
   return rows.map((row) => ({
     category: row.category,
     unit: row.unit,
+    lane: row.lane,
     factorLabel: [row.level2, row.level3, row.columnText]
       .filter(Boolean)
       .join(" · "),
@@ -1262,13 +1273,28 @@ async function listFactorSiblingsImpl(
  * index the mappings by pair, and index the siblings by the publisher's row
  * identity. `no_mapping` is decided here because only this layer knows what a
  * mapping is.
+ *
+ * **One lane per resolver** (prompt 85). The resolver is a
+ * `record → factor` function and a record now has up to two factors, so the
+ * lane is chosen when the resolver is built rather than smuggled into its key:
+ * `recalculateOrganization` builds one for the default lane and one for the
+ * market lane, and each is the same rule over a different subset of the same
+ * mapping rows. The date-selection rule itself lives in
+ * `lib/domain/factor-selection.ts` and is not duplicated.
+ *
+ * @param lane `null` is the default lane — the location-based figure and every
+ * scope 1 and 3 figure. `"market_based"` resolves only the pairs the reporter
+ * has mapped a contractual rate for; every other pair answers `no_mapping`,
+ * which the market pass discards rather than reporting as a coverage gap.
  */
 export function buildFactorResolver(
   mappings: readonly ResolvedMapping[],
   siblings: readonly FactorSibling[] = [],
+  lane: Scope2Method | null = null,
 ): FactorResolver {
   const byPair = new Map<string, ResolvedMapping>();
   for (const mapping of mappings) {
+    if ((mapping.lane ?? null) !== lane) continue;
     byPair.set(`${mapping.category}.${mapping.unit}`, mapping);
   }
 
@@ -1502,13 +1528,41 @@ async function recalculateOrganizationImpl(
 
   const { emissions } = aggregate(
     records,
-    buildFactorResolver(mappings, siblings),
+    buildFactorResolver(mappings, siblings, null),
   );
+
+  /* **The market pass** — prompt 85, and the second half of the Scope 2
+     Guidance's dual reporting.
+
+     It runs over the subset of records whose `(category, unit)` carries a
+     market-based mapping, and its own coverage report is discarded: a record
+     with no contractual rate is not a gap, it is the expected state, and this
+     product substitutes no residual mix and no grid average for it. What is
+     *not* discarded is the figure — and `outOfPeriodYears` on this lane is the
+     same gap the default lane already reports, through the same predicate.
+
+     No extra query: the mappings and the siblings are already loaded, the
+     resolver issues none, and both lanes' figures go to `replaceEmissions` in
+     one transaction. */
+  const marketPairs = new Set(
+    mappings
+      .filter((mapping) => mapping.lane === "market_based")
+      .map((mapping) => `${mapping.category}.${mapping.unit}`),
+  );
+  const marketEmissions =
+    marketPairs.size === 0
+      ? []
+      : aggregate(
+          records.filter((record) =>
+            marketPairs.has(`${record.category}.${record.unit}`),
+          ),
+          buildFactorResolver(mappings, siblings, "market_based"),
+        ).emissions;
 
   const { written } = await replaceEmissions(
     organizationId,
     records.map((record) => record.id),
-    emissions.map((emission) => ({
+    [...emissions, ...marketEmissions].map((emission) => ({
       activityRecordId: emission.recordId,
       factorId: emission.factorId,
       kgCo2e: toStoredKgCo2e(emission.kgCo2e),
@@ -1604,7 +1658,14 @@ async function countUncalculatedRecordsImpl(
     .from(activityRecord)
     .leftJoin(
       activityEmission,
-      eq(activityEmission.activityRecordId, activityRecord.id),
+      and(
+        eq(activityEmission.activityRecordId, activityRecord.id),
+        /* The primary lane only. This count is of the null side, which a second
+           market-based row cannot inflate — but a reader should not have to
+           work that out, and the predicate makes the question this asks
+           ("which records have no primary figure") explicit. */
+        sql`${activityEmission.scope2Method} is distinct from 'market_based'`,
+      ),
     )
     .where(
       and(
@@ -1650,6 +1711,9 @@ async function countOutOfPeriodRecordsImpl(
         eq(activityFactorMapping.category, activityRecord.category),
         eq(activityFactorMapping.unit, activityRecord.unit),
         isNull(activityFactorMapping.deletedAt),
+        /* The default lane only, for the reason `listFactorCoverage`'s join
+           records: a second lane would count every record twice. */
+        isNull(activityFactorMapping.scope2Method),
       ),
     )
     .innerJoin(
@@ -1850,6 +1914,11 @@ async function listFactorCoverageImpl(
         eq(activityFactorMapping.category, activityRecord.category),
         eq(activityFactorMapping.unit, activityRecord.unit),
         isNull(activityFactorMapping.deletedAt),
+        /* **The default lane only** — prompt 85. Without this predicate a pair
+           carrying a market-based mapping as well would join twice and every
+           count in this grouped read would double. The market lane is read
+           separately by {@link listMarketBasedMappings}. */
+        isNull(activityFactorMapping.scope2Method),
       ),
     )
     .leftJoin(
@@ -1917,6 +1986,87 @@ async function listFactorCoverageImpl(
             chosenBy: row.chosenBy,
           }
         : null,
+  }));
+}
+
+export type MarketBasedMapping = {
+  category: ActivityCategory;
+  unit: ActivityUnit;
+  factorId: string;
+  factorLabel: string;
+  source: string;
+  datasetVersion: string;
+  customerSupplied: boolean;
+  chosenAt: Date;
+  chosenBy: string | null;
+};
+
+/**
+ * The organisation's market-based scope 2 mappings — prompt 85.
+ *
+ * **A separate read rather than a second join into {@link listFactorCoverage}.**
+ * That query groups over the record scan to count records per pair, and a
+ * second mapping row per pair would double every count in it; the lane is
+ * therefore excluded there and asked for here, over the mapping table alone.
+ * There is at most one row per pair by
+ * `activity_factor_mapping_method_key`, so no grouping is needed.
+ *
+ * Predicated on `organization_id = $1` on the mapping, and on the shared
+ * visibility predicate for the factor, so a lane can never pick up another
+ * tenant's row.
+ */
+export const listMarketBasedMappings = withSafeQueryErrors(
+  "emission-queries.listMarketBasedMappings",
+  listMarketBasedMappingsImpl,
+);
+
+async function listMarketBasedMappingsImpl(
+  organizationId: string,
+): Promise<MarketBasedMapping[]> {
+  const rows = await getDb()
+    .select({
+      category: activityFactorMapping.category,
+      unit: activityFactorMapping.unit,
+      factorId: activityFactorMapping.factorId,
+      chosenAt: activityFactorMapping.updatedAt,
+      chosenBy: user.name,
+      level2: emissionFactor.level2,
+      level3: emissionFactor.level3,
+      columnText: emissionFactor.columnText,
+      source: emissionFactorSet.source,
+      datasetVersion: emissionFactorSet.datasetVersion,
+      setOrganizationId: emissionFactorSet.organizationId,
+    })
+    .from(activityFactorMapping)
+    .innerJoin(
+      emissionFactor,
+      and(
+        eq(emissionFactor.id, activityFactorMapping.factorId),
+        isNull(emissionFactor.deletedAt),
+        visibleFactorScope(organizationId),
+      ),
+    )
+    .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
+    .leftJoin(user, eq(user.id, activityFactorMapping.createdBy))
+    .where(
+      and(
+        eq(activityFactorMapping.organizationId, organizationId),
+        isNull(activityFactorMapping.deletedAt),
+        eq(activityFactorMapping.scope2Method, "market_based"),
+      ),
+    )
+    .orderBy(asc(activityFactorMapping.category), asc(activityFactorMapping.unit));
+
+  return rows.map((row) => ({
+    category: row.category,
+    unit: row.unit,
+    factorId: row.factorId,
+    factorLabel: factorLabelOf([row.level2, row.level3, row.columnText]),
+    source: row.source,
+    datasetVersion: row.datasetVersion,
+    customerSupplied: row.setOrganizationId !== null,
+    chosenAt: row.chosenAt,
+    chosenBy: row.chosenBy,
   }));
 }
 
@@ -1992,6 +2142,11 @@ async function searchFactorsForPairImpl(
   organizationId: string,
   unit: ActivityUnit,
   query: string,
+  /** The lane the result will be mapped on — prompt 85. On the market lane the
+      list is narrowed to scope 2 rows whose own method is `market_based`, so
+      the picker cannot offer a grid average for a market-based figure. The
+      action re-checks it regardless; this is the courtesy half. */
+  lane: Scope2Method | null = null,
 ): Promise<FactorSearchRow[]> {
   const admissible = admissibleFactorUnits(unit);
   if (admissible.length === 0) return [];
@@ -2027,6 +2182,12 @@ async function searchFactorsForPairImpl(
         isNull(emissionFactorSet.supersededBySetId),
         eq(emissionFactor.resultUnit, "kg_co2e"),
         inArray(emissionFactor.activityUnit, admissible),
+        lane === "market_based"
+          ? and(
+              eq(emissionFactor.scope, "scope_2"),
+              eq(emissionFactor.scope2Method, "market_based"),
+            )
+          : undefined,
         pattern
           ? or(
               ilike(emissionFactor.level2, pattern),
@@ -2145,6 +2306,10 @@ export type VisibleFactor = {
   label: string;
   activityUnit: FactorInput["activityUnit"];
   resultUnit: FactorInput["resultUnit"];
+  /** The two the lane check needs (prompt 85): a market-lane mapping takes a
+      scope 2 row whose own method is `market_based`, and nothing else. */
+  scope: FactorInput["scope"];
+  scope2Method: FactorInput["scope2Method"];
 };
 
 /**
@@ -2172,6 +2337,8 @@ async function getVisibleFactorImpl(
       columnText: emissionFactor.columnText,
       activityUnit: emissionFactor.activityUnit,
       resultUnit: emissionFactor.resultUnit,
+      scope: emissionFactor.scope,
+      scope2Method: emissionFactor.scope2Method,
     })
     .from(emissionFactor)
     .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
@@ -2192,6 +2359,8 @@ async function getVisibleFactorImpl(
     label: factorLabelOf([row.level2, row.level3, row.columnText]),
     activityUnit: row.activityUnit,
     resultUnit: row.resultUnit,
+    scope: row.scope,
+    scope2Method: row.scope2Method,
   };
 }
 
@@ -2199,12 +2368,19 @@ async function getVisibleFactorImpl(
  * Sets the organisation's factor for one `(category, unit)` pair.
  *
  * **`deleted_at` is cleared, and that is required for correctness rather than
- * tidiness.** `activity_factor_mapping_key` is a plain unique index, not a
- * partial one (`lib/db/schema.ts`), so a soft-deleted row still occupies its
- * `(organization_id, category, unit)` slot: an upsert that left `deleted_at`
- * set would resurrect nothing and re-mapping the pair would keep failing the
- * conflict silently. Prompt 65 sets and changes a mapping and deliberately
- * offers no unmap — what a removed mapping means is a decision of its own.
+ * tidiness.** The lane's unique index does not filter on `deleted_at`
+ * (`lib/db/schema.ts`), so a soft-deleted row still occupies its slot: an
+ * upsert that left `deleted_at` set would resurrect nothing and re-mapping the
+ * pair would keep failing the conflict silently. Prompt 65 sets and changes a
+ * mapping and deliberately offers no unmap — what a removed mapping means is a
+ * decision of its own.
+ *
+ * **Two indexes, so two conflict targets** (prompt 85). The default lane
+ * conflicts on `(organization_id, category, unit) where scope2_method is
+ * null` and the market lane on the four-column index; Postgres infers a
+ * *partial* index only when the statement repeats its predicate, so
+ * `targetWhere` is not decoration — without it the statement matches no index
+ * and raises rather than upserting.
  *
  * **This is a `set`, not a `seed`.** `seedDefaultMappings` refuses to overwrite
  * a reporter's own choice, for the reason its docblock records; this *is* the
@@ -2220,31 +2396,52 @@ async function setFactorMappingImpl(input: {
   category: ActivityCategory;
   unit: ActivityUnit;
   factorId: string;
+  /** `null` is the default lane; `"market_based"` is the second scope 2 lane. */
+  lane: Scope2Method | null;
   /** The person who chose it, for the provenance line. */
   userId: string;
 }): Promise<void> {
-  await getDb()
+  const set = {
+    factorId: input.factorId,
+    createdBy: input.userId,
+    updatedAt: new Date(),
+    deletedAt: null,
+  };
+
+  const insert = getDb()
     .insert(activityFactorMapping)
     .values({
       organizationId: input.organizationId,
       category: input.category,
       unit: input.unit,
+      scope2Method: input.lane,
       factorId: input.factorId,
       createdBy: input.userId,
-    })
-    .onConflictDoUpdate({
+    });
+
+  if (input.lane === null) {
+    await insert.onConflictDoUpdate({
       target: [
         activityFactorMapping.organizationId,
         activityFactorMapping.category,
         activityFactorMapping.unit,
       ],
-      set: {
-        factorId: input.factorId,
-        createdBy: input.userId,
-        updatedAt: new Date(),
-        deletedAt: null,
-      },
+      targetWhere: sql`${activityFactorMapping.scope2Method} is null`,
+      set,
     });
+    return;
+  }
+
+  await insert.onConflictDoUpdate({
+    target: [
+      activityFactorMapping.organizationId,
+      activityFactorMapping.category,
+      activityFactorMapping.unit,
+      activityFactorMapping.scope2Method,
+    ],
+    targetWhere: sql`${activityFactorMapping.scope2Method} is not null`,
+    set,
+  });
 }
 
 /**
@@ -2282,7 +2479,15 @@ async function seedDefaultMappingsImpl(
     const [existing] = await tx
       .select({ n: sql<number>`1` })
       .from(activityFactorMapping)
-      .where(eq(activityFactorMapping.organizationId, organizationId))
+      .where(
+        and(
+          eq(activityFactorMapping.organizationId, organizationId),
+          /* The defaults are default-lane rows, so it is the default lane that
+             decides whether they have already been seeded. An organisation
+             holding only a market-based mapping has not been seeded. */
+          isNull(activityFactorMapping.scope2Method),
+        ),
+      )
       .limit(1);
     if (existing) return { inserted: 0 };
 

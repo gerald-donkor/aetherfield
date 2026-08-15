@@ -37,9 +37,13 @@ import { RecalculateControl } from "./recalculate-control";
  *    total.** The Corporate Standard requires biomass CO2 to be "reported
  *    separately"; `totalsOf` partitions them out and this renders them in their
  *    own block so no one reads them as part of the scope figures.
- * 3. **Every scope 2 figure carries its method.** The Scope 2 Guidance requires
- *    the method to travel with the number, and this step produces
- *    location-based only.
+ * 3. **Every scope 2 figure carries its method, and both figures are shown.**
+ *    The Scope 2 Guidance requires the method to travel with the number and
+ *    requires dual reporting where contractual instruments exist. This
+ *    docblock used to end "and this step produces location-based only";
+ *    prompt 85 built the second lane, so it is corrected here rather than left
+ *    standing (AGENTS.md 12 rule 8). The market-based figure is an addend of
+ *    no total above it, and its coverage is stated beside it.
  *
  * **Attribution is rendered from the data, not hard-coded.** The Open
  * Government Licence requires it wherever the factors are surfaced, and reading
@@ -96,16 +100,22 @@ export async function EmissionsSummary({
   }
 
   const totals = totalsOf(parsed);
-  const calculated = parsed.length;
+  /* **The primary lane is what "a calculated record" means.** A record carrying
+     a market-based figure as well is one record, not two, and counting the rows
+     would overstate coverage by exactly the number of market-based figures
+     (prompt 85). */
+  const calculated = parsed.filter(
+    (row) => row.scope2Method !== "market_based",
+  ).length;
   const covered = calculated + uncalculated;
   const complete = uncalculated === 0 && calculated > 0;
 
-  const scope2Label =
-    totals.scope2Methods.length > 0
-      ? totals.scope2Methods
-          .map((method) => SCOPE2_METHOD_LABELS[method])
-          .join(", ")
-      : SCOPE2_METHOD_LABELS.location_based;
+  /* The location lane's own label. The market-based figure is rendered
+     separately below and carries its own, so joining both methods into one
+     label here would put "location-based, market-based" on a figure that is
+     only one of them. */
+  const scope2Label = SCOPE2_METHOD_LABELS.location_based;
+  const marketBased = totals.scope2MarketBasedRecords > 0;
 
   return (
     <section className="mt-20" aria-labelledby={headingId}>
@@ -209,6 +219,30 @@ export async function EmissionsSummary({
               value={tonnes(totals.scope3)}
             />
           </dl>
+
+          {/* Rule 3, made dual — prompt 85. The Scope 2 Guidance requires both
+              figures where contractual instruments exist, and neither replaces
+              the other in a total: this block sits beside the scope split
+              rather than inside it, and states the market lane's own coverage
+              so the second figure is never read as complete when it is not. */}
+          {marketBased ? (
+            <dl className="mt-6 grid gap-6 border-b border-border pb-7 md:grid-cols-2">
+              <Figure
+                label={`${EMISSION_SCOPE_LABELS.scope_2} (${SCOPE2_METHOD_LABELS.market_based})`}
+                value={tonnes(totals.scope2MarketBased)}
+                note={`Dual reporting. ${totals.scope2MarketBasedRecords.toLocaleString(
+                  "en-GB",
+                )} of ${totals.scope2Records.toLocaleString("en-GB")} scope 2 ${
+                  totals.scope2Records === 1 ? "record has" : "records have"
+                } a contractual rate mapped. Records without one produce no market-based figure and no grid average is substituted for them.`}
+              />
+              <Figure
+                label="Total, scopes 1-3 (market-based)"
+                value={tonnes(totals.totalMarketBased)}
+                note="The same inventory read on the market lane. It is comparable to the total above only where every scope 2 record carries a contractual rate."
+              />
+            </dl>
+          ) : null}
 
           {/* Rule 2: reported separately, and said so in words as well as in
               layout, so the separation survives a screen reader. */}

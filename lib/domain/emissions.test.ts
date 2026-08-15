@@ -323,6 +323,92 @@ describe("totalsOf", () => {
     const totals = totalsOf([]);
     expect(toDecimalString(totals.total)).toBe("0");
   });
+
+  /* Prompt 85 — dual reporting. The failure each of these guards against is a
+     market-based figure reaching a total that is filed as location-based, or a
+     record being counted twice because it carries two figures. */
+  describe("market-based scope 2", () => {
+    const dual = () => [
+      emission({ scope: "scope_1", kgCo2e: decimal("40") }),
+      emission({
+        scope: "scope_2",
+        scope2Method: "location_based",
+        kgCo2e: decimal("100"),
+      }),
+      emission({
+        scope: "scope_2",
+        scope2Method: "market_based",
+        kgCo2e: decimal("25"),
+      }),
+      emission({
+        scope: "scope_3",
+        scope3Category: "c6_business_travel",
+        kgCo2e: decimal("10"),
+      }),
+    ];
+
+    it("keeps the market-based figure out of scope 2 and out of the total", () => {
+      const totals = totalsOf(dual());
+      expect(toDecimalString(totals.scope2)).toBe("100");
+      expect(toDecimalString(totals.total)).toBe("150");
+      expect(toDecimalString(totals.scope2MarketBased)).toBe("25");
+    });
+
+    it("reads the same inventory on the market lane", () => {
+      const totals = totalsOf(dual());
+      expect(toDecimalString(totals.totalMarketBased)).toBe("75");
+    });
+
+    it("holds two genuinely independent figures", () => {
+      const totals = totalsOf(dual());
+      expect(toDecimalString(totals.scope2)).not.toBe(
+        toDecimalString(totals.scope2MarketBased),
+      );
+    });
+
+    it("counts one record per lane rather than one record twice", () => {
+      const totals = totalsOf(dual());
+      expect(totals.scope2Records).toBe(1);
+      expect(totals.scope2MarketBasedRecords).toBe(1);
+    });
+
+    it("reports both methods so neither figure can be labelled by assumption", () => {
+      expect(totalsOf(dual()).scope2Methods).toEqual([
+        "location_based",
+        "market_based",
+      ]);
+    });
+
+    it("produces no market-based figure where no contractual rate is mapped", () => {
+      const totals = totalsOf([
+        emission({
+          scope: "scope_2",
+          scope2Method: "location_based",
+          kgCo2e: decimal("100"),
+        }),
+      ]);
+      expect(toDecimalString(totals.scope2MarketBased)).toBe("0");
+      expect(totals.scope2MarketBasedRecords).toBe(0);
+      /* And the location-based figure is not quietly reused as one: the two
+         totals differ, so a reader cannot mistake the market lane for
+         complete. */
+      expect(toDecimalString(totals.totalMarketBased)).toBe("0");
+      expect(toDecimalString(totals.total)).toBe("100");
+    });
+
+    it("keeps the market lane out of the scope 3 category split", () => {
+      const totals = totalsOf(dual());
+      expect(totals.byScope3Category).toHaveLength(1);
+      expect(toDecimalString(totals.byScope3Category[0]!.kgCo2e)).toBe("10");
+    });
+
+    it("carries both lanes through a period grouping", () => {
+      const periods = totalsByPeriod(dual(), monthOf);
+      expect(periods).toHaveLength(1);
+      expect(toDecimalString(periods[0]!.totals.total)).toBe("150");
+      expect(toDecimalString(periods[0]!.totals.scope2MarketBased)).toBe("25");
+    });
+  });
 });
 
 describe("aggregate", () => {

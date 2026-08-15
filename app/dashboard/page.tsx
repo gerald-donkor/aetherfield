@@ -187,6 +187,18 @@ export default async function DashboardPage() {
                   <MiniFigure label="Scope 2" value={tonnes(totals.scope2)} />
                   <MiniFigure label="Scope 3" value={tonnes(totals.scope3)} />
                 </dl>
+                {/* Dual reporting — prompt 85. Shown only where a contractual
+                    rate is actually mapped, with the coverage it rests on, and
+                    never folded into the figure above it. */}
+                {totals.scope2MarketBasedRecords > 0 ? (
+                  <p className="mt-5 border-l-2 border-ink py-1 pl-4 font-mono text-[11px] leading-[18px]">
+                    Market-based: scope 2 {tonnes(totals.scope2MarketBased)}{" "}
+                    tCO2e, scopes 1-3 {tonnes(totals.totalMarketBased)} tCO2e,
+                    over {totals.scope2MarketBasedRecords.toLocaleString("en-GB")}{" "}
+                    of {totals.scope2Records.toLocaleString("en-GB")} scope 2
+                    records. The figures above are location-based.
+                  </p>
+                ) : null}
                 <p className="mt-5 font-mono text-[11px] leading-[18px] text-muted">
                   Biogenic {tonnes(totals.biogenic)} tCO2e · outside scopes{" "}
                   {tonnes(totals.outsideOfScopes)} tCO2e, reported separately.

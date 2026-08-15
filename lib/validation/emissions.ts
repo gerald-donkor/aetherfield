@@ -116,13 +116,32 @@ export const EMISSION_SCOPE_LABELS: Record<EmissionScope, string> = {
 /**
  * The two scope 2 accounting methods.
  *
- * **Only `location_based` is produced in this step**, and every scope 2 figure
- * is labelled as such wherever it is shown — the Scope 2 Guidance requires the
- * method to travel with the number. `market_based` exists in the vocabulary and
- * in the column from the first migration so that adding it later is a seeder
- * and a UI change rather than a schema rewrite; it needs REC and GO capture,
- * supplier-specific rates and a residual-mix fallback, none of which the
- * product models yet.
+ * **Both are produced since prompt 85**, and every scope 2 figure is labelled
+ * with its method wherever it is shown — the Scope 2 Guidance requires the
+ * method to travel with the number, and requires *both* figures where
+ * contractual instruments exist: "Companies with any operations in markets
+ * providing product or supplier-specific data in the form of contractual
+ * instruments shall report scope 2 emissions in two ways and label each result
+ * according to the method". `docs/backend.md` carries the quotations and their
+ * retrieval date.
+ *
+ * **This docblock previously said that `market_based` "needs REC and GO
+ * capture, supplier-specific rates and a residual-mix fallback, none of which
+ * the product models yet".** One of those three now exists and two do not, so
+ * the sentence is corrected here rather than left standing (AGENTS.md 12
+ * rule 8):
+ *
+ * - **supplier-specific rates — built.** A contractual rate is entered as a
+ *   customer-supplied factor through `/activity/factors`, and mapped on the
+ *   market lane of `activity_factor_mapping`;
+ * - **REC / GO document capture — still absent.** The instrument's *rate* is
+ *   what multiplies, and that is captured; the certificate itself is not
+ *   stored, so nothing in this product evidences a claim;
+ * - **a residual-mix fallback — deliberately absent, not merely unbuilt.** No
+ *   residual mix is shipped and no grid average is ever substituted into a
+ *   market-based figure. A scope 2 record with no market-based mapping
+ *   produces no market-based figure and the coverage is stated beside the
+ *   number.
  */
 export const SCOPE2_METHODS = ["location_based", "market_based"] as const;
 

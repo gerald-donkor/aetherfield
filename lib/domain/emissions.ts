@@ -97,8 +97,16 @@ import { lookupGwp } from "./gwp";
  * whichever factor the mapping happened to point at. That removes figures a
  * previous run produced, and re-points others at a different year's factor row,
  * so it moves numbers by construction — exactly the case this field exists for.
+ *
+ * **`1.2.0` — prompt 85, market-based scope 2.** A record can now carry a
+ * second computed figure on the market lane, and `totalsOf` partitions
+ * market-based scope 2 out of `scope2` and `total`. No location-based figure a
+ * previous run produced changes value, but what a run *produces* does, and the
+ * label on a stored row is what says which engine produced it. Existing rows
+ * are not rewritten: they were produced by 1.1.0 and stay labelled as such
+ * until the next recalculation restates them.
  */
-export const ENGINE_VERSION = "1.1.0";
+export const ENGINE_VERSION = "1.2.0";
 
 /* -------------------------------------------------------------------------- */
 /*  Inputs                                                                     */
@@ -478,8 +486,34 @@ export type ScopeTotals = {
   byScope3Category: { category: Scope3Category; kgCo2e: Decimal }[];
   /** Every scope 2 method present in the inputs. Whatever is shown must be
       labelled with it — the Scope 2 Guidance requires the method to travel with
-      the figure, and this step produces `location_based` only. */
+      the figure. Since prompt 85 both methods can appear. */
   scope2Methods: Scope2Method[];
+  /**
+   * The market-based scope 2 figure — prompt 85, and **an addend of nothing
+   * above**.
+   *
+   * The Scope 2 Guidance requires dual reporting: "Companies with any
+   * operations in markets providing product or supplier-specific data in the
+   * form of contractual instruments shall report scope 2 emissions in two ways
+   * and label each result according to the method". Two figures for the same
+   * consumption is the point, and adding them would be double counting.
+   *
+   * `scope2` and `total` therefore keep meaning the location-based reading
+   * exactly as they did before this field existed, which is what stops a stored
+   * report snapshot, a filed target or an alert from silently restating.
+   */
+  scope2MarketBased: Decimal;
+  /** `scope1 + scope2MarketBased + scope3` — the same inventory read on the
+      market lane. **Comparable to `total` only where the market lane covers
+      every scope 2 record**; the count is carried by
+      {@link scope2MarketBasedRecords} and stated beside the figure on every
+      surface, because no residual mix and no grid average is ever substituted
+      for a record with no contractual rate. */
+  totalMarketBased: Decimal;
+  /** How many scope 2 figures each lane holds, so a surface can state the
+      market lane's coverage rather than implying it is complete. */
+  scope2Records: number;
+  scope2MarketBasedRecords: number;
 };
 
 export type AggregateResult = {
@@ -640,15 +674,25 @@ export function totalsOf(emissions: readonly RecordEmission[]): ScopeTotals {
     }
   }
 
+  /* **The market lane is partitioned out before anything is summed** — prompt
+     85. A market-based figure is a second reading of electricity the
+     location-based figure has already counted, so a `scope_2` sum that
+     included it would double-count that consumption in `scope2` and in
+     `total`. Every existing field below is therefore computed over
+     `primary` and the market figure is computed separately. */
+  const primary = inScope.filter((e) => e.scope2Method !== "market_based");
+  const marketBased = inScope.filter((e) => e.scope2Method === "market_based");
+
   const byScope = (scope: EmissionScope) =>
-    sum(inScope.filter((e) => e.scope === scope).map((e) => e.kgCo2e));
+    sum(primary.filter((e) => e.scope === scope).map((e) => e.kgCo2e));
 
   const scope1 = byScope("scope_1");
   const scope2 = byScope("scope_2");
   const scope3 = byScope("scope_3");
+  const scope2MarketBased = sum(marketBased.map((e) => e.kgCo2e));
 
   const categories = new Map<Scope3Category, Decimal>();
-  for (const emission of inScope) {
+  for (const emission of primary) {
     if (emission.scope !== "scope_3" || !emission.scope3Category) continue;
     const running = categories.get(emission.scope3Category) ?? ZERO;
     categories.set(emission.scope3Category, add(running, emission.kgCo2e));
@@ -672,6 +716,10 @@ export function totalsOf(emissions: readonly RecordEmission[]): ScopeTotals {
       .map(([category, kgCo2e]) => ({ category, kgCo2e }))
       .sort((a, b) => a.category.localeCompare(b.category)),
     scope2Methods: [...methods].sort(),
+    scope2MarketBased,
+    totalMarketBased: sum([scope1, scope2MarketBased, scope3]),
+    scope2Records: primary.filter((e) => e.scope === "scope_2").length,
+    scope2MarketBasedRecords: marketBased.length,
   };
 }
 

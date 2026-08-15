@@ -424,6 +424,51 @@ describe("allowedNumberTokens", () => {
   });
 });
 
+describe("allowedNumberTokens, market-based", () => {
+  /* The validator must admit the figures the engine computed, or a correct
+     narrative quoting a market-based total is refused (prompt 85). */
+  const evidence = buildReportEvidence(
+    input({
+      emissions: [
+        emission("2026-01-10", "1000", {
+          scope: "scope_2",
+          scope2Method: "location_based",
+        }),
+        emission("2026-01-10", "250", {
+          scope: "scope_2",
+          scope2Method: "market_based",
+        }),
+      ],
+      committedRecords: 1,
+    }),
+  );
+
+  it("admits the market-based figures and the lane's record counts", () => {
+    const allowed = allowedNumberTokens(evidence);
+    expect(allowed.has("0.250")).toBe(true);
+    expect(allowed.has("0.25")).toBe(true);
+  });
+
+  it("accepts a narrative quoting the market-based figure", () => {
+    expect(
+      validateNarrative(
+        "Scope 2 is 1.000 tCO2e location-based and 0.250 tCO2e market-based.",
+        evidence,
+        500,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("still refuses a market-based figure the snapshot does not carry", () => {
+    const result = validateNarrative(
+      "Scope 2 is 0.900 tCO2e market-based.",
+      evidence,
+      500,
+    );
+    expect(result.ok).toBe(false);
+  });
+});
+
 describe("validateNarrative", () => {
   const accept = (text: string) =>
     validateNarrative(text, EVIDENCE, NARRATIVE_MAX_CHARS);
@@ -557,6 +602,53 @@ describe("reportSections", () => {
       input({ emissions: [emission("2026-01-10", "1000")], committedRecords: 1 }),
     );
     expect(reportSections(evidence).map((s) => s.key)).not.toContain("target");
+  });
+
+  /* Prompt 85 — dual reporting in the document itself. */
+  it("omits the market-based section when no contractual rate covers the period", () => {
+    const evidence = buildReportEvidence(
+      input({ emissions: [emission("2026-01-10", "1000")], committedRecords: 1 }),
+    );
+    expect(evidence.marketBased).toBeUndefined();
+    expect(reportSections(evidence).map((s) => s.key)).not.toContain(
+      "market-based",
+    );
+  });
+
+  it("renders both scope 2 readings, labelled, as separate sections", () => {
+    const evidence = buildReportEvidence(
+      input({
+        emissions: [
+          emission("2026-01-10", "1000", {
+            scope: "scope_2",
+            scope2Method: "location_based",
+          }),
+          emission("2026-01-10", "250", {
+            scope: "scope_2",
+            scope2Method: "market_based",
+          }),
+        ],
+        committedRecords: 1,
+      }),
+    );
+
+    /* The location-based figure keeps `scope2` and `total`; the market-based
+       one is beside it and in neither. */
+    expect(evidence.totals.scope2).toBe("1.000");
+    expect(evidence.totals.total).toBe("1.000");
+    expect(evidence.marketBased?.scope2).toBe("0.250");
+    expect(evidence.marketBased?.total).toBe("0.250");
+    /* One record, two figures. */
+    expect(evidence.coverage.calculatedRecords).toBe(1);
+
+    const sections = reportSections(evidence);
+    expect(sections.map((s) => s.key)).toContain("market-based");
+    const totals = sections.find((s) => s.key === "totals");
+    expect(
+      totals?.rows.find((row) => row.label.startsWith("Scope 2"))?.label,
+    ).toBe("Scope 2 (location-based)");
+    const market = sections.find((s) => s.key === "market-based");
+    expect(market?.rows.map((row) => row.value)).toContain("0.250");
   });
 
   it("renders every figure it emits as a string, never a number", () => {

@@ -77,6 +77,26 @@ export const ACTIVITY_CATEGORIES = [
 export type ActivityCategory = (typeof ACTIVITY_CATEGORIES)[number];
 
 /**
+ * The categories a market-based scope 2 lane is offered on — prompt 85.
+ *
+ * **A decision, not a measurement** (AGENTS.md 12 rule 4), and it follows the
+ * Scope 2 Guidance's own boundary: scope 2 covers purchased electricity, steam,
+ * heat and cooling, and Appendix A extends dual reporting to the latter three
+ * ("Companies shall report emissions from the purchase and use of these energy
+ * products the same as for electricity: according to a location-based and
+ * market-based method"). `fuel` is combusted on site and is scope 1; nothing
+ * else in this list is scope 2 at all.
+ *
+ * It bounds where the *lane* is offered. It does not decide whether a factor is
+ * market-based — `emission_factor.scope2_method` does, and the action checks it.
+ */
+export const SCOPE2_MARKET_LANE_CATEGORIES = ["electricity", "heat"] as const;
+
+export function offersMarketLane(category: ActivityCategory): boolean {
+  return (SCOPE2_MARKET_LANE_CATEGORIES as readonly string[]).includes(category);
+}
+
+/**
  * The units an activity is *measured* in. Also a judgement.
  *
  * **No emission factor, coefficient or tCO2e value appears anywhere in this
@@ -272,6 +292,15 @@ export type ActivityImportActionResult = SubmitResult;
  * and whether the engine can calculate with it are three server-side checks the
  * action performs afterwards, at stage e. A non-uuid is a forged request rather
  * than a typo and gets the same handled failure a missing factor gets.
+ *
+ * **The lane is a third key column, and it accepts exactly two values** —
+ * prompt 85. `null` is the reporting lane that has always existed and keeps its
+ * meaning for every scope; `"market_based"` is the second scope 2 lane the
+ * Scope 2 Guidance's dual-reporting requirement needs. `"location_based"` is
+ * deliberately *not* accepted here even though it is in `SCOPE2_METHODS`: the
+ * default lane already carries the location-based figure, and admitting the
+ * string would create a third lane that means the same thing as `null` and
+ * silently split one pair's mapping in two.
  */
 export const factorMappingSchema = z.object({
   category: z.enum(ACTIVITY_CATEGORIES, {
@@ -279,6 +308,10 @@ export const factorMappingSchema = z.object({
   }),
   unit: z.enum(ACTIVITY_UNITS, { error: "Choose a unit." }),
   factorId: z.uuid({ error: "Choose a factor from the list." }),
+  scope2Method: z
+    .literal("market_based", { error: "Choose a reporting lane." })
+    .nullish()
+    .transform((value) => value ?? null),
 });
 
 export type FactorMappingInput = z.infer<typeof factorMappingSchema>;
@@ -299,6 +332,14 @@ export const FACTOR_MAPPING_ERRORS = {
     "That factor is not available. It may have been superseded since the list was loaded.",
   notOwner:
     "Only an owner can change an emission factor. A factor choice moves every figure in a disclosure.",
+  /* The market lane's own refusal — prompt 85. A grid-average factor mapped on
+     the market lane would put an uncontracted rate into a market-based
+     disclosure figure, which is the one substitution this product refuses to
+     make silently. */
+  notMarketBased:
+    "That factor is not a market-based scope 2 rate. The market-based lane takes a contractual rate you hold — add it under Add customer factor, with its method set to market-based.",
+  marketBasedOnDefaultLane:
+    "That is a market-based scope 2 rate. It belongs on the market-based lane for this pair, beside the grid-average factor, not in place of it.",
 } as const;
 
 export const FACTOR_SEARCH_MODES = ["lexical", "fuzzy"] as const;

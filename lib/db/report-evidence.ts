@@ -141,7 +141,14 @@ async function countPeriodRecords(
     .from(activityRecord)
     .leftJoin(
       activityEmission,
-      eq(activityEmission.activityRecordId, activityRecord.id),
+      and(
+        eq(activityEmission.activityRecordId, activityRecord.id),
+        /* **The primary lane only** — prompt 85. A record can carry a second,
+           market-based figure, and `count(*)` over an unfiltered join would
+           count that record twice as *committed*. `is distinct from` rather
+           than `<>`, because the column is null on every scope 1 and 3 row. */
+        sql`${activityEmission.scope2Method} is distinct from 'market_based'`,
+      ),
     )
     .where(
       and(

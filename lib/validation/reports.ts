@@ -193,6 +193,31 @@ export const reportEvidenceSchema = z.object({
     biogenic: figure,
     outsideOfScopes: figure,
   }),
+  /**
+   * The market-based reading of the same period — prompt 85, and **optional on
+   * purpose**.
+   *
+   * A stored `report.evidence` snapshot is immutable and every report filed
+   * before this field existed must keep parsing, so its absence means "this
+   * report was generated before the second lane existed", not "zero". It is
+   * also absent on a report whose period carries no contractual rate at all,
+   * which is the honest reading: no residual mix and no grid average is
+   * substituted for a record without one.
+   *
+   * `scope2` and `total` above keep meaning the location-based figures, which
+   * is what stops an already-filed target or reading from restating.
+   */
+  marketBased: z
+    .object({
+      scope2: figure,
+      /** `scope1 + market-based scope 2 + scope3`. */
+      total: figure,
+      /** Scope 2 figures on each lane, so the coverage the market figure rests
+          on is carried in the snapshot rather than recomputed at render. */
+      scope2Records: count,
+      scope2MarketBasedRecords: count,
+    })
+    .optional(),
   scope3ByCategory: z.array(
     z.object({ category: z.enum(SCOPE3_CATEGORIES), tonnes: figure }),
   ),

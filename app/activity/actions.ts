@@ -711,10 +711,11 @@ export async function setFactorMapping(
         category: fieldErrors.category?.[0],
         unit: fieldErrors.unit?.[0],
         factorId: fieldErrors.factorId?.[0],
+        scope2Method: fieldErrors.scope2Method?.[0],
       },
     };
   }
-  const { category, unit, factorId } = parsed.data;
+  const { category, unit, factorId, scope2Method: lane } = parsed.data;
 
   // -- d. Authorise --------------------------------------------------------
   if (membership.role !== "owner") {
@@ -745,11 +746,41 @@ export async function setFactorMapping(
       };
     }
 
+    /* **The lane and the factor's own method have to agree** — prompt 85, and
+       this is the check that keeps a grid average out of a market-based
+       disclosure figure. Both directions are refused:
+
+       - a factor that is not a market-based scope 2 row cannot be mapped on the
+         market lane, because the market-based figure would then be a rate the
+         reporter never contracted for;
+       - a market-based row cannot be mapped on the default lane, because
+         `totalsOf` partitions market-based figures out of `scope2` and `total`
+         and the pair's contribution would silently vanish from the
+         location-based reading.
+
+       The picker's list is narrowed the same way, and that narrowing is a
+       courtesy: this is the check. */
+    const factorIsMarketBased =
+      factor.scope === "scope_2" && factor.scope2Method === "market_based";
+    if (factorIsMarketBased !== (lane === "market_based")) {
+      return {
+        ok: false,
+        error: FACTOR_MAPPING_ERRORS.invalid,
+        fieldErrors: {
+          factorId:
+            lane === "market_based"
+              ? FACTOR_MAPPING_ERRORS.notMarketBased
+              : FACTOR_MAPPING_ERRORS.marketBasedOnDefaultLane,
+        },
+      };
+    }
+
     await setFactorMappingRow({
       organizationId,
       category,
       unit,
       factorId: factor.id,
+      lane,
       userId,
     });
   } catch {

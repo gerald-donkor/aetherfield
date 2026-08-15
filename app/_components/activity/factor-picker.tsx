@@ -48,6 +48,7 @@ type SearchFactor = {
 export function FactorPicker({
   category,
   unit,
+  lane,
   factors,
   searchMessage,
   searchInvalid,
@@ -55,6 +56,9 @@ export function FactorPicker({
 }: {
   category: ActivityCategory;
   unit: ActivityUnit;
+  /** Which reporting lane the chosen factor is mapped on — prompt 85. `null` is
+      the default lane; `"market_based"` is the second scope 2 lane. */
+  lane: "market_based" | null;
   factors: SearchFactor[];
   searchMessage: string;
   searchInvalid: boolean;
@@ -81,7 +85,7 @@ export function FactorPicker({
     setMessage("");
     setErrors({});
 
-    const input = { category, unit, factorId };
+    const input = { category, unit, factorId, scope2Method: lane };
     const checked = factorMappingSchema.safeParse(input);
     if (!checked.success) {
       setMessage(FACTOR_MAPPING_ERRORS.invalid);
@@ -94,6 +98,9 @@ export function FactorPicker({
         factorId: checked.error.issues.find((issue) =>
           issue.path.includes("factorId"),
         )?.message,
+        scope2Method: checked.error.issues.find((issue) =>
+          issue.path.includes("scope2Method"),
+        )?.message,
       });
       return;
     }
@@ -102,7 +109,11 @@ export function FactorPicker({
     try {
       const result = await setFactorMapping(checked.data);
       if (result.ok) {
-        setMessage("Factor saved. The organisation's figures have been recalculated.");
+        setMessage(
+          lane === "market_based"
+            ? "Market-based rate saved. The organisation's figures have been recalculated on both lanes."
+            : "Factor saved. The organisation's figures have been recalculated.",
+        );
         router.refresh();
         setPendingId(null);
         return;

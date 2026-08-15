@@ -759,6 +759,21 @@ export const activityFactorMapping = pgTable(
       /* Deliberately not `cascade`: a factor row disappearing must not silently
          un-map a customer's category. A set is superseded, not deleted. */
       .references(() => emissionFactor.id, { onDelete: "restrict" }),
+    /**
+     * Which reporting lane this mapping feeds — prompt 85.
+     *
+     * **`null` is the lane that has always existed**, and it keeps its meaning
+     * unchanged for every scope: it is the figure that goes into `total`, and
+     * for scope 2 it is the location-based one. `'market_based'` is the second
+     * lane the Scope 2 Guidance's dual-reporting requirement needs, and it
+     * carries a contractual rate the reporter holds.
+     *
+     * `'location_based'` is a value the enum permits and this column never
+     * takes: the default lane already carries that figure, and writing it here
+     * would split one pair's mapping into two rows that mean the same thing.
+     * `lib/validation/activity.ts` refuses it at the boundary.
+     */
+    scope2Method: scope2Method("scope2_method"),
     /** Who chose it, for the provenance line. Null for the seeded defaults,
         which no person chose. */
     createdBy: text("created_by").references(() => user.id, {
@@ -773,11 +788,25 @@ export const activityFactorMapping = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("activity_factor_mapping_key").on(
-      t.organizationId,
-      t.category,
-      t.unit,
-    ),
+    /**
+     * One default-lane mapping per `(organization, category, unit)` — the
+     * invariant `activity_factor_mapping_key` held before prompt 85, restated
+     * as a partial index so the second lane can exist beside it.
+     *
+     * **Partial, and it has to be.** Postgres treats two NULLs as distinct in a
+     * plain unique index, so simply widening the old three-column key to
+     * include `scope2_method` would have permitted unlimited duplicate default
+     * mappings for one pair — the exact double-count this index exists to
+     * prevent. The repo already uses this shape four times elsewhere in this
+     * file.
+     */
+    uniqueIndex("activity_factor_mapping_default_key")
+      .on(t.organizationId, t.category, t.unit)
+      .where(sql`${t.scope2Method} is null`),
+    /** And one mapping per lane for the lanes that name a method. */
+    uniqueIndex("activity_factor_mapping_method_key")
+      .on(t.organizationId, t.category, t.unit, t.scope2Method)
+      .where(sql`${t.scope2Method} is not null`),
     index("activity_factor_mapping_factor_idx").on(t.factorId),
   ],
 );
@@ -845,9 +874,27 @@ export const activityEmission = pgTable(
       .defaultNow(),
   },
   (t) => [
-    /** One computed figure per record. A recalculation replaces the row rather
-        than appending a second, so a total can never double-count a record. */
-    uniqueIndex("activity_emission_record_key").on(t.activityRecordId),
+    /**
+     * **Exactly one primary figure per record, and at most one market-based
+     * figure beside it** — prompt 85.
+     *
+     * The invariant to preserve is the one `activity_emission_record_key`
+     * carried in its own words before this: "A recalculation replaces the row
+     * rather than appending a second, so a total can never double-count a
+     * record." That is still true, per lane. `ScopeTotals.total` sums the
+     * primary lane only, so the second row can never reach it.
+     *
+     * **`is distinct from` rather than `<>`**: `scope2_method` is null on every
+     * scope 1 and scope 3 figure, and `null <> 'market_based'` is null, not
+     * true — a plain inequality would leave every scope 1 and 3 row outside
+     * both indexes and unguarded.
+     */
+    uniqueIndex("activity_emission_record_key")
+      .on(t.activityRecordId)
+      .where(sql`${t.scope2Method} is distinct from 'market_based'`),
+    uniqueIndex("activity_emission_record_market_key")
+      .on(t.activityRecordId)
+      .where(sql`${t.scope2Method} = 'market_based'`),
     index("activity_emission_organization_scope_idx").on(
       t.organizationId,
       t.scope,

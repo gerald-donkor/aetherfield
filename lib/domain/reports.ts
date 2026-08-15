@@ -59,6 +59,7 @@ import {
   toTonnes,
   totalsOf,
   type RecordEmission,
+  type ScopeTotals,
 } from "./emissions";
 import { assessTarget } from "./targets";
 
@@ -162,13 +163,29 @@ export function buildReportEvidence(
       biogenic: reportTonnes(totals.biogenic),
       outsideOfScopes: reportTonnes(totals.outsideOfScopes),
     },
+    /* Present only where the period actually carries a market-based figure.
+       Absent is the honest reading of "no contractual rate covers this
+       period" — a zero would assert a market-based inventory of nothing. */
+    marketBased:
+      totals.scope2MarketBasedRecords > 0
+        ? {
+            scope2: reportTonnes(totals.scope2MarketBased),
+            total: reportTonnes(totals.totalMarketBased),
+            scope2Records: totals.scope2Records,
+            scope2MarketBasedRecords: totals.scope2MarketBasedRecords,
+          }
+        : undefined,
     scope3ByCategory: totals.byScope3Category.map((entry) => ({
       category: entry.category,
       tonnes: reportTonnes(entry.kgCo2e),
     })),
     scope2Methods: [...totals.scope2Methods],
     coverage: {
-      calculatedRecords: periodEmissions.length,
+      /* **Records, not rows.** A record carrying a market-based figure as well
+         holds two rows and is one calculated record (prompt 85). */
+      calculatedRecords: periodEmissions.filter(
+        (row) => row.scope2Method !== "market_based",
+      ).length,
       committedRecords: input.committedRecords,
       uncalculatedRecords: input.uncalculatedRecords,
     },
@@ -176,7 +193,7 @@ export function buildReportEvidence(
     target: input.target
       ? buildTargetEvidence(input.target, input.emissions, input.asOf)
       : null,
-    caveats: buildCaveats(input, periodEmissions.length),
+    caveats: buildCaveats(input, periodEmissions.length, totals),
   };
 }
 
@@ -241,6 +258,7 @@ function buildTargetEvidence(
 function buildCaveats(
   input: BuildReportEvidenceInput,
   calculatedRecords: number,
+  totals: ScopeTotals,
 ): string[] {
   const caveats: string[] = [];
 
@@ -269,9 +287,23 @@ function buildCaveats(
   caveats.push(
     "Biogenic carbon dioxide and emissions outside the scopes are reported separately and are included in no scope total.",
   );
-  caveats.push(
-    "Scope 2 figures are location-based unless a method is stated beside them.",
-  );
+  /* **Dual reporting, stated as a caveat rather than assumed** — prompt 85.
+     Which of these three sentences applies is decided by the evidence, and each
+     of them is true of the report it appears in. */
+  if (totals.scope2MarketBasedRecords === 0) {
+    caveats.push(
+      "Scope 2 figures in this report are location-based. No market-based figure is reported, because no contractual instrument rate is mapped for this period.",
+    );
+  } else {
+    caveats.push(
+      "Scope 2 is dual reported. The location-based and market-based figures are two readings of the same electricity consumption; neither is added to the other, and every total in this report that is not labelled market-based is location-based.",
+    );
+    if (totals.scope2MarketBasedRecords < totals.scope2Records) {
+      caveats.push(
+        `The market-based figure covers ${totals.scope2MarketBasedRecords} of ${totals.scope2Records} scope 2 records in this period. The remainder carry no contractual instrument rate, and no residual mix or grid average has been substituted for them, so the market-based total is not comparable to the location-based total.`,
+      );
+    }
+  }
   caveats.push(
     "This report covers the latest 12 complete calendar months. The current partial month is excluded.",
   );
@@ -346,6 +378,19 @@ export function allowedNumberTokens(evidence: ReportEvidence): Set<string> {
   allowed.add(String(REPORT_WINDOW_MONTHS));
 
   for (const value of Object.values(evidence.totals)) addFigure(allowed, value);
+
+  /* **The market-based figures, or the narrative validator rejects a report
+     that quotes a number the engine computed** (prompt 85). The two record
+     counts are admitted for the same reason: the coverage caveat prints them,
+     so prose that repeats the caveat is naming a figure this snapshot carries.
+     Absent on a snapshot filed before the second lane existed, and nothing is
+     added for it then. */
+  if (evidence.marketBased) {
+    addFigure(allowed, evidence.marketBased.scope2);
+    addFigure(allowed, evidence.marketBased.total);
+    allowed.add(String(evidence.marketBased.scope2Records));
+    allowed.add(String(evidence.marketBased.scope2MarketBasedRecords));
+  }
   for (const entry of evidence.scope3ByCategory) {
     addFigure(allowed, entry.tonnes);
     /* The standard numbers its own categories and `SCOPE3_CATEGORY_LABELS`
@@ -501,11 +546,14 @@ export function reportSections(evidence: ReportEvidence): ReportSection[] {
         { label: "Scopes 1, 2 and 3", value: t.total },
         { label: "Scope 1", value: t.scope1 },
         {
+          /* **Always the location-based label on this row.** It used to join
+             every method present in the period, which was right when only one
+             could be; since prompt 85 two can, and joining them would label a
+             location-based figure as though it were both. The market-based
+             figure has its own section below. */
           label:
             evidence.scope2Methods.length > 0
-              ? `Scope 2 (${evidence.scope2Methods
-                  .map((method) => SCOPE2_METHOD_LABELS[method])
-                  .join(", ")})`
+              ? `Scope 2 (${SCOPE2_METHOD_LABELS.location_based})`
               : "Scope 2",
           value: t.scope2,
         },
@@ -516,6 +564,35 @@ export function reportSections(evidence: ReportEvidence): ReportSection[] {
       notes: [],
     },
   ];
+
+  /* **The second reporting lane, as its own section** — prompt 85. Dual
+     reporting is two labelled figures for the same consumption, so the
+     market-based reading sits beside the totals rather than inside them, and
+     its coverage is a note on the section rather than a footnote elsewhere. */
+  if (evidence.marketBased) {
+    const m = evidence.marketBased;
+    sections.push({
+      key: "market-based",
+      title: "Market-based scope 2, tCO2e",
+      rows: [
+        {
+          label: `Scope 2 (${SCOPE2_METHOD_LABELS.market_based})`,
+          value: m.scope2,
+        },
+        { label: "Scopes 1, 2 and 3 on the market lane", value: m.total },
+        {
+          label: "Scope 2 records carrying a contractual rate",
+          value: `${m.scope2MarketBasedRecords} of ${m.scope2Records}`,
+        },
+      ],
+      notes: [
+        "Reported alongside the location-based figures above, not in place of them. Neither figure is an addend of the other.",
+        m.scope2MarketBasedRecords < m.scope2Records
+          ? "Scope 2 records with no contractual instrument rate produce no market-based figure. No residual mix or grid average has been substituted for them."
+          : "Every scope 2 record in this period carries a contractual instrument rate.",
+      ],
+    });
+  }
 
   if (evidence.scope3ByCategory.length > 0) {
     sections.push({

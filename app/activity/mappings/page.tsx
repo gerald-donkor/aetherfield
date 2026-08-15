@@ -10,6 +10,7 @@ import {
   type FactorSearchRow,
   listFactorCoverage,
   listFactorSets,
+  listMarketBasedMappings,
   searchFactorsByWording,
   searchFactorsForPair,
 } from "../../../lib/db/emission-queries";
@@ -21,6 +22,7 @@ import {
   ACTIVITY_CATEGORIES,
   ACTIVITY_UNITS,
   factorSearchSchema,
+  offersMarketLane,
   type ActivityCategory,
   type ActivityUnit,
 } from "../../../lib/validation/activity";
@@ -72,13 +74,25 @@ function label(value: string): string {
   return value.replaceAll("_", " ");
 }
 
+/** The lane, as it travels in the query string. `market` is the only value that
+    means anything other than the default lane, and anything else reads as the
+    default — a forged value selects the lane a reporter would have got anyway,
+    and the action re-derives it from its own input regardless. */
+type Lane = "market_based" | null;
+
+function laneOf(value: string): Lane {
+  return value === "market" ? "market_based" : null;
+}
+
 function pairHref(
   category: ActivityCategory,
   unit: ActivityUnit,
   q = "",
+  lane: Lane = null,
 ): string {
   const params = new URLSearchParams({ category, unit });
   if (q.trim() !== "") params.set("q", q.trim());
+  if (lane === "market_based") params.set("lane", "market");
   return `/activity/mappings?${params.toString()}`;
 }
 
@@ -87,6 +101,7 @@ async function presentSearch(
   unit: ActivityUnit,
   rawQ: string,
   rawMode: string,
+  lane: Lane,
 ): Promise<SearchPresentation & { q: string; mode: "lexical" | "fuzzy" }> {
   const checked = factorSearchSchema.safeParse({ q: rawQ, mode: rawMode });
   if (!checked.success) {
@@ -101,8 +116,15 @@ async function presentSearch(
     };
   }
 
-  const { q, mode } = checked.data;
-  const lexical = await searchFactorsForPair(organizationId, unit, q);
+  const { q, mode: requested } = checked.data;
+  /* **The market lane is lexical only** — prompt 85. Close-wording ranking
+     exists to find one row among 7,035 published ones; the market lane's
+     candidates are the handful of contractual rates this tenant has entered
+     itself, and a fuzzy pass over them would rank a list a reporter can read
+     whole. `searchFactorsByWording` also has no lane predicate, so running it
+     here would offer rows the action then refuses. */
+  const mode = lane === "market_based" ? ("lexical" as const) : requested;
+  const lexical = await searchFactorsForPair(organizationId, unit, q, lane);
   if (mode === "lexical") {
     return {
       q,
@@ -152,6 +174,64 @@ async function presentSearch(
   };
 }
 
+/**
+ * One pair's market-based lane — prompt 85.
+ *
+ * **A mapped rate and an unmapped lane read as two different states, and
+ * neither reads as an error.** An absent contractual rate is the expected state
+ * for most reporters, so the sentence says what the lane is for rather than
+ * naming a gap; no grid average is offered in its place, because substituting
+ * one would put a rate the reporter never contracted for into a market-based
+ * figure.
+ */
+function MarketLane({
+  mapping,
+  href,
+}: {
+  mapping: {
+    factorLabel: string;
+    source: string;
+    datasetVersion: string;
+    customerSupplied: boolean;
+    chosenBy: string | null;
+  } | null;
+  href: string;
+}) {
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <p className="font-mono text-[11px] leading-[16px] text-muted uppercase">
+          Market-based lane
+        </p>
+        <Link
+          href={href}
+          className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          {mapping ? "Change rate" : "Map a rate"}
+        </Link>
+      </div>
+      {mapping ? (
+        <>
+          <p className="mt-3 wrap-anywhere font-serif text-[16px] leading-6 text-ink">
+            {mapping.factorLabel}
+          </p>
+          <p className="mt-2 font-mono text-[11px] leading-[18px] text-muted">
+            {mapping.source} {mapping.datasetVersion}
+            {mapping.customerSupplied ? " · customer-supplied" : ""}
+            {mapping.chosenBy ? ` · chosen by ${mapping.chosenBy}` : ""}
+          </p>
+        </>
+      ) : (
+        <p className="mt-3 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
+          No contractual rate is mapped, so this pair contributes to the
+          location-based figure only. The market-based figure states its own
+          coverage; no grid average is substituted for it.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default async function ActivityMappingsPage({
   searchParams,
 }: {
@@ -159,10 +239,17 @@ export default async function ActivityMappingsPage({
 }) {
   const membership = await requireOrganization("/activity/mappings");
   const query = await searchParams;
-  const [coverage, sets] = await Promise.all([
+  const [coverage, sets, marketMappings] = await Promise.all([
     listFactorCoverage(membership.organization.id),
     listFactorSets(membership.organization.id),
+    listMarketBasedMappings(membership.organization.id),
   ]);
+  const marketByPair = new Map(
+    marketMappings.map((mapping) => [
+      `${mapping.category}.${mapping.unit}`,
+      mapping,
+    ]),
+  );
 
   const requestedCategory = first(query.category);
   const requestedUnit = first(query.unit);
@@ -175,12 +262,20 @@ export default async function ActivityMappingsPage({
     coverage.find((pair) => pair.mapping === null) ??
     coverage[0] ??
     null;
+  /* The market lane is only ever selected on a category that has one. A `lane`
+     parameter on any other pair reads as the default lane rather than as an
+     error: it selects the lane the reporter would have got anyway. */
+  const lane: Lane =
+    selected && offersMarketLane(selected.category)
+      ? laneOf(first(query.lane))
+      : null;
   const search = selected
     ? await presentSearch(
         membership.organization.id,
         selected.unit,
         first(query.q),
         first(query.mode),
+        lane,
       )
     : {
         q: "",
@@ -339,6 +434,26 @@ export default async function ActivityMappingsPage({
                           contribute to the emissions total.
                         </p>
                       )}
+                      {/* The market-based lane — prompt 85. Shown beside the
+                          grid-average mapping, never in place of it: the Scope
+                          2 Guidance asks for both figures, and a pair with no
+                          contractual rate says so rather than borrowing the
+                          grid average. */}
+                      {offersMarketLane(pair.category) ? (
+                        <MarketLane
+                          mapping={
+                            marketByPair.get(
+                              `${pair.category}.${pair.unit}`,
+                            ) ?? null
+                          }
+                          href={pairHref(
+                            pair.category,
+                            pair.unit,
+                            "",
+                            "market_based",
+                          )}
+                        />
+                      ) : null}
                     </li>
                   );
                 })}
@@ -351,16 +466,36 @@ export default async function ActivityMappingsPage({
                   id="factor-picker-heading"
                   className="font-sans text-[28px] leading-8 font-bold"
                 >
-                  Choose a factor
+                  {lane === "market_based"
+                    ? "Choose a market-based rate"
+                    : "Choose a factor"}
                 </h2>
                 <p className="mt-4 max-w-[700px] font-serif text-p2 text-muted">
-                  Showing factors whose denominator can calculate activity
-                  measured in {selected.unit}. Search the publisher level and
-                  column descriptions to narrow the list.
+                  {lane === "market_based"
+                    ? `Showing scope 2 factors recorded as market-based whose denominator can calculate activity measured in ${selected.unit}. A market-based rate comes from a contract, a supplier disclosure or an energy attribute certificate you hold. Add one under Add customer factor if the rate you need is not listed.`
+                    : `Showing factors whose denominator can calculate activity measured in ${selected.unit}. Search the publisher level and column descriptions to narrow the list.`}
                 </p>
+                {offersMarketLane(selected.category) ? (
+                  <p className="mt-4 font-sans text-nav font-bold">
+                    <Link
+                      href={pairHref(
+                        selected.category,
+                        selected.unit,
+                        "",
+                        lane === "market_based" ? null : "market_based",
+                      )}
+                      className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    >
+                      {lane === "market_based"
+                        ? "Choose the location-based factor instead"
+                        : "Choose the market-based rate instead"}
+                    </Link>
+                  </p>
+                ) : null}
                 <FactorPicker
                   category={selected.category}
                   unit={selected.unit}
+                  lane={lane}
                   factors={search.factors}
                   searchMessage={search.message}
                   searchInvalid={search.invalid}
@@ -372,6 +507,11 @@ export default async function ActivityMappingsPage({
                       value={selected.category}
                     />
                     <input type="hidden" name="unit" value={selected.unit} />
+                    {/* Without this the search would drop the reporter back to
+                        the default lane on every submit. */}
+                    {lane === "market_based" ? (
+                      <input type="hidden" name="lane" value="market" />
+                    ) : null}
                     <label
                       htmlFor="factor-search"
                       className="block font-sans text-nav font-bold text-ink"
@@ -397,21 +537,23 @@ export default async function ActivityMappingsPage({
                         >
                           Search exact text
                         </Button>
-                        <Button
-                          type="submit"
-                          name="mode"
-                          value="fuzzy"
-                          size="secondary"
-                          bullet={false}
-                        >
-                          Find close wording
-                        </Button>
+                        {lane === "market_based" ? null : (
+                          <Button
+                            type="submit"
+                            name="mode"
+                            value="fuzzy"
+                            size="secondary"
+                            bullet={false}
+                          >
+                            Find close wording
+                          </Button>
+                        )}
                       </div>
                     </div>
                     <p className="mt-3 max-w-[40rem] font-mono text-[11px] leading-[18px] text-muted">
-                      Close-wording search compares character groups in this
-                      database. It can help with misspellings, but it can miss
-                      synonyms and does not choose a factor for you.
+                      {lane === "market_based"
+                        ? "This list holds only the market-based rates recorded in this workspace, so it is searched by exact text."
+                        : "Close-wording search compares character groups in this database. It can help with misspellings, but it can miss synonyms and does not choose a factor for you."}
                     </p>
                   </form>
                 </FactorPicker>

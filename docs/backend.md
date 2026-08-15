@@ -9485,7 +9485,7 @@ comments were reworded. Added to `docs/automation.md`.
 | --- | --- |
 | EPA Hub, eGRID, or any second publisher | decided with the user: DEFRA only. EPA's shape differs fundamentally and generalising over two publishers at once widens the step |
 | IEA factors | licence-blocked for this product, above. Not a scheduling decision |
-| market-based scope 2 | needs REC/GO capture, supplier rates and a residual-mix fallback. `scope2_method` is built now so it is not a rewrite later |
+| market-based scope 2 | needs REC/GO capture, supplier rates and a residual-mix fallback. `scope2_method` is built now so it is not a rewrite later. **Closed by prompt 85** — see its section at the end of this file; the prediction held, and the second lane cost a column and two index pairs rather than a schema rewrite |
 | **AI factor matching** — no AI SDK, no provider, no model, no prompt | §5.3: sanctioned at this step but "sanctioned, not scheduled". The engine must be correct and tested before a model is near factor selection |
 | halocarbon GWPs | not verified this session; a refusal beats a remembered number |
 | extending `activity_record` with fuel type, region or a Net/Gross CV flag | changes step 9's CSV grammar, its alias table and its mapping UI. Its own prompt |
@@ -10568,3 +10568,295 @@ not.
 | AI-assisted anything | blocked, not deferred — prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, and prompt 76 shipped the provider-free path |
 | any change to a marketing route, `Container`, `SiteNav`, `SiteFooter` or a GSAP surface | out of scope entirely (AGENTS.md §8.1) |
 | a step 15 | §5.2 remains the ordered plan; this is post-sequence work as prompts 63–83 were |
+
+## Market-based scope 2: the second reporting lane, prompt 85
+
+Implemented on 15 Aug 2026. It closes the largest remaining named deferral on
+the path that decides a filed disclosure figure — step 10's own record said
+market-based scope 2 "needs REC/GO capture, supplier rates and a residual-mix
+fallback", and `docs/backend.md` carried it as open in eleven places. Before
+this change a second figure was **structurally impossible**, not merely
+unbuilt: one unique index allowed one factor per `(organization, category,
+unit)` and another allowed one computed figure per record.
+
+Not a step 15. §5.2 remains the ordered plan; this is post-sequence work on
+step 10's surface, on the same footing as prompts 63–84.
+
+### The methodology, quoted rather than recalled
+
+**The primary document was read this session**, not summarised from memory
+(AGENTS.md §12 rule 2). Step 13 previously refused this work because "no
+verified methodology was read for this step"; that refusal is discharged here.
+
+- **Source**: *GHG Protocol Scope 2 Guidance*, an amendment to the Corporate
+  Standard, retrieved **15 Aug 2026** from
+  <https://ghgprotocol.org/sites/default/files/2023-03/Scope%202%20Guidance.pdf>
+  (3.4 MB, PDF 1.7, 5,798 lines of extracted text). **The landing page
+  <https://ghgprotocol.org/scope-2-guidance> could not be fetched** and the PDF
+  exceeded `WebFetch`'s 10 MB content limit on its first URL, so it was
+  downloaded and read with `pdftotext -layout`. Every quotation below is from
+  that file, not from a secondary summary.
+
+**The dual-reporting requirement — §1.5.1, "New reporting requirements":**
+
+> Companies with any operations in markets providing product or
+> supplier-specific data in the form of contractual instruments shall report
+> scope 2 emissions in two ways and label each result according to the method:
+> one based on the location-based method, and one based on the market-based
+> method. This is also termed "dual reporting."
+
+> Not having contractual data for every site will not cause noncompliance with
+> the GHG Protocol Corporate Standard and Scope 2 Guidance. As with scope 3, a
+> range of data may be available. Companies should consult the hierarchy of
+> emission factors for both location-based and market-based methods. Any data
+> on those hierarchies (including using location-based emission factors in the
+> absence of contractual information) is acceptable.
+
+**§7.4, "Dual reporting"** — that the two are two, and neither replaces the
+other:
+
+> Dual reporting allows companies to compare their individual purchasing
+> decisions to the overall GHG-intensity of the grids on which they operate. In
+> addition, reporting two separate scope 2 figures using two different methods
+> provides several benefits [...]
+
+**The market-based hierarchy — Table 6.3, "Market-based scope 2 data hierarchy
+examples", in the published order, higher precision first:**
+
+| rung | emission factors | indicative examples |
+| --- | --- | --- |
+| 1 | Energy attribute certificates or equivalent instruments (unbundled, bundled with electricity, conveyed in a contract for electricity, or delivered by a utility) | RECs (US, Canada, Australia), Generator Declarations (UK), Guarantees of Origin (EU), PPAs that also convey RECs or GOs |
+| 2 | Contracts for electricity, such as power purchase agreements (PPAs) and contracts from specified sources, where electricity attribute certificates do not exist or are not required for a usage claim | contracts that convey attributes where certificates do not exist |
+| 3 | Supplier/Utility emission rates, such as standard product offer or a different product, disclosed (preferably publicly) according to best available information | green energy tariffs, voluntary renewable electricity products |
+| 4 | Residual mix (subnational or national) that uses energy production data and factors out voluntary purchases | calculated by EU country under the RE-DISS project |
+| 5 | Other grid-average emission factors (subnational or national) — see location-based data | eGRID, "Defra annual grid average emission factor (UK)", IEA national factors |
+
+**And what a reporter does when no contractual instrument and no residual mix
+are available — the sentence immediately before Table 6.2:**
+
+> Companies using the market-based method shall ensure that any contractual
+> instrument from which an emission factor is derived meets the Scope 2 Quality
+> Criteria listed in Chapter 7. Where contractual instruments do not meet the
+> Scope 2 Quality Criteria requirements, and no other market-based method data
+> are available, the location-based data should be used.
+
+**This last quotation contradicts prompt 85's stated reason for D5, and the
+contradiction is recorded rather than smoothed over** (AGENTS.md §12 rule 8).
+The prompt justified refusing a grid-average fallback on the ground that it
+"would put a number the reporter did not contract for into a disclosure". The
+Guidance does not agree: rung 5 of its own hierarchy *is* the grid average, and
+it says location-based data **should** be used when nothing better exists.
+
+**D5 is kept, and it is now stated as what it actually is: a product decision
+not to make that substitution silently, not a requirement of the standard.**
+The reasoning that survives the correction:
+
+- the substitution is a **reporter's judgement**, not a calculation. It asserts
+  that no better instrument exists for that consumption, which this product
+  cannot know — it knows only that no rate was mapped;
+- the Guidance itself requires the result to be **labelled by method**, and a
+  figure that is a grid average wearing a market-based label is the one thing
+  the labelling requirement exists to prevent;
+- the honest intermediate is what shipped: **the coverage is stated beside the
+  figure**, on every surface and in the report's caveats, so the reporter can
+  see exactly which records carry a contractual rate and decide for themselves.
+
+**Adding rung 5 as an explicit, reporter-chosen fallback is therefore a real
+open item**, not a rejected idea. It is listed in the deferrals table below.
+
+### The decisions, D1–D10
+
+Each is a decision, not a measurement (§12 rule 4).
+
+| # | decision | as built |
+| --- | --- | --- |
+| **D1** | a second lane on `activity_factor_mapping`, not a second table | `scope2_method` column, nullable. `null` is the lane that always existed and keeps its meaning for every scope; `'market_based'` is the new one. `'location_based'` is refused at the boundary — the default lane already carries that figure |
+| **D2** | two partial unique indexes replace `activity_factor_mapping_key` | `activity_factor_mapping_default_key` and `activity_factor_mapping_method_key`, below. Partial because Postgres treats NULLs as distinct, so a widened plain index would have permitted unlimited duplicate default mappings |
+| **D3** | two partial unique indexes on `activity_emission` | `activity_emission_record_key` (now partial) and `activity_emission_record_market_key`. **Exactly one primary figure and at most one market-based figure per record** — measured as `max_rows_per_record = 2` below |
+| **D4** | `ScopeTotals.scope2` and `.total` keep meaning the location-based figures | the market figures are new fields: `scope2MarketBased`, `totalMarketBased`, plus `scope2Records` / `scope2MarketBasedRecords`. `totalsForCoverage` in `lib/domain/targets.ts` reads `scope1/scope2/scope3` and is untouched, so no filed target, alert or stored snapshot restates |
+| **D5** | no residual-mix dataset, and no silent grid-average substitution | a scope 2 record with no market-based mapping produces **no** market-based figure. Corrected above: this is a product decision, not a requirement of the Guidance |
+| **D6** | the rate is entered through the existing custom-factor surface | `custom-factor-form.tsx` already offered `market_based` on a scope 2 factor, and the CSV importer already accepted a `scope2_method` column. No new capture UI was built |
+| **D7** | the market pass runs over the filtered record subset and discards its own `unmatchedPairs` | a record with no contractual rate is the expected state, not a coverage gap. `outOfPeriodYears` is the same gap the default lane reports and is not special-cased |
+| **D8** | `ENGINE_VERSION` bumps to **`1.2.0`**; stored emissions are not retroactively rewritten | old rows were produced by 1.1.0 and stay labelled as such until the next recalculation restates them |
+| **D9** | the snapshot's new fields are optional | on **`reportEvidenceSchema`**, which is the exported name — the prompt called it `reportSnapshotSchema`, and there is no such export. A report filed before this change keeps parsing |
+| **D10** | one owner-gated action for both lanes, with the lane as an input field | `setFactorMapping` unchanged in stage order; the lane is a field on `factorMappingSchema` |
+
+### The lane check, which is the load-bearing server-side rule
+
+`app/activity/actions.ts` refuses **both** directions at stage e, after
+re-resolving the factor under the tenant's own visibility:
+
+- a factor that is not a scope 2 row with `scope2_method = 'market_based'`
+  cannot be mapped on the market lane — that is the grid-average substitution
+  D5 refuses, arriving by hand;
+- a market-based row cannot be mapped on the **default** lane — `totalsOf`
+  partitions market-based figures out of `scope2` and `total`, so the pair's
+  contribution would silently vanish from the location-based reading.
+
+The picker's list is narrowed the same way (`searchFactorsForPair` takes a
+`lane`), and that narrowing is a courtesy: the action is the check.
+
+### The migration
+
+`npm run db:generate` produced **`lib/db/migrations/0016_mute_doomsday.sql`**,
+read before it was applied, verbatim:
+
+```sql
+DROP INDEX "activity_factor_mapping_key";--> statement-breakpoint
+DROP INDEX "activity_emission_record_key";--> statement-breakpoint
+ALTER TABLE "activity_factor_mapping" ADD COLUMN "scope2_method" "scope2_method";--> statement-breakpoint
+CREATE UNIQUE INDEX "activity_emission_record_market_key" ON "activity_emission" USING btree ("activity_record_id") WHERE "activity_emission"."scope2_method" = 'market_based';--> statement-breakpoint
+CREATE UNIQUE INDEX "activity_factor_mapping_default_key" ON "activity_factor_mapping" USING btree ("organization_id","category","unit") WHERE "activity_factor_mapping"."scope2_method" is null;--> statement-breakpoint
+CREATE UNIQUE INDEX "activity_factor_mapping_method_key" ON "activity_factor_mapping" USING btree ("organization_id","category","unit","scope2_method") WHERE "activity_factor_mapping"."scope2_method" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "activity_emission_record_key" ON "activity_emission" USING btree ("activity_record_id") WHERE "activity_emission"."scope2_method" is distinct from 'market_based';
+```
+
+**No `ALTER TABLE` was hand-run** (§9). Read back from `pg_indexes` after
+`npm run db:migrate`, both pairs present as declared:
+
+```
+CREATE UNIQUE INDEX activity_emission_record_key ON public.activity_emission USING btree (activity_record_id) WHERE (scope2_method IS DISTINCT FROM 'market_based'::scope2_method)
+CREATE UNIQUE INDEX activity_emission_record_market_key ON public.activity_emission USING btree (activity_record_id) WHERE (scope2_method = 'market_based'::scope2_method)
+CREATE UNIQUE INDEX activity_factor_mapping_default_key ON public.activity_factor_mapping USING btree (organization_id, category, unit) WHERE (scope2_method IS NULL)
+CREATE UNIQUE INDEX activity_factor_mapping_method_key ON public.activity_factor_mapping USING btree (organization_id, category, unit, scope2_method) WHERE (scope2_method IS NOT NULL)
+```
+
+`information_schema`: `activity_factor_mapping.scope2_method`, `USER-DEFINED`,
+udt `scope2_method`, nullable.
+
+**`is distinct from`, not `<>`.** `scope2_method` is null on every scope 1 and
+scope 3 figure, and `null <> 'market_based'` is null rather than true — a plain
+inequality would have left every scope 1 and 3 row outside both indexes and
+unguarded.
+
+**`ON CONFLICT` needs the predicate repeated.** Postgres infers a *partial*
+unique index only when the statement restates its `WHERE`, so
+`setFactorMapping` passes Drizzle's `targetWhere` on both branches. Without it
+the upsert matches no index and raises instead of updating.
+
+### The double-count traps a second lane creates, and where each was closed
+
+Every one of these is a query that counted rows where it meant to count
+records. They are the real cost of the second lane and they are listed so a
+later join is written with them in mind.
+
+| where | what would have happened | fix |
+| --- | --- | --- |
+| `listFactorCoverage`'s mapping join | a pair with both lanes joins twice, doubling `recordCount` and `outOfPeriodRecords` for the whole grouped read | `isNull(activityFactorMapping.scope2Method)` on the join; the market lane is read by the new `listMarketBasedMappings` |
+| `countOutOfPeriodRecords` | the same, on the inner join | the same predicate |
+| `countPeriodRecords` in `report-evidence.ts` | `count(*)` over the emission join counts a dual-reported record twice as *committed* | `scope2_method is distinct from 'market_based'` on the join |
+| `EmissionsSummary`'s `calculated` | `parsed.length` counts rows, overstating coverage by the number of market figures | count the primary lane only |
+| `buildReportEvidence`'s `coverage.calculatedRecords` | the same | the same |
+| `seedDefaultMappings`' existence check | an organisation holding only a market mapping would never be seeded | the check is scoped to the default lane |
+| `totalsOf` | market-based figures summed into `scope2` and `total` — the double count that matters, because it reaches a filing | partitioned out before anything is summed |
+
+### Measurements
+
+All from a synthetic organisation built, measured and deleted by a throwaway
+script (500 electricity records, one `(electricity, kWh)` pair, a location-based
+factor of 0.2 and a market-based rate of 0.01234 — no real supplier, no real
+rate). **Warm**, against the free-plan Neon resource with scale-to-zero on
+(§7.3).
+
+| what | result |
+| --- | --- |
+| recalculation, default lane only | **10 queries, 4,873 ms warm**, 500 figures over 500 records |
+| recalculation, both lanes | **11 queries, 9,409 ms warm**, 1,000 figures over 500 records |
+| the second lane's query cost | **+1 query — one extra insert batch, not a per-record fan-out.** The market pass issues no query of its own: the mappings and siblings are already loaded, the resolver never queries, and both lanes' figures go to one `replaceEmissions` call in one transaction |
+| dual figures, by lane | 500 location-based figures and 500 market-based figures |
+| the two figures are genuinely independent | summed exactly from `numeric`: **100000.000000000000000000000000 kg** location-based against **6170.000000000000000000000000 kg** market-based (500 × 1000 kWh × 0.2, and × 0.01234) |
+| no double counting | **`max_rows_per_record = 2`** — one primary figure and one market-based figure, which is exactly what the two partial indexes permit |
+
+**The wall clock roughly doubles because twice as many rows are written, and
+nothing here is a measurement of the second *pass*** — it is a measurement of a
+recalculation that persists 1,000 figures instead of 500. Whether that matters
+on a large tenant is a question for the nightly sweep, not answered here.
+
+### Prerender impact and verification, prompt 85
+
+**None. Verified, not assumed** (§8.1).
+
+A dev server was running, so both sides were built in copies under
+`~/.cache/aetherfield-diff` per `docs/automation.md`'s clean recipe, base at
+`8b21f34`.
+
+- **Route table**: `/`, `/about`, `/careers`, `/journal`, `/design-system`
+  `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG`;
+  every route this change touches — `/activity`, `/activity/mappings`,
+  `/dashboard`, `/reports*` — already `ƒ` and still `ƒ`.
+- **21 prerendered HTML files on each side, same file set. After normalising
+  `.next/BUILD_ID`, both chunk-name patterns and the RSC flight scripts: 0 of
+  21 differed.**
+- **The CSS chunk is identical by content hash** — `0nfq7xy4zoxgc.css` on both
+  sides, 69 KB. No normalisation was needed for it, which is a stronger result
+  than the usual byte comparison: nothing this change touched produced a single
+  new utility, because every file it edits is behind an authenticated route
+  whose utilities were already emitted.
+
+### Checks run
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **268 passed, 12 files** — up from 255, so the new cases are running |
+| `npm run db:generate` | `0016_mute_doomsday.sql`, read before applying, quoted above |
+| `npm run db:migrate` | applied; indexes read back from `pg_indexes` above |
+| `npm run build` | route table above |
+| `npm run test:e2e:local` | **107 passed, 9 skipped** (Chromium + Firefox) |
+| `e2e/market-based-scope-2.spec.ts` alone, Chromium | **6 passed** (4 tests plus setup and teardown) |
+| `npm run test:e2e:webkit` | **did not run** — "Podman is required for WebKit on Arch Linux", the same environment gap prompts 78–84 recorded. **A gap, not a pass** |
+| prerender diff | **0 of 21 differed**, CSS chunk identical by hash |
+
+### Trust boundary and data
+
+- **No new public write path.** `setFactorMapping` is authenticated and
+  owner-only, checked inside the action after the session, the tenant
+  resolution and the `pendingDeletion` lock. No BotID on an authenticated path.
+- A submitted factor id remains **a claim, not a capability**: re-read through
+  `getVisibleFactor` under the tenant predicate, with missing, deleted,
+  superseded and foreign all answering one indistinguishable refusal.
+- The lane arrives as a field on the shared schema and is parsed at stage c;
+  a value other than `market_based` or absent is a field error, never a third
+  lane.
+- **No new environment variable and no `NEXT_PUBLIC_*`.** `DATABASE_URL`
+  through `lib/db/client.ts`, and the existing Upstash limiter, unchanged.
+- **No personal data.** A supplier-specific rate is a customer's commercial
+  data: tenant-scoped on every read and write, never logged, never transmitted.
+  `app/activity/actions.ts` still has no `console` call. **No model is called** —
+  §5.3's phase-two AI surfaces are untouched.
+
+### Corrections made in this change
+
+Three places predicted or asserted something this work falsified, and each is
+fixed in place rather than left standing (§12 rule 8):
+
+1. **`SCOPE2_METHODS`' docblock** in `lib/validation/emissions.ts` said
+   `market_based` "needs REC and GO capture, supplier-specific rates and a
+   residual-mix fallback, none of which the product models yet". One of the
+   three now exists (the supplier-specific rate), one does not (REC/GO document
+   capture) and one is now a deliberate refusal rather than a gap (residual
+   mix). The docblock says which is which.
+2. **`EmissionsSummary`'s rule 3** said "this step produces location-based
+   only".
+3. **`reportSections`' scope 2 label** joined every method present in the
+   period. That was right while only one could be present; with two it would
+   have labelled a location-based figure as though it were both.
+
+### What prompt 85 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| **a residual-mix dataset** | needs the separately licensed AIB European Residual Mixes. Same class of block as the IEA licence recorded at step 10 |
+| **rung 5 as an explicit, reporter-chosen grid-average fallback** | **a real open item, newly named.** The Guidance permits it and D5 declines to do it *silently*; offering it as a recorded, per-pair choice with its own provenance is a coherent next prompt, and it is not this one |
+| **REC / GO certificate document capture** | a blob upload, a retention decision and an evidence-linking surface. The figure is correct without it — the instrument's *rate* is what multiplies, and D6 captures that — but nothing in this product evidences a claim |
+| **Scope 2 Quality Criteria enforcement** | Chapter 7's criteria are properties of an instrument this product does not model. Asserting them would be a claim we cannot check |
+| **supplier or contract entities** | D6. A contract register is a different product |
+| **re-basing targets or alerts on the market-based figure** | D4 keeps `total` location-based on purpose. Which basis a target tracks is a decision with its own surface |
+| **restating already-filed reports, or rewriting stored emissions** | D8 and D9. A snapshot is immutable; old rows keep their engine version until the next recalculation |
+| **the market lane on categories other than `electricity` and `heat`** | `SCOPE2_MARKET_LANE_CATEGORIES`. `fuel` is combusted on site and is scope 1; nothing else in the list is scope 2 at all |
+| **close-wording search on the market lane** | the candidates are the handful of rates a tenant entered itself, and `searchFactorsByWording` has no lane predicate — it would offer rows the action then refuses |
+| **un-retiring a factor set** | prompt 84's own deferral, untouched and still open |
+| **AI-assisted anything** | blocked, not deferred — prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, and prompt 76 shipped the provider-free path |
+| **any change to a marketing route, `Container`, `SiteNav`, `SiteFooter` or a GSAP surface** | out of scope entirely (AGENTS.md §8.1) |
+| **a step 15** | §5.2 remains the ordered plan; this is post-sequence work as prompts 63–84 were |
