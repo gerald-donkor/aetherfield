@@ -10240,3 +10240,174 @@ rather than assumed**.
 | sharing the set-chooser fields between the two forms on `/activity/factors` | the import leaf repeats them rather than extracting a shared control out of a settled form. Same primitives, same names, same classes — a refactor of `custom-factor-form.tsx` was not this prompt's scope |
 | any change to a marketing route, `SiteNav`, `SiteFooter`, `Container` or any GSAP surface | out of scope entirely (AGENTS.md 8.1) |
 | a step 15 | AGENTS.md 5.2 remains the ordered plan; this is post-sequence work, as prompts 63-81 were |
+
+## Connection acquisition resilience, prompt 83
+
+Implemented on 15 Aug 2026. `/activity/factors` rendered a `DatabaseQueryError`
+from `emission-queries.listSupersedableRows` with `sqlState: undefined`, on a
+request the dev server timed at **20.6 s**, while all three of that page's
+queries succeeded when run directly. This section is the diagnosis and the fix.
+Post-sequence hardening of step 1's data layer, not a step 15 — AGENTS.md §5.2
+remains the complete ordered product build.
+
+### What changed
+
+| file | change |
+| --- | --- |
+| `lib/db/query-error.ts` | third own property `driverFault` on `DatabaseQueryError`; new exported `readDriverFault`, its code allowlist and its name pattern |
+| `lib/db/client.ts` | `AcquisitionRetryingPool`; a `pool.on("error")` listener; `connectionTimeoutMillis` re-derived; `min`, `max`, `idleTimeoutMillis` and `maxLifetimeSeconds` set deliberately |
+
+Nothing else. No schema, migration, environment variable, dependency, package
+script, route, component or style changed, and `npm run db:generate` was not
+run. No query was touched — `listSupersedableRows` was the victim, not the
+cause — and `app/activity/factors/page.tsx` still issues its three queries in
+parallel, deliberately: collapsing them would have masked this by reducing
+concurrency and left every other fan-out page exposed.
+
+### The diagnosis, and its confidence
+
+**Judged, not measured: the failure was a connection-acquisition timeout.**
+Every observable is consistent with it and none contradicts it — a cause with no
+SQLSTATE yields exactly `sqlState: undefined`, and 20.6 s is beyond the 10 s
+ceiling that was in force — but prompt 80 drops `cause` by design, so the cause
+was never captured. **The `driverFault` property below exists to turn this
+judgement into a measurement the next time it happens**, and this line keeps
+saying "judged" until it does.
+
+The second-order finding **is** a measurement: `idleTimeoutMillis` defaults to
+**10 s** (`node_modules/pg-pool/index.js:98-100`) while a fresh connection to
+the pooled host costs **~2.1 s**, and pg-pool applies that timeout to every
+client while `_clients.length > min`, with `min` defaulting to 0
+(`index.js:90, 122-124, 409`). A developer moving between pages more than ten
+seconds apart therefore paid a full handshake on nearly every render. AGENTS.md
+§7.2 chose `pg` over the HTTP driver *for connection reuse*; the defaults undid
+it.
+
+### Measurements
+
+Against the pooled Neon host from this machine, 15 Aug 2026. `pg` 8.22.0,
+`pg-pool` 3.14.0.
+
+| measurement | value |
+| --- | --- |
+| fresh connect + `select 1`, 3 concurrent, warm | 1980 / 2137 / 2145 ms |
+| the same, 6 concurrent, warm | 2078-2188 ms |
+| the same, 10 concurrent, warm | 2058-3743 ms |
+| the failing request, from the user's terminal | 20.6 s, `operation: 'emission-queries.listSupersedableRows'`, `sqlState: undefined` |
+
+Re-run **after** the change, with the shipped pool options:
+
+| measurement | value |
+| --- | --- |
+| 3 concurrent, across a scale-to-zero wake | 3057 / 4039 / **4118** ms |
+| 6 concurrent, warm | 2366-2640 ms |
+| 10 concurrent, warm | 2015-**3273** ms |
+| four `select 1`s **twelve seconds apart** — past the old 10 s idle default | **2051 / 388 / 284 / 409 ms** |
+| the pool at the end of that sequence | `totalCount` 1, `idleCount` 1 |
+
+The last two rows are the reuse fix, measured: only the first query pays a
+handshake now, where every one of them did before. 4118 ms is the slowest
+acquisition ever recorded against this host, and it includes a compute wake.
+
+### The pool's settings, each marked
+
+| option | value | measured or judged |
+| --- | --- | --- |
+| `connectionTimeoutMillis` | 7000 | **judged** — 1.7x the slowest observed acquisition (4118 ms, cold). One timeout plus the single retry is 14.1 s worst case, under the 20.6 s that provoked this. Replaces an inherited 10000 that was never derived |
+| `idleTimeoutMillis` | 60000 | **judged** on the measured 2.1 s handshake and 10 s default — long enough to span a page's fan-out and the navigation after it, short enough that a burst's extra connections are not held for a session |
+| `min` | 1 | **judged.** pg-pool applies no idle timeout while `_clients.length <= min`, so this is what makes the first query of a request find a live connection. It does **not** pre-connect: pg-pool creates clients on demand only |
+| `max` | 10 | pg-pool's own default, set explicitly so it is a decision. The widest fan-out in the app is three queries |
+| `maxLifetimeSeconds` | 240 | **judged** against Neon's **5-minute** idle suspend (AGENTS.md §7.3), which is the server-side cut the connection `min` holds open can otherwise outlive. The pool discards it a minute early, so a wake is paid on a fresh connect rather than discovered on a dead one |
+| `ACQUIRE_RETRY_DELAY_MS` | 100 | **judged** — invisible next to a 2.1 s connect, enough that a retry racing a compute wake does not repeat the same instant |
+
+`CONNECT_ATTEMPT_TIMEOUT_MS` (2500) and `attachDatabasePool` are unchanged, as
+is the lazy, no-`Proxy` shape of `getDb()`.
+
+### `driverFault` — what a codeless failure may now say
+
+A third own property beside `operation` and `sqlState`, of the shape
+`{ name, code }`:
+
+- `name` is the cause's constructor name, accepted only when it matches
+  `/^[A-Za-z][A-Za-z0-9_]{0,63}$/` and falling back to `"Error"` otherwise, so a
+  cause whose `name` was overwritten with a message cannot smuggle one through.
+- `code` is accepted only from a **closed allowlist** of fourteen transport
+  codes — `ECONNREFUSED`, `ECONNRESET`, `ECONNABORTED`, `ETIMEDOUT`,
+  `EHOSTUNREACH`, `ENETUNREACH`, `ENETDOWN`, `EPIPE`, `EADDRNOTAVAIL`,
+  `ENOTFOUND`, `EAI_AGAIN`, `EPROTO`, `ERR_SOCKET_CONNECTION_TIMEOUT`,
+  `ERR_SSL_WRONG_VERSION_NUMBER`. Anything else is dropped.
+
+Never `message`, never `detail`, never `query`, never `params`. It is an
+allowlist rather than a redaction for prompt 80's reason: a redaction has to be
+right about every value it lets through, an allowlist only about the values it
+names. Every property read stays inside `readDriverFault`'s `try`, matching
+`readSqlState`'s discipline. This **narrows** disclosure relative to the raw
+`DrizzleQueryError` and adds nothing to what prompt 80 already permitted.
+
+### The retry, and why it is safe
+
+`Pool#query` (`node_modules/pg-pool/index.js:448-451`) calls `this.connect()`
+and returns its error **before dispatching anything**. Every error `connect`
+reports is therefore one no statement outlived: nothing reached the server, and
+a second attempt cannot repeat a write. `AcquisitionRetryingPool` overrides
+`connect` — both the promise and the callback form — and on failure retries once
+via `super.connect`, so a dead host costs exactly two attempts and cannot
+recurse.
+
+That is what makes the retry scopeable to acquisition **without touching a
+single write path**, which the prompt required before allowing it at all. A
+retry one layer up — inside `withSafeQueryErrors` — would not be safe: a
+data-layer function may complete one statement and then fail to acquire a
+connection for the next, so re-running it would repeat the first.
+
+**A subclass, not a wrapper.** AGENTS.md §7.5 forbids a `Proxy` around the
+client because Better Auth inspects the adapter object and its request chain
+hangs with no error. A subclass is a real `Pool` — `instanceof`, own methods,
+own emitter — so nothing that inspects it sees anything different.
+
+**The retry timer is not `unref`ed**, and that is a measured correction: the
+first draft called `timer.unref()`, and the verification below showed the
+process exiting between the failure and the retry, dropping it silently.
+
+### The `error` listener
+
+`lib/db/client.ts` attached none. `pg-pool/index.js:52-62` emits `error` when an
+**idle** client fails — a background disconnect from Neon, which happens
+routinely across a compute suspend — and an `EventEmitter` `error` with no
+listener throws, so a recovered condition could take the dev server or the
+function instance down. The pool has already removed the client before it emits;
+the listener logs that fact and the `readDriverFault` shape, never the error's
+message, which on a connect failure can quote the host (AGENTS.md §8.3 rule 2).
+
+### Verified, prompt 83
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **255 passed**, 12 files |
+| `npm run build` | compiled in 8.8 s; route table **unchanged** — `/`, `/about`, `/careers`, `/journal`, `/design-system` `○ Static`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| retry, against a closed port | `[db] connection acquisition failed; retrying once { name: 'Error', code: 'ECONNREFUSED' }` logged **once**, then the failure surfaced at 112 ms — two attempts plus the 100 ms delay |
+| the sanitized error, same run | `operation: 'check.acquisition'`, `sqlState: undefined`, `driverFault: { name: 'Error', code: 'ECONNREFUSED' }`; own properties are `stack`, `message`, `name`, `operation`, `driverFault` and nothing else |
+| a real `db.transaction()` through the subclass — the **promise** form of `connect`, which Drizzle uses for transactions and the callback form never exercises | committed and returned `{ one: 1 }` in 2714 ms, and the query after it reused the connection at 253 ms |
+| the concurrency and reuse re-measurement | quoted in full above |
+
+The retry and sanitizer checks ran through a temporary ESM script importing
+`lib/db/client.ts` under `tsx` with a throwaway tsconfig aliasing `server-only`
+to an empty module — the same obstacle prompt 80 recorded, solved without
+touching the shipped module. Both the script and the tsconfig were deleted
+afterwards; nothing about them is committed.
+
+**Prerender impact: none — no route changes**, verified against the route table
+above rather than assumed. No HTML diff was run: this change touches `lib/db/`
+only, and no marketing route imports it.
+
+### What prompt 83 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| retry on writes, or anywhere above acquisition | a data-layer function can be multi-statement; only the acquisition boundary proves nothing was dispatched |
+| change any query, or collapse `/activity/factors`' three parallel queries | it would mask the fault by reducing concurrency and leave every other fan-out page exposed |
+| move to `@neondatabase/serverless` | AGENTS.md §7.2 settled the driver; a slow handshake argues for reusing connections, not for abandoning them |
+| a Neon plan change to defeat scale-to-zero | out of scope, and the 240 s lifetime handles the consequence |
+| forward `cause` on `DatabaseQueryError` | prompt 80's decision stands; `driverFault` is two matched identifiers, not the cause |

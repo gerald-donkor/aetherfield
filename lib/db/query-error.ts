@@ -48,20 +48,47 @@ import { DrizzleQueryError } from "drizzle-orm";
  * on a unique violation `detail` quotes the conflicting key **value** — an
  * email address, on `subscriber` and on `user`. Attaching the cause would
  * reintroduce the disclosure one property further down.
+ *
+ * - `driverFault` — prompt 83. A failure that never reached the server carries
+ *   no SQLSTATE, so `sqlState: undefined` was the whole of what a connection
+ *   failure reported, and the page that surfaced it could not be told apart
+ *   from a broken statement. This carries the cause's constructor `name` and,
+ *   when it matches a closed allowlist of transport codes, its `code`. Neither
+ *   can carry a row: both are matched against a fixed shape and the code
+ *   against a fixed list, so an unrecognised value is dropped rather than
+ *   reproduced.
  */
 export class DatabaseQueryError extends Error {
   /** The `<module>.<function>` label the wrapped data-layer export supplied. */
   readonly operation: string;
   /** The driver's SQLSTATE, when it supplied one of the expected shape. */
   readonly sqlState: string | undefined;
+  /** The cause's error class, and its transport code when it is a known one. */
+  readonly driverFault: DriverFault | undefined;
 
-  constructor(operation: string, sqlState: string | undefined) {
+  constructor(
+    operation: string,
+    sqlState: string | undefined,
+    driverFault: DriverFault | undefined,
+  ) {
     super("Database query failed");
     this.name = "DatabaseQueryError";
     this.operation = operation;
     this.sqlState = sqlState;
+    this.driverFault = driverFault;
   }
 }
+
+/**
+ * What a failure below SQL level is allowed to disclose: two identifiers, both
+ * matched against a fixed shape or a fixed list.
+ */
+export type DriverFault = {
+  /** The cause's constructor name — `Error`, `AggregateError`, `DatabaseError`. */
+  readonly name: string;
+  /** A transport-level code from {@link DRIVER_FAULT_CODES}, when it is one. */
+  readonly code: string | undefined;
+};
 
 /** SQLSTATE is five characters from `[0-9A-Z]` (Postgres Appendix A). Anything
     else is not a code and is dropped rather than reproduced. */
@@ -87,6 +114,70 @@ function readSqlState(error: DrizzleQueryError): string | undefined {
 }
 
 /**
+ * The transport-level codes a failure may name, and nothing else.
+ *
+ * Node's `libuv` codes plus the two DNS ones, which is the whole set a socket
+ * to the pooled Neon host can produce. It is an allowlist rather than a
+ * redaction for the reason prompt 80 recorded: a redaction has to be right
+ * about every value it lets through, and an allowlist only about the values it
+ * names. A code outside it is dropped, so a driver that one day puts something
+ * else in `code` discloses nothing.
+ */
+const DRIVER_FAULT_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENETDOWN",
+  "EPIPE",
+  "EADDRNOTAVAIL",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPROTO",
+  "ERR_SOCKET_CONNECTION_TIMEOUT",
+  "ERR_SSL_WRONG_VERSION_NUMBER",
+]);
+
+/** An error class name is an identifier. Anything else is not one, and is
+    dropped rather than reproduced — the same discipline as `SQLSTATE_PATTERN`,
+    and the reason a cause whose `name` was overwritten with a message cannot
+    smuggle one through. */
+const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
+/**
+ * Reads the cause's class name and transport code, or returns `undefined`.
+ *
+ * Every property read is inside the `try`, for the reason `readSqlState` gives:
+ * the error object is provider-controlled and a throwing getter must not turn a
+ * sanitized failure into a second, worse one.
+ */
+export function readDriverFault(error: unknown): DriverFault | undefined {
+  try {
+    const cause: unknown =
+      error instanceof DrizzleQueryError ? error.cause : error;
+    if (typeof cause !== "object" || cause === null) return undefined;
+
+    const rawName: unknown = (cause as { name?: unknown }).name;
+    const name =
+      typeof rawName === "string" && ERROR_NAME_PATTERN.test(rawName)
+        ? rawName
+        : "Error";
+
+    const rawCode: unknown = (cause as { code?: unknown }).code;
+    const code =
+      typeof rawCode === "string" && DRIVER_FAULT_CODES.has(rawCode)
+        ? rawCode
+        : undefined;
+
+    return { name, code };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * A `DatabaseQueryError` for a Drizzle query failure; **everything else is
  * returned unchanged, by identity**.
  *
@@ -102,7 +193,11 @@ function readSqlState(error: DrizzleQueryError): string | undefined {
  */
 export function toSafeQueryError(error: unknown, operation: string): unknown {
   if (!(error instanceof DrizzleQueryError)) return error;
-  return new DatabaseQueryError(operation, readSqlState(error));
+  return new DatabaseQueryError(
+    operation,
+    readSqlState(error),
+    readDriverFault(error),
+  );
 }
 
 /**
