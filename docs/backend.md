@@ -11379,9 +11379,36 @@ redeploy is required once they land.
 **The Google Cloud Console redirect URI** —
 `https://aetherfield-rho.vercel.app/api/auth/callback/google` — must be added to
 the OAuth client by hand. **Google sign-in is not to be reported as working
-until both this and the two variables above are done and confirmed.** As of this
-correction the two variables are done; the redirect URI and a real sign-in
-against production are not confirmed here.
+until both this and the two variables above are done and confirmed.**
+
+> **Closed 15 Aug 2026.** All three are done and confirmed. The redirect URI was
+> added alongside the existing localhost entry — one OAuth client serves both,
+> and Google matches the list exactly, so `https` and no trailing slash matter.
+> Production sign-up through Google completed end to end and landed on
+> `/account`.
+
+**How each half was confirmed, because they need different evidence.** The
+client ID is verifiable without signing in: `POST /api/auth/sign-in/social` with
+`{"provider":"google"}` returns Better Auth's authorize URL, and its query
+carries the `client_id` and the `redirect_uri` the server will actually send. On
+production that returned an `accounts.google.com` URL whose `client_id` ends
+`.apps.googleusercontent.com` with **no leading or trailing quote** — which is
+what proved the quoting trap above had been cleared, from the running server
+rather than from the write command's output. **The secret cannot be reached that
+way**: it is used only in the server-to-server token exchange after the
+callback, so nothing observable from a browser or a curl exercises it. The
+completed sign-in is the only evidence for it, and that is why this item stayed
+open until a real one was performed.
+
+**Two Console details that cost time.** The consent screen no longer exists
+under that name — Google split it into **Google Auth Platform** in 2025, and
+publishing status and test users are at `console.cloud.google.com/auth/audience`.
+And **Authorised JavaScript origins is not the field for the callback**; it
+rejects any path. It is left **empty** deliberately: `GoogleSignInButton` calls
+`authClient.signIn.social`, which posts to our own server and redirects, and the
+Google mark is inlined SVG — no browser-side call to a Google endpoint exists,
+so an origin entry would be unused permission. Adding One Tap or the rendered
+GIS button later would change that.
 
 **Preview has no `BETTER_AUTH_URL`** (D3), so anything on a preview deployment
 that resolves an emailed link still throws. Deliberate; wants its own prompt if
