@@ -16,6 +16,7 @@ import type {
   ActivityImportStatus,
   ActivityMapping,
 } from "../validation/activity";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * Every read and write of the four phase-two ingestion tables — build step 9.
@@ -99,7 +100,12 @@ const listedImportColumns = {
   uploadedByName: user.name,
 } as const;
 
-export async function listImports(
+export const listImports = withSafeQueryErrors(
+  "activity-queries.listImports",
+  listImportsImpl,
+);
+
+async function listImportsImpl(
   organizationId: string,
   page: number,
 ): Promise<ListedImport[]> {
@@ -118,7 +124,12 @@ export async function listImports(
     .offset((page - 1) * ACTIVITY_PAGE_SIZE);
 }
 
-export async function countImports(organizationId: string): Promise<number> {
+export const countImports = withSafeQueryErrors(
+  "activity-queries.countImports",
+  countImportsImpl,
+);
+
+async function countImportsImpl(organizationId: string): Promise<number> {
   const [row] = await getDb()
     .select({ count: count() })
     .from(activityImport)
@@ -138,7 +149,12 @@ export async function countImports(organizationId: string): Promise<number> {
  * organisation" and "an import that has been erased" — deliberately one answer,
  * so the caller has nothing to distinguish and cannot leak the difference.
  */
-export async function getImport(
+export const getImport = withSafeQueryErrors(
+  "activity-queries.getImport",
+  getImportImpl,
+);
+
+async function getImportImpl(
   importId: string,
   organizationId: string,
 ): Promise<ImportDetail | null> {
@@ -187,7 +203,12 @@ export type ListedImportRow = {
 /** Staged rows of one status, scoped to both the import and the organisation.
     The second predicate is redundant given the first and is there anyway — see
     `activity_import_row.organization_id`'s docblock in `schema.ts`. */
-export async function listImportRows(
+export const listImportRows = withSafeQueryErrors(
+  "activity-queries.listImportRows",
+  listImportRowsImpl,
+);
+
+async function listImportRowsImpl(
   importId: string,
   organizationId: string,
   status: ActivityImportRowStatus,
@@ -224,7 +245,12 @@ export async function listImportRows(
 
 /** Every staged row's number and source fields, for a mapping override to
     re-coerce without asking for the file again. */
-export async function listRawImportRows(
+export const listRawImportRows = withSafeQueryErrors(
+  "activity-queries.listRawImportRows",
+  listRawImportRowsImpl,
+);
+
+async function listRawImportRowsImpl(
   importId: string,
   organizationId: string,
 ): Promise<{ rowNumber: number; raw: string[] }[]> {
@@ -247,7 +273,12 @@ export async function listRawImportRows(
 
 /** How many activity records this organisation holds. The index view's one
     figure, and the only read of `activity_record` step 9 needs. */
-export async function countActivityRecords(
+export const countActivityRecords = withSafeQueryErrors(
+  "activity-queries.countActivityRecords",
+  countActivityRecordsImpl,
+);
+
+async function countActivityRecordsImpl(
   organizationId: string,
 ): Promise<number> {
   const [row] = await getDb()
@@ -284,7 +315,12 @@ export type StagedRow = {
  * action compensates for with a best-effort delete exactly as the CV path does
  * (AGENTS.md 10 stage e).
  */
-export async function createStagedImport(input: {
+export const createStagedImport = withSafeQueryErrors(
+  "activity-queries.createStagedImport",
+  createStagedImportImpl,
+);
+
+async function createStagedImportImpl(input: {
   organizationId: string;
   uploadedBy: string;
   filename: string;
@@ -333,7 +369,12 @@ export async function createStagedImport(input: {
  * Returns `false` when the import is not this organisation's, does not exist,
  * or is no longer `staged`. One answer for all three, as everywhere else here.
  */
-export async function restageImport(input: {
+export const restageImport = withSafeQueryErrors(
+  "activity-queries.restageImport",
+  restageImportImpl,
+);
+
+async function restageImportImpl(input: {
   importId: string;
   organizationId: string;
   columnMapping: ActivityMapping;
@@ -405,7 +446,12 @@ export type CommitOutcome =
  * through — the only way a `site` row is ever created (AGENTS.md 5.2, "do not
  * overbuild": step 9 ships no site management UI).
  */
-export async function commitImport(
+export const commitImport = withSafeQueryErrors(
+  "activity-queries.commitImport",
+  commitImportImpl,
+);
+
+async function commitImportImpl(
   importId: string,
   organizationId: string,
 ): Promise<CommitOutcome> {
@@ -528,7 +574,12 @@ export type DiscardOutcome =
  * reason to stay in the store. Clearing the column in the same statement means
  * a failed delete leaves an orphan rather than a row pointing at nothing.
  */
-export async function discardImport(
+export const discardImport = withSafeQueryErrors(
+  "activity-queries.discardImport",
+  discardImportImpl,
+);
+
+async function discardImportImpl(
   importId: string,
   organizationId: string,
 ): Promise<DiscardOutcome> {

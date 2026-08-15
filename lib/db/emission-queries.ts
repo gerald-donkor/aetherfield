@@ -47,6 +47,7 @@ import {
   type FactorRowIdentity,
 } from "../domain/factor-selection";
 import type { CreateCustomFactorInput } from "../validation/emissions";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * Every read and write of the four factor and emission tables — build step 10.
@@ -137,7 +138,12 @@ export type ListedFactorSet = {
  * an existing `activity_emission.factor_id`, so an old figure still re-derives,
  * but the set is no longer offered as current.
  */
-export async function listFactorSets(
+export const listFactorSets = withSafeQueryErrors(
+  "emission-queries.listFactorSets",
+  listFactorSetsImpl,
+);
+
+async function listFactorSetsImpl(
   organizationId: string,
 ): Promise<ListedFactorSet[]> {
   return getDb()
@@ -206,7 +212,12 @@ export type TenantFactorRow = {
   deletedAt: Date | null;
 };
 
-export async function listTenantFactorSets(
+export const listTenantFactorSets = withSafeQueryErrors(
+  "emission-queries.listTenantFactorSets",
+  listTenantFactorSetsImpl,
+);
+
+async function listTenantFactorSetsImpl(
   organizationId: string,
 ): Promise<TenantFactorSet[]> {
   return getDb()
@@ -239,7 +250,12 @@ export async function listTenantFactorSets(
     .orderBy(desc(emissionFactorSet.createdAt));
 }
 
-export async function listTenantFactors(
+export const listTenantFactors = withSafeQueryErrors(
+  "emission-queries.listTenantFactors",
+  listTenantFactorsImpl,
+);
+
+async function listTenantFactorsImpl(
   organizationId: string,
 ): Promise<TenantFactorRow[]> {
   const rows = await getDb()
@@ -391,7 +407,12 @@ export type CreateTenantFactorOutcome =
  * of the other kind cannot go into it and is refused rather than mislabelled
  * (decision 7).
  */
-export async function createTenantFactor(input: {
+export const createTenantFactor = withSafeQueryErrors(
+  "emission-queries.createTenantFactor",
+  createTenantFactorImpl,
+);
+
+async function createTenantFactorImpl(input: {
   organizationId: string;
   data: CreateCustomFactorInput;
 }): Promise<CreateTenantFactorOutcome> {
@@ -537,7 +558,12 @@ export async function createTenantFactor(input: {
  * already renders the gap, and historical `activity_emission` rows stay
  * re-derivable.
  */
-export async function retireTenantFactor(input: {
+export const retireTenantFactor = withSafeQueryErrors(
+  "emission-queries.retireTenantFactor",
+  retireTenantFactorImpl,
+);
+
+async function retireTenantFactorImpl(input: {
   organizationId: string;
   factorId: string;
 }): Promise<{ retired: false } | { retired: true; mappingCount: number }> {
@@ -619,7 +645,12 @@ export type SupersedableRow = {
  * Distinct on `(source, source_row_id)`, because eight seeded mappings
  * routinely share four rows.
  */
-export async function listSupersedableRows(
+export const listSupersedableRows = withSafeQueryErrors(
+  "emission-queries.listSupersedableRows",
+  listSupersedableRowsImpl,
+);
+
+async function listSupersedableRowsImpl(
   organizationId: string,
   db: Db = getDb(),
 ): Promise<SupersedableRow[]> {
@@ -682,7 +713,12 @@ export type FactorSibling = FactorCandidate & FactorRowIdentity;
  * engine takes. The engine never sees a database handle — that boundary is
  * AGENTS.md 6.2's, and this function is the seam.
  */
-export async function listFactorMappings(
+export const listFactorMappings = withSafeQueryErrors(
+  "emission-queries.listFactorMappings",
+  listFactorMappingsImpl,
+);
+
+async function listFactorMappingsImpl(
   organizationId: string,
   db: Db = getDb(),
 ): Promise<ResolvedMapping[]> {
@@ -768,7 +804,12 @@ export async function listFactorMappings(
  * into a filed number, which is why the predicate is the shared helper rather
  * than a restatement of it.
  */
-export async function listFactorSiblings(
+export const listFactorSiblings = withSafeQueryErrors(
+  "emission-queries.listFactorSiblings",
+  listFactorSiblingsImpl,
+);
+
+async function listFactorSiblingsImpl(
   organizationId: string,
   mappings: readonly ResolvedMapping[],
   db: Db = getDb(),
@@ -939,7 +980,12 @@ export function buildFactorResolver(
  * empty list, which is the same answer a nonexistent id gets. No existence
  * oracle on this path.
  */
-export async function listRecordsForCalculation(
+export const listRecordsForCalculation = withSafeQueryErrors(
+  "emission-queries.listRecordsForCalculation",
+  listRecordsForCalculationImpl,
+);
+
+async function listRecordsForCalculationImpl(
   organizationId: string,
   importId: string | null,
   db: Db = getDb(),
@@ -993,7 +1039,12 @@ export type StoredEmission = {
  * The unique index on `activity_record_id` is the backstop: a double-run cannot
  * append a second figure for one record even if this transaction were wrong.
  */
-export async function replaceEmissions(
+export const replaceEmissions = withSafeQueryErrors(
+  "emission-queries.replaceEmissions",
+  replaceEmissionsImpl,
+);
+
+async function replaceEmissionsImpl(
   organizationId: string,
   recordIds: readonly string[],
   emissions: readonly StoredEmission[],
@@ -1079,7 +1130,12 @@ export type RecalculationOutcome = {
  * run to one import. It is an additional predicate, never a replacement for the
  * tenant one.
  */
-export async function recalculateOrganization(
+export const recalculateOrganization = withSafeQueryErrors(
+  "emission-queries.recalculateOrganization",
+  recalculateOrganizationImpl,
+);
+
+async function recalculateOrganizationImpl(
   organizationId: string,
   importId: string | null,
 ): Promise<RecalculationOutcome> {
@@ -1152,7 +1208,12 @@ export type PersistedEmission = {
  * version, against a named factor row, and re-deriving it on every page view
  * would make "what did we file" unanswerable.
  */
-export async function listEmissions(
+export const listEmissions = withSafeQueryErrors(
+  "emission-queries.listEmissions",
+  listEmissionsImpl,
+);
+
+async function listEmissionsImpl(
   organizationId: string,
   importId: string | null,
 ): Promise<PersistedEmission[]> {
@@ -1187,7 +1248,12 @@ export async function listEmissions(
  * How many committed records currently have no computed figure — the number the
  * surface needs to say "this total is not complete" without recalculating.
  */
-export async function countUncalculatedRecords(
+export const countUncalculatedRecords = withSafeQueryErrors(
+  "emission-queries.countUncalculatedRecords",
+  countUncalculatedRecordsImpl,
+);
+
+async function countUncalculatedRecordsImpl(
   organizationId: string,
   importId: string | null,
 ): Promise<number> {
@@ -1223,7 +1289,12 @@ export async function countUncalculatedRecords(
  * reason {@link listFactorCoverage} exists, applied to the same question. The
  * predicate is the shared one, so this and the pair list agree by construction.
  */
-export async function countOutOfPeriodRecords(
+export const countOutOfPeriodRecords = withSafeQueryErrors(
+  "emission-queries.countOutOfPeriodRecords",
+  countOutOfPeriodRecordsImpl,
+);
+
+async function countOutOfPeriodRecordsImpl(
   organizationId: string,
   importId: string | null,
 ): Promise<number> {
@@ -1274,7 +1345,12 @@ export async function countOutOfPeriodRecords(
  * holds no coverage list — the nightly sweep would have to ask it to distinguish
  * an unseeded organisation from an idle one. It is not called today.
  */
-export async function hasAnyFactorMapping(
+export const hasAnyFactorMapping = withSafeQueryErrors(
+  "emission-queries.hasAnyFactorMapping",
+  hasAnyFactorMappingImpl,
+);
+
+async function hasAnyFactorMappingImpl(
   organizationId: string,
 ): Promise<boolean> {
   const [row] = await getDb()
@@ -1393,7 +1469,12 @@ export type FactorCoveragePair = {
  * {@link countOutOfPeriodRecords} uses, so the pair list and the coverage line
  * cannot disagree.
  */
-export async function listFactorCoverage(
+export const listFactorCoverage = withSafeQueryErrors(
+  "emission-queries.listFactorCoverage",
+  listFactorCoverageImpl,
+);
+
+async function listFactorCoverageImpl(
   organizationId: string,
 ): Promise<FactorCoveragePair[]> {
   const rows = await getDb()
@@ -1560,7 +1641,12 @@ function escapeLike(text: string): string {
  * label columns keep their precedence, so the list a reporter reads does not
  * re-sequence.
  */
-export async function searchFactorsForPair(
+export const searchFactorsForPair = withSafeQueryErrors(
+  "emission-queries.searchFactorsForPair",
+  searchFactorsForPairImpl,
+);
+
+async function searchFactorsForPairImpl(
   organizationId: string,
   unit: ActivityUnit,
   query: string,
@@ -1644,7 +1730,12 @@ export type FuzzyFactorSearchRow = FactorSearchRow & {
  * the lexical picker's five eligibility rules and includes visible customer
  * rows: all ranking happens inside the tenant-scoped Postgres query.
  */
-export async function searchFactorsByWording(
+export const searchFactorsByWording = withSafeQueryErrors(
+  "emission-queries.searchFactorsByWording",
+  searchFactorsByWordingImpl,
+);
+
+async function searchFactorsByWordingImpl(
   organizationId: string,
   unit: ActivityUnit,
   query: string,
@@ -1722,7 +1813,12 @@ export type VisibleFactor = {
  * indistinguishable from one that does not exist — the same stance `getImport`
  * takes on a foreign `importId`. No existence oracle.
  */
-export async function getVisibleFactor(
+export const getVisibleFactor = withSafeQueryErrors(
+  "emission-queries.getVisibleFactor",
+  getVisibleFactorImpl,
+);
+
+async function getVisibleFactorImpl(
   organizationId: string,
   factorId: string,
 ): Promise<VisibleFactor | null> {
@@ -1772,7 +1868,12 @@ export async function getVisibleFactor(
  * a reporter's own choice, for the reason its docblock records; this *is* the
  * reporter's own choice, made deliberately, so it overwrites.
  */
-export async function setFactorMapping(input: {
+export const setFactorMapping = withSafeQueryErrors(
+  "emission-queries.setFactorMapping",
+  setFactorMappingImpl,
+);
+
+async function setFactorMappingImpl(input: {
   organizationId: string;
   category: ActivityCategory;
   unit: ActivityUnit;
@@ -1826,7 +1927,12 @@ export async function setFactorMapping(input: {
  * date — so this is which provenance a reporter sees, not which figure is
  * filed.
  */
-export async function seedDefaultMappings(
+export const seedDefaultMappings = withSafeQueryErrors(
+  "emission-queries.seedDefaultMappings",
+  seedDefaultMappingsImpl,
+);
+
+async function seedDefaultMappingsImpl(
   organizationId: string,
   defaults: readonly { category: ActivityCategory; unit: ActivityUnit; sourceRowId: string }[],
 ): Promise<{ inserted: number }> {

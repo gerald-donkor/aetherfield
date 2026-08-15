@@ -7261,6 +7261,287 @@ and returned prompt 78's baseline of 98 passed. Neither the option nor the
 worker count is committed; both are verification conditions. Teardown reported
 `rate_limit` rows 3 before and 3 after on both runs.
 
+## Drizzle query-error disclosure, closed at the data layer, prompt 80
+
+Implemented on 15 Aug 2026. Prompt 79 closed Better Auth's provider-logger path
+and recorded, as a measurement rather than a reservation, that an unrelated
+`DrizzleQueryError` reaching Next's own error printer still carried the failing
+statement and its bound parameters. This section closes that. Post-sequence
+hardening, not a step 15 — AGENTS.md §5.2 remains the complete ordered product
+build.
+
+### What changed
+
+| file | change |
+| --- | --- |
+| `lib/db/query-error.ts` | new — `DatabaseQueryError`, `toSafeQueryError`, `withSafeQueryErrors` |
+| `lib/db/*-queries.ts` (11 files) and `lib/db/report-evidence.ts` | every exported async function wrapped — 89 of them |
+| `app/api/auth/[...all]/route.ts` | `GET` and `POST` wrapped, because Better Auth's adapter queries do not go through `lib/db/` |
+
+Nothing else. No schema, migration, environment variable, dependency, package
+script, component or style changed, and `npm run db:generate` was not run.
+
+### The mechanism, read from the installed sources
+
+Four files compose into the disclosure, and each was opened rather than
+recalled:
+
+1. `node_modules/drizzle-orm/errors.js` — `DrizzleQueryError`'s constructor
+   builds its message as `` `Failed query: ${query}\nparams: ${params}` `` and
+   keeps `query`, `params` and `cause` as own properties. The message is
+   therefore inside `stack` as well.
+2. `node_modules/drizzle-orm/pg-core/session.js:41,48,59,66,81,98` — six throw
+   sites, one per branch of `queryWithCache`. **Every** query path wraps, so no
+   Drizzle option avoids it.
+3. `node_modules/next/dist/server/base-server.js:462-464` — `logError(err)` is
+   `_log.error(err)`, and it is the print path for route handlers and for render
+   failures alike; `node_modules/next/dist/build/output/log.js:75-101` ends at
+   `console.error(prefix, err)`, so the error **object** is inspected, not
+   stringified, and the own properties print alongside the message.
+4. `node_modules/pg-protocol/dist/messages.d.ts:34-53` — `pg`'s `DatabaseError`
+   carries `code` (SQLSTATE) and `detail`, and on a unique violation `detail`
+   quotes the conflicting key **value**.
+
+`DrizzleQueryError` is on the package's public root export
+(`require("drizzle-orm").DrizzleQueryError` is a `function`), so the check needs
+no deep import.
+
+### The sanitizer's contract
+
+`lib/db/query-error.ts` is `server-only`, like every other module under
+`lib/db/`.
+
+- `DatabaseQueryError` has the fixed message `Database query failed` and two own
+  properties beyond `name` and `stack`: `operation`, the caller-supplied
+  `<module>.<function>` label, and `sqlState`, accepted only when the driver's
+  `code` matches `/^[0-9A-Z]{5}$/`. Neither is customer data, and together they
+  keep a failure diagnosable — losing the query text and printing nothing would
+  trade one defect for another.
+- **`cause` is dropped, not forwarded.** Attaching `pg`'s error would
+  reintroduce the disclosure one property further down, through `detail`.
+- `toSafeQueryError(error, operation)` replaces a `DrizzleQueryError` and
+  **returns everything else by identity**. That pass-through is required, not
+  lax: `redirect()` and `notFound()` are implemented as thrown values, and
+  Drizzle's own `TransactionRollbackError` is not a `DrizzleQueryError` and must
+  keep reaching the transaction that expects it. An already-sanitized error is
+  also returned unchanged, so a nested data-layer call keeps the innermost
+  label.
+- Every property read of the caught object — including the read of `cause`
+  itself — is inside a `try`, so a getter that throws cannot turn a sanitized
+  failure into a worse one.
+- `withSafeQueryErrors(operation, fn)` preserves the wrapped function's
+  parameter and return types exactly, optional and defaulted parameters
+  included. Every wrapper rethrows; none swallows.
+
+**Applied at the data layer, which is the boundary AGENTS.md §6.2 already
+draws** — nothing outside `lib/db/` talks to the database — so the guarantee
+holds for a consumer written later that knows nothing about this file. All 89
+exported async functions in the twelve modules are wrapped. The one exported
+function that is **not** is `buildFactorResolver` in `emission-queries.ts`: it
+is synchronous, takes already-read rows and performs no I/O, so it cannot raise
+a query error.
+
+**And at the auth catch-all**, because Better Auth's adapter queries bypass
+`lib/db/` entirely — the database-backed rate limiter's `consume` is one of
+them, and it is the path prompt 79 measured.
+
+### Two alternatives, considered and rejected
+
+- **A `util.inspect.custom` method on `DrizzleQueryError.prototype`.** One file,
+  no churn, and it would cover the production printer, which ends at
+  `console.error(prefix, err)`. Rejected because `message` and `stack` are own
+  properties set in the constructor, so a prototype hook neutralises neither,
+  and anything reading `err.message` — the dev printer, a future reporter —
+  still sees the parameters. A global monkey-patch on a third party's class that
+  is *nearly* complete is worse than an explicit boundary.
+- **Moving Better Auth's rate limiter off the database**
+  (`rateLimit.storage: "secondary-storage"`, which the
+  `better-auth-security-best-practices` skill documents and for which this repo
+  already has Upstash). Rejected as a fix: it removes one query that carries an
+  IP, not the mechanism, and it changes the shipped limiter's behaviour under
+  cover of a logging change — the same objection prompt 79 recorded against
+  setting `level`.
+
+### The fault matrix
+
+Two clean trees were built and started on an unused local port — `git archive HEAD`
+for the parent, a `tar` of the working tree for the implementation, both with
+`.claude/`, `.agents/` and every `.env*` file removed so the two sides read the
+same environment. Each ran against a fake loopback database URL, a local
+`BETTER_AUTH_URL`, a test-only 44-character secret and a test-only cron secret.
+No real secret was read or printed.
+
+The fault is injected by a minimal Postgres wire-protocol stub held outside the
+repository — it accepts any startup packet and answers each statement with
+either an empty success or an `ErrorResponse` carrying SQLSTATE `57P01`. It is
+uncommitted and adds no dependency, route or environment flag. Two modes were
+run, because they reach different code:
+
+- **targeted** — only statements naming the session relation fail, which is
+  prompt 78's intermittent condition;
+- **total outage** — every statement fails, which is the mode prompt 79's record
+  measured 60 framework error blocks in.
+
+Seven requests per run, identical on both sides: the marketing home page; the
+auth catch-all with a **signed** forged session cookie (`better-call` verifies
+an HMAC-SHA256 over the value before the lookup reaches the database, so an
+unsigned forgery would prove nothing — the signature was computed with the
+probe's own test-only secret); a `/dashboard` Server Component render with the
+same cookie; both cron sweeps with their bearer secret; the report export route,
+which has no catch of its own; and the newsletter one-click unsubscribe.
+
+| measurement | parent | implementation |
+| --- | --- | --- |
+| **production, targeted** — statuses and bodies | 200 / 500 / 200 / 200 / 503 / 500 / 200 | identical |
+| `Failed query` · `params:` occurrences | 0 · 0 | 0 · 0 |
+| server log lines | 24 | 24 |
+| **production, total outage** — statuses and bodies | 200 / 500 / 200 / 500 / 503 / 500 / 200 | identical |
+| `Failed query` occurrences | **2** | **0** |
+| `params:` occurrences | **4** | **0** |
+| forged-cookie sentinel occurrences | 0 | 0 |
+| fake database user / password / name occurrences | 0 | 0 |
+| server log lines | 98 | 42 |
+| sanitized replacements | none — the type did not exist | **2**, `operation: auth-handler.GET` and `operation: organization-queries.listAllOrganizationIds`, each with `sqlState: '57P01'` |
+| **dev, total outage** — statuses and bodies | as above | identical |
+| `Failed query` · `params:` occurrences | **2** · **4** | **0** · **0** |
+| server log lines | 106 | 64 |
+
+Response bodies were compared byte for byte after normalising the per-build
+script id and chunk names; the two HTML bodies are identical under that
+normalisation, and the five non-HTML bodies are identical outright.
+
+**The two parent disclosures, and what each one proves.** The first is Better
+Auth's rate limiter on the auth catch-all — `select … from "rate_limit" where
+"rate_limit"."key" = $1`, with `params: 127.0.0.1|/get-session,100`. That
+parameter is the **client IP address**, which is exactly the finding prompt 79
+left open, and it is disclosed on a path that no `lib/db/` wrapper can reach.
+The second is `organization-queries.listAllOrganizationIds` escaping the nightly
+recalculation sweep, whose route awaits it outside any catch — a `lib/db/` call
+reaching the framework printer from a route handler. Between them the two cover
+both halves of this change.
+
+**The targeted run is clean on both sides, and that is prompt 79's result, not
+this one's.** With only the session relation failing, Better Auth's own catch
+turns the error into an `APIError` and the safe logger prints an event code, so
+nothing leaks on either side. It is recorded because a run that shows no
+difference is evidence about scope: this change is not what stops that path
+disclosing.
+
+**Dev is closed too, and that was measured rather than assumed.** Dev prints
+through `bundlerService.logErrorWithOriginalStack`
+(`node_modules/next/dist/server/dev/next-dev-server.js:451-453`), a different
+printer from `_log.error`, and on the parent it printed **more** than
+production: the message, the source frame, and then `query:` and `params:` again
+as inspected own properties, plus the `[cause]` chain. All of it is gone on the
+implementation side.
+
+**One observation outside this change's scope, recorded rather than fixed.** The
+dev server's request log prints the request line, so a one-click unsubscribe
+URL's `?token=` value appears there once — on both sides, on the parent as well.
+It is Next's own dev-only request logging of a value the client supplied in the
+URL, not an error path, and closing it is a different change.
+
+**The export route was left unwrapped, deliberately and on the measurement.**
+The prompt said to wrap only what a measurement shows can print. Its two
+database reads — `getMembership` through `getCurrentMembership`, and
+`getReport` — are both wrapped `lib/db/` exports, and neither is reachable
+without a session, so with the database failing it answers before it queries.
+What escapes it is Better Auth's `APIError`, which carries no query and no
+parameters. The three cron and newsletter handlers were checked the same way:
+each reaches the database only through `lib/db/`.
+
+### The direct fault probe
+
+`toSafeQueryError` and `withSafeQueryErrors` were exercised in a temporary,
+uncommitted probe: a `DrizzleQueryError` carrying distinct sentinels in its
+message, its stack, its `query`, its `params` and its `cause`; a `pg`-shaped
+cause whose `detail` holds an address-shaped sentinel; eight malformed SQLSTATE
+values; a cause whose `code` getter records that it was read and then throws; an
+already-sanitized error; a plain `Error`; a `TypeError`; a self-referencing
+object; an object with a throwing getter; a Next `redirect()` signal; and a
+number, a string, `null` and `undefined`.
+
+**45 assertions, all passing**, exit 0. Every non-Drizzle input came back by
+identity — the redirect signal with its `NEXT_REDIRECT` digest intact — and the
+pass-through getter was never read. Every Drizzle input produced a
+`DatabaseQueryError` whose own properties are exactly `message`, `name`,
+`operation`, `sqlState` and `stack`, with **zero** sentinels across
+`util.inspect`, `String()`, `.message`, `.stack` and a `JSON.stringify` over all
+own property names. The valid SQLSTATE survived; all eight malformed ones were
+dropped; the original cause was left unmutated, since it is discarded rather
+than edited.
+
+**One probe-harness artefact worth knowing.** Under `tsx` the repository's
+modules load as CommonJS while a `.mts` probe is ESM, so the probe had to import
+`DrizzleQueryError` from `drizzle-orm/index.cjs` to compare against the same
+class object. That is a property of the probe harness, not of the application:
+the fault matrix above is the evidence that `instanceof` resolves correctly in
+the real Next runtime, since the conversion happened there.
+
+### Prerender impact
+
+`none — no route markup or render-mode changes`, verified rather than assumed.
+The comparison was run after this section and the prompt file were on disk, so
+Tailwind v4's scan of `docs/` and `prompts/` prose is included on the
+implementation side. `docs/automation.md`'s clean two-build procedure, with
+`.claude/`, `.agents/` and every `.env*` file removed from both sides and the
+build id, JavaScript and CSS chunk names and inline RSC transport normalised:
+
+| measurement | result |
+| --- | --- |
+| prerendered HTML files | **21** on each side, same set |
+| differing after normalisation | **0 of 21** |
+| compiled CSS | **68,506 → 68,506 bytes** |
+| CSS rules added / removed | **0 / 0** |
+| route table | identical, and byte-identical including every First Load JS figure — the wrapper is server-only and reaches no client bundle |
+
+**Remeasure the parent; do not carry a number forward.** Prompt 79's record puts
+its clean base at 68,506 bytes, at a different commit.
+
+### Trust boundary
+
+No new request path, and no change to an existing one. The browser-to-server
+boundary remains Better Auth's catch-all handler, the four other route handlers
+and the Server Actions, each with its existing authorisation. Status, body and
+cookie behaviour are unchanged, proven by the identical columns above.
+
+The boundary this change adds is between a thrown database error and the server
+log. What crosses it is a caught error object; what is emitted is a fixed
+message plus two non-personal fields. No `NODE_ENV` or E2E conditional, no
+test-only route, no `disableCSRFCheck`, no auth fallback and no swallowed error:
+every wrapper rethrows, and the error still propagates.
+
+### Secrets and data
+
+No new environment variable, no `.env.example` change, no `NEXT_PUBLIC_*`, no
+additional secret read, no model call. The change **removes** personal data from
+the logs — the bound parameters it stops printing include client IP addresses,
+email addresses, user and organisation ids, session tokens and blob references.
+Nothing is added to any store.
+
+The probe and the fault matrix used only fake loopback credentials, a test-only
+Better Auth secret, a test-only cron secret and non-secret sentinels. No value
+from prompt 78's incident, and no real address, token or row, appears in code,
+tests, transcripts or this record.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, exit 0 |
+| `npm run typecheck` | clean, exit 0 |
+| type-preservation probe | a wrong argument type, a missing argument and a wrong return type are all still errors through the wrapper; a defaulted parameter stays optional |
+| `npm test` | **10 files, 215 tests passed**, unchanged |
+| direct fault probe | **45 assertions passed**, exit 0 |
+| production fault matrix, total outage | `Failed query` **2 → 0**, `params:` **4 → 0**, statuses and bodies identical |
+| dev fault matrix, total outage | `Failed query` **2 → 0**, `params:` **4 → 0**, statuses and bodies identical |
+| `npm run build` | exit 0, compiled in 8.2 s, 32/32 static pages |
+| route table | identical to the parent build, diffed line by line |
+| prerender/CSS comparison | **0 of 21** HTML files differed; CSS **68,506 → 68,506** bytes, **0 rules added / 0 removed** |
+| `npm run test:e2e:local -- --workers=1` | **98 passed in 6.8 min**, Chromium + Firefox, exit 0. Teardown reported `rate_limit` rows 3 before and 3 after |
+| `npm run test:e2e:webkit` | did not run: `Podman is required for WebKit on Arch Linux.` `podman` is not installed here. Environment gap, not a pass — unchanged from prompts 78 and 79 |
+| `npm run db:generate` | not run; the schema is untouched |
+
 ## Provider-free fuzzy factor matching, prompt 76
 
 Prompt 75 reached its first Vercel AI Gateway embedding request and received

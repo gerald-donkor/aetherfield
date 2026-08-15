@@ -5,6 +5,7 @@ import { and, count, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { user } from "./auth-schema";
 import { getDb } from "./client";
 import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
+import { withSafeQueryErrors } from "./query-error";
 
 export type StaffRole = "staff" | "admin";
 
@@ -12,7 +13,12 @@ export type StaffRole = "staff" | "admin";
  * Roles are authorization data, so they are read from Postgres on every
  * protected request rather than trusted from Better Auth's session payload.
  */
-export async function getStaffRole(
+export const getStaffRole = withSafeQueryErrors(
+  "auth-queries.getStaffRole",
+  getStaffRoleImpl,
+);
+
+async function getStaffRoleImpl(
   userId: string,
 ): Promise<StaffRole | null> {
   const [record] = await getDb()
@@ -35,7 +41,12 @@ export type ListedAccount = {
   createdAt: Date;
 };
 
-export async function listVerifiedAccounts(
+export const listVerifiedAccounts = withSafeQueryErrors(
+  "auth-queries.listVerifiedAccounts",
+  listVerifiedAccountsImpl,
+);
+
+async function listVerifiedAccountsImpl(
   page: number,
 ): Promise<ListedAccount[]> {
   return getDb()
@@ -54,7 +65,12 @@ export async function listVerifiedAccounts(
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export async function countVerifiedAccounts(): Promise<number> {
+export const countVerifiedAccounts = withSafeQueryErrors(
+  "auth-queries.countVerifiedAccounts",
+  countVerifiedAccountsImpl,
+);
+
+async function countVerifiedAccountsImpl(): Promise<number> {
   const [row] = await getDb()
     .select({ count: count() })
     .from(user)
@@ -66,7 +82,12 @@ export async function countVerifiedAccounts(): Promise<number> {
  * Grants or revokes staff only. The WHERE is the authority for every guard:
  * no self-change, no admin/unknown-role target, and no unverified target.
  */
-export async function setStaffRole({
+export const setStaffRole = withSafeQueryErrors(
+  "auth-queries.setStaffRole",
+  setStaffRoleImpl,
+);
+
+async function setStaffRoleImpl({
   actorId,
   targetId,
   role,

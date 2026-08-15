@@ -4,6 +4,7 @@ import { and, count, desc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "./client";
 import { lead, type NewLead } from "./schema";
+import { withSafeQueryErrors } from "./query-error";
 
 export const SUBMISSIONS_PAGE_SIZE = 20;
 
@@ -30,7 +31,12 @@ export type ListedLead = {
  * the Resend idempotency key (`demo-request-confirmation/<id>`), so two
  * genuine requests key differently and a retry of one cannot double-send.
  */
-export async function insertLead(values: NewLead): Promise<string> {
+export const insertLead = withSafeQueryErrors(
+  "lead-queries.insertLead",
+  insertLeadImpl,
+);
+
+async function insertLeadImpl(values: NewLead): Promise<string> {
   const [row] = await getDb()
     .insert(lead)
     .values(values)
@@ -38,7 +44,12 @@ export async function insertLead(values: NewLead): Promise<string> {
   return row.id;
 }
 
-export async function listLeads(page: number): Promise<ListedLead[]> {
+export const listLeads = withSafeQueryErrors(
+  "lead-queries.listLeads",
+  listLeadsImpl,
+);
+
+async function listLeadsImpl(page: number): Promise<ListedLead[]> {
   return getDb()
     .select({
       id: lead.id,
@@ -56,7 +67,12 @@ export async function listLeads(page: number): Promise<ListedLead[]> {
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export async function countLeads(): Promise<number> {
+export const countLeads = withSafeQueryErrors(
+  "lead-queries.countLeads",
+  countLeadsImpl,
+);
+
+async function countLeadsImpl(): Promise<number> {
   const [row] = await getDb()
     .select({ count: count() })
     .from(lead)
@@ -65,7 +81,12 @@ export async function countLeads(): Promise<number> {
 }
 
 /** Returns false for an unknown or already removed row. */
-export async function softDeleteLead(id: string): Promise<boolean> {
+export const softDeleteLead = withSafeQueryErrors(
+  "lead-queries.softDeleteLead",
+  softDeleteLeadImpl,
+);
+
+async function softDeleteLeadImpl(id: string): Promise<boolean> {
   const [row] = await getDb()
     .update(lead)
     .set({ deletedAt: new Date() })

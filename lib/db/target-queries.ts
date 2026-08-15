@@ -17,6 +17,7 @@ import type {
   TargetCoverage,
   TargetStatus,
 } from "../validation/targets";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * Every read and write of `emission_target` — build step 11.
@@ -110,7 +111,12 @@ function visible(organizationId: string) {
   );
 }
 
-export async function createTarget(target: NewTarget): Promise<{ id: string }> {
+export const createTarget = withSafeQueryErrors(
+  "target-queries.createTarget",
+  createTargetImpl,
+);
+
+async function createTargetImpl(target: NewTarget): Promise<{ id: string }> {
   const [row] = await getDb()
     .insert(emissionTarget)
     .values(target)
@@ -126,7 +132,12 @@ export async function createTarget(target: NewTarget): Promise<{ id: string }> {
  * said it would do, and hiding it from the workspace that produced it would be
  * a quieter kind of deletion than the one `deleted_at` is for.
  */
-export async function listTargets(
+export const listTargets = withSafeQueryErrors(
+  "target-queries.listTargets",
+  listTargetsImpl,
+);
+
+async function listTargetsImpl(
   organizationId: string,
 ): Promise<ListedTarget[]> {
   return getDb()
@@ -137,7 +148,12 @@ export async function listTargets(
 }
 
 /** One target, or `null` — which is also the answer for another tenant's id. */
-export async function getTarget(
+export const getTarget = withSafeQueryErrors(
+  "target-queries.getTarget",
+  getTargetImpl,
+);
+
+async function getTargetImpl(
   id: string,
   organizationId: string,
 ): Promise<ListedTarget | null> {
@@ -158,7 +174,12 @@ export async function getTarget(
  * what tells "already retired" apart from "not yours" without either answer
  * leaking the other.
  */
-export async function retireTarget(
+export const retireTarget = withSafeQueryErrors(
+  "target-queries.retireTarget",
+  retireTargetImpl,
+);
+
+async function retireTargetImpl(
   id: string,
   organizationId: string,
 ): Promise<{ status: "retired" | "already-retired" | "not-found" }> {
@@ -190,7 +211,12 @@ export async function retireTarget(
  * approval); revisiting that boundary against real tenant volume is a future
  * scale judgement, not something to pre-optimise here.
  */
-export async function readTargetEvidence(
+export const readTargetEvidence = withSafeQueryErrors(
+  "target-queries.readTargetEvidence",
+  readTargetEvidenceImpl,
+);
+
+async function readTargetEvidenceImpl(
   organizationId: string,
 ): Promise<TargetEvidence> {
   const [rows, uncalculatedRecords] = await Promise.all([

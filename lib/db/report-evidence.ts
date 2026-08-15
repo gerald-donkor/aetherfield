@@ -16,6 +16,7 @@ import { selectDashboardTarget } from "../domain/dashboard";
 import type { RecordEmission } from "../domain/emissions";
 import type { ReportTargetInput } from "../domain/reports";
 import type { ReportEvidence, ReportPeriod } from "../validation/reports";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * The report snapshot's **named evidence seam** — build step 13.
@@ -65,7 +66,12 @@ export type ReportEvidenceRead = {
  * report's own period. That remains the step-11 **judgement** about in-memory
  * scale, not a measured production limit.
  */
-export async function readReportEvidence(
+export const readReportEvidence = withSafeQueryErrors(
+  "report-evidence.readReportEvidence",
+  readReportEvidenceImpl,
+);
+
+async function readReportEvidenceImpl(
   organizationId: string,
   period: ReportPeriod,
   asOf: string,

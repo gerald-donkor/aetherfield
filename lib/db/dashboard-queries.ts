@@ -12,6 +12,7 @@ import { activityRecord } from "./schema";
 import { listTargets } from "./target-queries";
 import { getDb } from "./client";
 import type { EnergyInput } from "../domain/dashboard";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * The complete read-only evidence set for `/dashboard`.
@@ -21,7 +22,12 @@ import type { EnergyInput } from "../domain/dashboard";
  * all-emissions read remains an in-memory scale judgement until real tenant
  * volume supplies a measured reason to replace it.
  */
-export async function readDashboardEvidence(organizationId: string) {
+export const readDashboardEvidence = withSafeQueryErrors(
+  "dashboard-queries.readDashboardEvidence",
+  readDashboardEvidenceImpl,
+);
+
+async function readDashboardEvidenceImpl(organizationId: string) {
   const [
     emissions,
     uncalculatedRecords,

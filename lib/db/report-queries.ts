@@ -5,6 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "./client";
 import { report } from "./schema";
 import type { ReportNarrativeStatus } from "../validation/reports";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * Every read and write of `report` — build step 13.
@@ -94,7 +95,12 @@ function visible(organizationId: string) {
   );
 }
 
-export async function createReport(row: NewReportRow): Promise<{ id: string }> {
+export const createReport = withSafeQueryErrors(
+  "report-queries.createReport",
+  createReportImpl,
+);
+
+async function createReportImpl(row: NewReportRow): Promise<{ id: string }> {
   const [created] = await getDb()
     .insert(report)
     .values(row)
@@ -103,7 +109,12 @@ export async function createReport(row: NewReportRow): Promise<{ id: string }> {
 }
 
 /** Every report this organisation holds, newest first. */
-export async function listReports(
+export const listReports = withSafeQueryErrors(
+  "report-queries.listReports",
+  listReportsImpl,
+);
+
+async function listReportsImpl(
   organizationId: string,
 ): Promise<ListedReport[]> {
   return getDb()
@@ -114,7 +125,12 @@ export async function listReports(
 }
 
 /** One report, or `null` — which is also the answer for another tenant's id. */
-export async function getReport(
+export const getReport = withSafeQueryErrors(
+  "report-queries.getReport",
+  getReportImpl,
+);
+
+async function getReportImpl(
   id: string,
   organizationId: string,
 ): Promise<StoredReport | null> {
@@ -138,7 +154,12 @@ export async function getReport(
  * The `WHERE` carries the tenant and the id, so a cross-tenant id matches no row
  * and is reported as not-found.
  */
-export async function setReportNarrative(
+export const setReportNarrative = withSafeQueryErrors(
+  "report-queries.setReportNarrative",
+  setReportNarrativeImpl,
+);
+
+async function setReportNarrativeImpl(
   id: string,
   organizationId: string,
   outcome:
@@ -179,7 +200,12 @@ export async function setReportNarrative(
  * removal is one `deleted_at` write with an audit trail rather than a cascade —
  * and every read above already filters on it.
  */
-export async function deleteReport(
+export const deleteReport = withSafeQueryErrors(
+  "report-queries.deleteReport",
+  deleteReportImpl,
+);
+
+async function deleteReportImpl(
   id: string,
   organizationId: string,
 ): Promise<{ status: "deleted" | "not-found" }> {

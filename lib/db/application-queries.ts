@@ -5,6 +5,7 @@ import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "./client";
 import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
 import { application, type NewApplication } from "./schema";
+import { withSafeQueryErrors } from "./query-error";
 
 export type ListedApplication = {
   id: string;
@@ -35,7 +36,12 @@ export type ListedApplication = {
  * `notNull`, so the blob `put()` precedes this call, and a failure here is what
  * `deleteCv()` compensates for (AGENTS.md 10 stage e).
  */
-export async function insertApplication(
+export const insertApplication = withSafeQueryErrors(
+  "application-queries.insertApplication",
+  insertApplicationImpl,
+);
+
+async function insertApplicationImpl(
   values: NewApplication,
 ): Promise<string> {
   const [row] = await getDb()
@@ -45,7 +51,12 @@ export async function insertApplication(
   return row.id;
 }
 
-export async function listApplications(
+export const listApplications = withSafeQueryErrors(
+  "application-queries.listApplications",
+  listApplicationsImpl,
+);
+
+async function listApplicationsImpl(
   page: number,
 ): Promise<ListedApplication[]> {
   return getDb()
@@ -65,7 +76,12 @@ export async function listApplications(
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export async function countApplications(): Promise<number> {
+export const countApplications = withSafeQueryErrors(
+  "application-queries.countApplications",
+  countApplicationsImpl,
+);
+
+async function countApplicationsImpl(): Promise<number> {
   const [row] = await getDb()
     .select({ count: count() })
     .from(application)
@@ -73,7 +89,12 @@ export async function countApplications(): Promise<number> {
   return row.count;
 }
 
-export async function getLiveApplicationCv(id: string) {
+export const getLiveApplicationCv = withSafeQueryErrors(
+  "application-queries.getLiveApplicationCv",
+  getLiveApplicationCvImpl,
+);
+
+async function getLiveApplicationCvImpl(id: string) {
   const [row] = await getDb()
     .select({
       pathname: application.cvPathname,
@@ -90,7 +111,12 @@ export type RemovedApplication = {
   removedAt: Date;
 };
 
-export async function softDeleteApplication(
+export const softDeleteApplication = withSafeQueryErrors(
+  "application-queries.softDeleteApplication",
+  softDeleteApplicationImpl,
+);
+
+async function softDeleteApplicationImpl(
   id: string,
 ): Promise<RemovedApplication | null> {
   const removedAt = new Date();
@@ -103,7 +129,12 @@ export async function softDeleteApplication(
 }
 
 /** Restores only the exact removal this request made. */
-export async function restoreApplicationRemoval(
+export const restoreApplicationRemoval = withSafeQueryErrors(
+  "application-queries.restoreApplicationRemoval",
+  restoreApplicationRemovalImpl,
+);
+
+async function restoreApplicationRemovalImpl(
   id: string,
   removedAt: Date,
 ): Promise<boolean> {

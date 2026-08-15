@@ -5,6 +5,7 @@ import { and, asc, eq, gt, isNotNull, isNull, lte } from "drizzle-orm";
 import { invitation, member, organization, user } from "./auth-schema";
 import { getDb } from "./client";
 import { activityImport, organizationDeletion } from "./schema";
+import { withSafeQueryErrors } from "./query-error";
 
 /**
  * The tenant-scope primitive (AGENTS.md 9.2 rule 6).
@@ -84,7 +85,12 @@ function toMembership(row: {
  * reading anything scoped to `organizationId`, and no other condition — not a
  * staff role, not an admin role — substitutes for it (AGENTS.md 11).
  */
-export async function getMembership(
+export const getMembership = withSafeQueryErrors(
+  "organization-queries.getMembership",
+  getMembershipImpl,
+);
+
+async function getMembershipImpl(
   userId: string,
   organizationId: string,
 ): Promise<Membership | null> {
@@ -108,7 +114,12 @@ export async function getMembership(
  * every render, and so the single-membership fallback in
  * `lib/auth/organization.ts` is deterministic.
  */
-export async function listMembershipsForUser(
+export const listMembershipsForUser = withSafeQueryErrors(
+  "organization-queries.listMembershipsForUser",
+  listMembershipsForUserImpl,
+);
+
+async function listMembershipsForUserImpl(
   userId: string,
 ): Promise<Membership[]> {
   const rows = await getDb()
@@ -146,7 +157,12 @@ export async function listMembershipsForUser(
  * workspace they have asked to have removed. The exclusion is here rather than
  * in the sweep so it cannot be forgotten by a later caller.
  */
-export async function listAllOrganizationIds(): Promise<string[]> {
+export const listAllOrganizationIds = withSafeQueryErrors(
+  "organization-queries.listAllOrganizationIds",
+  listAllOrganizationIdsImpl,
+);
+
+async function listAllOrganizationIdsImpl(): Promise<string[]> {
   const rows = await getDb()
     .select({ id: organization.id })
     .from(organization)
@@ -192,7 +208,12 @@ export type OrganizationMember = {
  *
  * Ordered stably so the roster does not reshuffle between renders.
  */
-export async function listMembersForOrganization(
+export const listMembersForOrganization = withSafeQueryErrors(
+  "organization-queries.listMembersForOrganization",
+  listMembersForOrganizationImpl,
+);
+
+async function listMembersForOrganizationImpl(
   organizationId: string,
 ): Promise<OrganizationMember[]> {
   return getDb()
@@ -229,7 +250,12 @@ export type PendingInvitation = {
  * Tenant-predicated on the resolved organisation id, as
  * `listMembersForOrganization` above is and for the same reason.
  */
-export async function listPendingInvitations(
+export const listPendingInvitations = withSafeQueryErrors(
+  "organization-queries.listPendingInvitations",
+  listPendingInvitationsImpl,
+);
+
+async function listPendingInvitationsImpl(
   organizationId: string,
   now: Date = new Date(),
 ): Promise<PendingInvitation[]> {
@@ -292,7 +318,12 @@ export type InvitationForLink = {
  * which leaves a page with nothing true to say). Deciding what may be *shown*
  * from this row is the page's job, not this layer's.
  */
-export async function getInvitationForLink(
+export const getInvitationForLink = withSafeQueryErrors(
+  "organization-queries.getInvitationForLink",
+  getInvitationForLinkImpl,
+);
+
+async function getInvitationForLinkImpl(
   invitationId: string,
   now: Date = new Date(),
 ): Promise<InvitationForLink | null> {
@@ -329,7 +360,12 @@ export async function getInvitationForLink(
  * between the two still ends at the constraint, which is why the action also
  * handles the violation.
  */
-export async function getOrganizationBySlug(
+export const getOrganizationBySlug = withSafeQueryErrors(
+  "organization-queries.getOrganizationBySlug",
+  getOrganizationBySlugImpl,
+);
+
+async function getOrganizationBySlugImpl(
   slug: string,
 ): Promise<{ id: string; name: string; slug: string } | null> {
   const [record] = await getDb()
@@ -360,7 +396,12 @@ export async function getOrganizationBySlug(
  *
  * Tenant-predicated on the resolved organisation id, as every read here is.
  */
-export async function listOwnerEmails(
+export const listOwnerEmails = withSafeQueryErrors(
+  "organization-queries.listOwnerEmails",
+  listOwnerEmailsImpl,
+);
+
+async function listOwnerEmailsImpl(
   organizationId: string,
 ): Promise<{ email: string }[]> {
   return getDb()
@@ -392,7 +433,12 @@ const pendingColumns = {
 } as const;
 
 /** One organisation's open deletion request, or `null`. Tenant-predicated. */
-export async function getPendingDeletion(
+export const getPendingDeletion = withSafeQueryErrors(
+  "organization-queries.getPendingDeletion",
+  getPendingDeletionImpl,
+);
+
+async function getPendingDeletionImpl(
   organizationId: string,
 ): Promise<PendingDeletionRow | null> {
   const [row] = await getDb()
@@ -421,7 +467,12 @@ export async function getPendingDeletion(
  * Every value written here was resolved server-side by the caller from a
  * membership row — nothing on this path comes from a request.
  */
-export async function createDeletionRequest(input: {
+export const createDeletionRequest = withSafeQueryErrors(
+  "organization-queries.createDeletionRequest",
+  createDeletionRequestImpl,
+);
+
+async function createDeletionRequestImpl(input: {
   organizationId: string;
   organizationName: string;
   organizationSlug: string;
@@ -451,7 +502,12 @@ export async function createDeletionRequest(input: {
  * row that is already cancelled, and a purged row can never be "restored" into
  * a workspace that no longer exists. Returns whether a row moved.
  */
-export async function cancelDeletionRequest(
+export const cancelDeletionRequest = withSafeQueryErrors(
+  "organization-queries.cancelDeletionRequest",
+  cancelDeletionRequestImpl,
+);
+
+async function cancelDeletionRequestImpl(
   organizationId: string,
   cancelledBy: string,
   now: Date = new Date(),
@@ -482,7 +538,12 @@ export async function cancelDeletionRequest(
  *
  * Ordered stably so an interrupted sweep resumes over the same sequence.
  */
-export async function listDueDeletions(
+export const listDueDeletions = withSafeQueryErrors(
+  "organization-queries.listDueDeletions",
+  listDueDeletionsImpl,
+);
+
+async function listDueDeletionsImpl(
   now: Date = new Date(),
 ): Promise<PendingDeletionRow[]> {
   return getDb()
@@ -503,7 +564,12 @@ export async function listDueDeletions(
 /** The audit row's final state. It is not deleted: it is the only remaining
     evidence the organisation existed, which is the point of AGENTS.md 9.2
     rule 5's audit trail. */
-export async function markDeletionPurged(
+export const markDeletionPurged = withSafeQueryErrors(
+  "organization-queries.markDeletionPurged",
+  markDeletionPurgedImpl,
+);
+
+async function markDeletionPurgedImpl(
   deletionId: string,
   now: Date = new Date(),
 ): Promise<void> {
@@ -521,7 +587,12 @@ export async function markDeletionPurged(
  * message: a driver or provider error can quote a customer's data, and this
  * column is read by us (AGENTS.md 8.3 rule 2). The sweep passes a fixed string.
  */
-export async function recordDeletionPurgeError(
+export const recordDeletionPurgeError = withSafeQueryErrors(
+  "organization-queries.recordDeletionPurgeError",
+  recordDeletionPurgeErrorImpl,
+);
+
+async function recordDeletionPurgeErrorImpl(
   deletionId: string,
   reason: string,
 ): Promise<void> {
@@ -544,7 +615,12 @@ export async function recordDeletionPurgeError(
  * Soft-deleted imports are **included**: a discarded import's blob is still a
  * customer's file in storage, and erasure means erasure.
  */
-export async function listImportBlobPathnames(
+export const listImportBlobPathnames = withSafeQueryErrors(
+  "organization-queries.listImportBlobPathnames",
+  listImportBlobPathnamesImpl,
+);
+
+async function listImportBlobPathnamesImpl(
   organizationId: string,
 ): Promise<{ id: string; blobPathname: string }[]> {
   const rows = await getDb()
@@ -574,7 +650,12 @@ export async function listImportBlobPathnames(
  * on the organisation as well as the import id, so the statement cannot reach
  * another tenant's row even if a caller passed the wrong id.
  */
-export async function clearImportBlobPathname(
+export const clearImportBlobPathname = withSafeQueryErrors(
+  "organization-queries.clearImportBlobPathname",
+  clearImportBlobPathnameImpl,
+);
+
+async function clearImportBlobPathnameImpl(
   organizationId: string,
   importId: string,
 ): Promise<void> {
@@ -602,7 +683,12 @@ export async function clearImportBlobPathname(
  * **`organization_deletion` is not among them**, by construction: it carries no
  * foreign key, which is what lets the audit row outlive the row it describes.
  */
-export async function deleteOrganizationRow(
+export const deleteOrganizationRow = withSafeQueryErrors(
+  "organization-queries.deleteOrganizationRow",
+  deleteOrganizationRowImpl,
+);
+
+async function deleteOrganizationRowImpl(
   organizationId: string,
 ): Promise<void> {
   await getDb().delete(organization).where(eq(organization.id, organizationId));

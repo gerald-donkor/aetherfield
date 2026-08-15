@@ -18,6 +18,7 @@ import {
 import { getDb } from "./client";
 import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
 import { subscriber } from "./schema";
+import { withSafeQueryErrors } from "./query-error";
 
 export type ListedSubscriber = {
   id: string;
@@ -106,7 +107,12 @@ export type SubscribeOutcome =
  * and rotating it would break the unsubscribe link in every message already
  * delivered to that person.
  */
-export async function upsertSubscriber(email: string): Promise<SubscribeOutcome> {
+export const upsertSubscriber = withSafeQueryErrors(
+  "subscriber-queries.upsertSubscriber",
+  upsertSubscriberImpl,
+);
+
+async function upsertSubscriberImpl(email: string): Promise<SubscribeOutcome> {
   const [row] = await getDb()
     .insert(subscriber)
     .values({
@@ -168,7 +174,12 @@ export type ConfirmOutcome =
  * why — and that read is not an oracle: it answers only to someone already
  * holding a 32-byte token, and it never sees an address.
  */
-export async function confirmSubscriberByToken(
+export const confirmSubscriberByToken = withSafeQueryErrors(
+  "subscriber-queries.confirmSubscriberByToken",
+  confirmSubscriberByTokenImpl,
+);
+
+async function confirmSubscriberByTokenImpl(
   token: string,
 ): Promise<ConfirmOutcome> {
   const db = getDb();
@@ -230,7 +241,12 @@ export type UnsubscribeOutcome =
  * are certainly not receiving mail, and telling them their token is unknown
  * would be both alarming and false.
  */
-export async function unsubscribeByToken(
+export const unsubscribeByToken = withSafeQueryErrors(
+  "subscriber-queries.unsubscribeByToken",
+  unsubscribeByTokenImpl,
+);
+
+async function unsubscribeByTokenImpl(
   token: string,
 ): Promise<UnsubscribeOutcome> {
   const db = getDb();
@@ -258,7 +274,12 @@ export async function unsubscribeByToken(
   return existing ? { state: "already-unsubscribed" } : { state: "unknown" };
 }
 
-export async function listSubscribers(
+export const listSubscribers = withSafeQueryErrors(
+  "subscriber-queries.listSubscribers",
+  listSubscribersImpl,
+);
+
+async function listSubscribersImpl(
   page: number,
 ): Promise<ListedSubscriber[]> {
   return getDb()
@@ -278,7 +299,12 @@ export async function listSubscribers(
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export async function countSubscribers(): Promise<number> {
+export const countSubscribers = withSafeQueryErrors(
+  "subscriber-queries.countSubscribers",
+  countSubscribersImpl,
+);
+
+async function countSubscribersImpl(): Promise<number> {
   const [row] = await getDb()
     .select({ count: count() })
     .from(subscriber)
@@ -287,7 +313,12 @@ export async function countSubscribers(): Promise<number> {
 }
 
 /** Tokens never enter either the select above or this handled outcome. */
-export async function softDeleteSubscriber(id: string): Promise<boolean> {
+export const softDeleteSubscriber = withSafeQueryErrors(
+  "subscriber-queries.softDeleteSubscriber",
+  softDeleteSubscriberImpl,
+);
+
+async function softDeleteSubscriberImpl(id: string): Promise<boolean> {
   const [row] = await getDb()
     .update(subscriber)
     .set({ deletedAt: new Date() })
