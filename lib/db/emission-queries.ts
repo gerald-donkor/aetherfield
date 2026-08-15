@@ -30,6 +30,7 @@ import { DEFAULT_FACTOR_MAPPINGS } from "../domain/defra";
 import {
   factorMatchSourceText,
 } from "../domain/factor-match";
+import { factorRowIdentityParts } from "../domain/factor-import";
 import {
   admissibleFactorUnits,
   aggregate,
@@ -156,10 +157,27 @@ async function listFactorSetsImpl(
       licenceUrl: emissionFactorSet.licenceUrl,
       sourceUrl: emissionFactorSet.sourceUrl,
       sourceReference: emissionFactorSet.sourceReference,
+      /**
+       * **A correlated subquery has to qualify both sides by hand, and
+       * Drizzle's column interpolation does not** — found at prompt 82, and it
+       * had been silently answering zero.
+       *
+       * `${emissionFactor.setId}` renders as a bare `"set_id"` inside a raw
+       * `sql` fragment, not as `"emission_factor"."set_id"`, and
+       * `${emissionFactorSet.id}` renders as a bare `"id"`. Inside the
+       * subquery, Postgres resolves both against the innermost scope, so the
+       * predicate became `emission_factor.set_id = emission_factor.id` — never
+       * true, no error, and every set on `/activity/factors` reported **0
+       * active** while the table held thousands of rows.
+       *
+       * Aliasing the inner table and naming the outer one is what makes each
+       * reference unambiguous. The same correction is applied to the two
+       * sibling subqueries below.
+       */
       factorCount: sql<number>`(
-        select count(*)::int from ${emissionFactor}
-        where ${emissionFactor.setId} = ${emissionFactorSet.id}
-          and ${emissionFactor.deletedAt} is null
+        select count(*)::int from ${emissionFactor} f
+        where f.set_id = ${emissionFactorSet}.id
+          and f.deleted_at is null
       )`,
     })
     .from(emissionFactorSet)
@@ -238,11 +256,13 @@ async function listTenantFactorSetsImpl(
       deletedAt: emissionFactorSet.deletedAt,
       /* `and deleted_at is null`, matching `listFactorSets` above. Without it
          `/activity/factors` counted retired rows and `/activity/mappings` did
-         not, so the two surfaces disagreed about the same set. */
+         not, so the two surfaces disagreed about the same set. The aliasing is
+         prompt 82's correction — see `listFactorSets` for what a bare column
+         reference does inside a correlated subquery. */
       factorCount: sql<number>`(
-        select count(*)::int from ${emissionFactor}
-        where ${emissionFactor.setId} = ${emissionFactorSet.id}
-          and ${emissionFactor.deletedAt} is null
+        select count(*)::int from ${emissionFactor} f
+        where f.set_id = ${emissionFactorSet}.id
+          and f.deleted_at is null
       )`,
     })
     .from(emissionFactorSet)
@@ -278,12 +298,15 @@ async function listTenantFactorsImpl(
       region: emissionFactor.region,
       biogenic: emissionFactor.biogenic,
       value: emissionFactor.value,
-      /* One correlated subquery rather than a second round trip per row. */
+      /* One correlated subquery rather than a second round trip per row.
+         Aliased and qualified for the reason `listFactorSets` records: bare
+         column references bound to the inner table and this count answered
+         zero for every row. */
       mappingCount: sql<number>`(
-        select count(*)::int from ${activityFactorMapping}
-        where ${activityFactorMapping.factorId} = ${emissionFactor.id}
-          and ${activityFactorMapping.organizationId} = ${organizationId}
-          and ${activityFactorMapping.deletedAt} is null
+        select count(*)::int from ${activityFactorMapping} m
+        where m.factor_id = ${emissionFactor}.id
+          and m.organization_id = ${organizationId}
+          and m.deleted_at is null
       )`,
       createdAt: emissionFactor.createdAt,
       deletedAt: emissionFactor.deletedAt,
@@ -338,45 +361,28 @@ function normaliseHashPart(value: string | undefined | null): string {
 function sourceRowIdForCustomFactor(
   organizationId: string,
   setId: string,
-  input: CreateCustomFactorInput,
+  factor: TenantFactorInput,
 ): string {
+  /* **The field list moved to `lib/domain/factor-import.ts` at prompt 82** and
+     is imported rather than restated, so the bulk importer's in-file duplicate
+     check and the `(set_id, source_row_id)` unique index this backs agree by
+     construction. The order, the normalisation and the conditional supersession
+     pair are unchanged, so every hash already stored still resolves — a row
+     created before that change re-submits as the idempotent no-op it got
+     before, not as a duplicate. */
   const identity = [
-    organizationId,
-    setId,
-    input.factor.level1,
-    input.factor.level2,
-    input.factor.level3,
-    input.factor.level4,
-    input.factor.columnText,
-    input.factor.publishedUom,
-    input.factor.scope,
-    input.factor.scope3Category,
-    input.factor.scope2Method,
-    input.factor.activityUnit,
-    input.factor.gas,
-    input.factor.ch4Variant,
-    input.factor.gwpSet,
-    input.factor.region,
-    input.factor.biogenic ? "biogenic" : "non-biogenic",
-    input.factor.value,
-  ].map(normaliseHashPart);
-
-  /* **Appended only when declared** (prompt 71). Two rows identical in every
-     other field but restating different published rows are different rows, and
-     without the pair here they collide on `(set_id, source_row_id)` and the
-     `onConflictDoNothing` below discards the second in silence. Appending it
-     unconditionally would instead move the hash of every non-superseding
-     submission, so a row created before this change would re-submit as a
-     duplicate rather than as the idempotent no-op it gets today. */
-  if (input.factor.supersedes) {
-    identity.push(
-      normaliseHashPart(input.factor.supersedes.source),
-      normaliseHashPart(input.factor.supersedes.sourceRowId),
-    );
-  }
+    normaliseHashPart(organizationId),
+    normaliseHashPart(setId),
+    ...factorRowIdentityParts(factor),
+  ];
 
   return `custom:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`;
 }
+
+/** One tenant-owned factor row, as the two write paths carry it. The single
+    form and the bulk importer submit the identical object — `customFactorSchema`
+    parses both — so the row type is the schema's, named once here. */
+type TenantFactorInput = CreateCustomFactorInput["factor"];
 
 /**
  * What a create can answer with besides success.
@@ -412,6 +418,93 @@ export const createTenantFactor = withSafeQueryErrors(
   createTenantFactorImpl,
 );
 
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/**
+ * Resolves the set a write is going into, inside the caller's transaction.
+ *
+ * **Extracted at prompt 82 so the single-row and bulk paths cannot diverge on
+ * it** — this is the whole tenant boundary of the factor write path, and two
+ * copies of it is two places for a predicate to go missing. Behaviour is
+ * unchanged from prompt 67's: an existing id is re-read under the tenant
+ * predicate and a missing, retired or foreign id is one indistinguishable
+ * `set_not_found`; a new set is inserted and the
+ * `(organization_id, source, dataset_version)` collision is answered as
+ * `set_exists` rather than silently reusing the stored set and discarding the
+ * licence the submission carried.
+ */
+async function resolveWritableSet(
+  tx: Tx,
+  organizationId: string,
+  setInput: CreateCustomFactorInput["set"],
+  derivedGasBasis: FactorGasBasis,
+): Promise<
+  | { ok: true; set: { id: string; gasBasis: FactorGasBasis } }
+  | { ok: false; reason: "set_exists" }
+  | { ok: false; reason: "set_not_found" }
+  | { ok: false; reason: "gas_basis_mismatch"; setGasBasis: FactorGasBasis }
+> {
+  let set: { id: string; gasBasis: FactorGasBasis } | undefined;
+
+  if (setInput.mode === "existing") {
+    /* A submitted set id is a claim, not a capability. */
+    [set] = await tx
+      .select({ id: emissionFactorSet.id, gasBasis: emissionFactorSet.gasBasis })
+      .from(emissionFactorSet)
+      .where(
+        and(
+          eq(emissionFactorSet.id, setInput.setId),
+          eq(emissionFactorSet.organizationId, organizationId),
+          isNull(emissionFactorSet.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!set) return { ok: false, reason: "set_not_found" };
+  } else {
+    [set] = await tx
+      .insert(emissionFactorSet)
+      .values({
+        organizationId,
+        source: setInput.source,
+        datasetVersion: setInput.datasetVersion,
+        publicationYear: setInput.publicationYear,
+        effectiveFrom: setInput.effectiveFrom,
+        effectiveTo: setInput.effectiveTo,
+        licence: setInput.licence,
+        licenceUrl: setInput.licenceUrl ?? null,
+        sourceUrl: setInput.sourceUrl ?? null,
+        sourceReference: setInput.sourceReference ?? null,
+        retrievedAt: new Date(),
+        gasBasis: derivedGasBasis,
+        notes: setInput.notes ?? null,
+      })
+      .onConflictDoNothing({
+        target: [
+          emissionFactorSet.organizationId,
+          emissionFactorSet.source,
+          emissionFactorSet.datasetVersion,
+        ],
+        where: sql`${emissionFactorSet.organizationId} is not null`,
+      })
+      .returning({
+        id: emissionFactorSet.id,
+        gasBasis: emissionFactorSet.gasBasis,
+      });
+
+    /* Nothing inserted means the set already exists — including the race
+       where a concurrent submission created it a moment ago, which gets the
+       same answer rather than diverging. */
+    if (!set) return { ok: false, reason: "set_exists" };
+  }
+
+  if (set.gasBasis !== derivedGasBasis) {
+    return { ok: false, reason: "gas_basis_mismatch", setGasBasis: set.gasBasis };
+  }
+
+  return { ok: true, set };
+}
+
 async function createTenantFactorImpl(input: {
   organizationId: string;
   data: CreateCustomFactorInput;
@@ -422,72 +515,19 @@ async function createTenantFactorImpl(input: {
     factorInput.gas === "co2e" ? "combined_co2e" : "per_gas";
 
   return getDb().transaction(async (tx) => {
-    let set: { id: string; gasBasis: FactorGasBasis } | undefined;
-
-    if (setInput.mode === "existing") {
-      /* A submitted set id is a claim, not a capability. */
-      [set] = await tx
-        .select({ id: emissionFactorSet.id, gasBasis: emissionFactorSet.gasBasis })
-        .from(emissionFactorSet)
-        .where(
-          and(
-            eq(emissionFactorSet.id, setInput.setId),
-            eq(emissionFactorSet.organizationId, input.organizationId),
-            isNull(emissionFactorSet.deletedAt),
-          ),
-        )
-        .limit(1);
-
-      if (!set) return { ok: false, reason: "set_not_found" };
-    } else {
-      [set] = await tx
-        .insert(emissionFactorSet)
-        .values({
-          organizationId: input.organizationId,
-          source: setInput.source,
-          datasetVersion: setInput.datasetVersion,
-          publicationYear: setInput.publicationYear,
-          effectiveFrom: setInput.effectiveFrom,
-          effectiveTo: setInput.effectiveTo,
-          licence: setInput.licence,
-          licenceUrl: setInput.licenceUrl ?? null,
-          sourceUrl: setInput.sourceUrl ?? null,
-          sourceReference: setInput.sourceReference ?? null,
-          retrievedAt: new Date(),
-          gasBasis: derivedGasBasis,
-          notes: setInput.notes ?? null,
-        })
-        .onConflictDoNothing({
-          target: [
-            emissionFactorSet.organizationId,
-            emissionFactorSet.source,
-            emissionFactorSet.datasetVersion,
-          ],
-          where: sql`${emissionFactorSet.organizationId} is not null`,
-        })
-        .returning({
-          id: emissionFactorSet.id,
-          gasBasis: emissionFactorSet.gasBasis,
-        });
-
-      /* Nothing inserted means the set already exists — including the race
-         where a concurrent submission created it a moment ago, which gets the
-         same answer rather than diverging. */
-      if (!set) return { ok: false, reason: "set_exists" };
-    }
-
-    if (set.gasBasis !== derivedGasBasis) {
-      return {
-        ok: false,
-        reason: "gas_basis_mismatch",
-        setGasBasis: set.gasBasis,
-      };
-    }
+    const resolved = await resolveWritableSet(
+      tx,
+      input.organizationId,
+      setInput,
+      derivedGasBasis,
+    );
+    if (!resolved.ok) return resolved;
+    const set = resolved.set;
 
     const sourceRowId = sourceRowIdForCustomFactor(
       input.organizationId,
       set.id,
-      input.data,
+      factorInput,
     );
     const [inserted] = await tx
       .insert(emissionFactor)
@@ -540,6 +580,122 @@ async function createTenantFactorImpl(input: {
 
     if (!existing) tx.rollback();
     return { ok: true, factorId: existing.id };
+  });
+}
+
+/**
+ * What a bulk import can answer with besides success.
+ *
+ * The set refusals are {@link CreateTenantFactorOutcome}'s verbatim, so the
+ * action maps them once. `mixed_gas_basis` is the file-level one:
+ * `lib/domain/factor-import.ts` refuses a mixed file before this is called and
+ * names the two lines, so reaching it here is a bug rather than a submission —
+ * it exists because deriving one basis from rows that disagree would mislabel
+ * the ones on the other side of the split.
+ */
+export type ImportTenantFactorsOutcome =
+  | { ok: true; imported: number; skipped: number }
+  | { ok: false; reason: "set_exists" }
+  | { ok: false; reason: "set_not_found" }
+  | { ok: false; reason: "gas_basis_mismatch"; setGasBasis: FactorGasBasis }
+  | { ok: false; reason: "mixed_gas_basis" };
+
+/**
+ * Writes many tenant-owned factor rows into one tenant-owned set — prompt 82.
+ *
+ * **One transaction, all rows or none.** The user chose the atomic shape over
+ * step 9's staged review, and the reason is the licence: a partly-imported set
+ * is a set whose provenance describes rows that are not all present, and that
+ * provenance is rendered as disclosure evidence. "Rollback" is this transaction
+ * plus the existing per-row retire control, so there is no staging table and no
+ * migration.
+ *
+ * **Rows the set already holds are skipped and counted, not failed.**
+ * `(set_id, source_row_id)` is the unique index and `source_row_id` is the
+ * row's own identity hash, so re-running the same file writes nothing and says
+ * so. Anything else that fails aborts the transaction and leaves zero rows.
+ */
+export const importTenantFactors = withSafeQueryErrors(
+  "emission-queries.importTenantFactors",
+  importTenantFactorsImpl,
+);
+
+async function importTenantFactorsImpl(input: {
+  organizationId: string;
+  set: CreateCustomFactorInput["set"];
+  factors: readonly TenantFactorInput[];
+}): Promise<ImportTenantFactorsOutcome> {
+  const first = input.factors[0];
+  if (!first) return { ok: true, imported: 0, skipped: 0 };
+
+  /* Derived from the file, never asked (prompt 67 decision 6). */
+  const derivedGasBasis: FactorGasBasis =
+    first.gas === "co2e" ? "combined_co2e" : "per_gas";
+  const mixed = input.factors.some(
+    (factor) =>
+      (factor.gas === "co2e" ? "combined_co2e" : "per_gas") !==
+      derivedGasBasis,
+  );
+  if (mixed) return { ok: false, reason: "mixed_gas_basis" };
+
+  return getDb().transaction(async (tx) => {
+    const resolved = await resolveWritableSet(
+      tx,
+      input.organizationId,
+      input.set,
+      derivedGasBasis,
+    );
+    if (!resolved.ok) return resolved;
+    const set = resolved.set;
+
+    const values = input.factors.map((factor) => ({
+      setId: set.id,
+      organizationId: input.organizationId,
+      sourceRowId: sourceRowIdForCustomFactor(
+        input.organizationId,
+        set.id,
+        factor,
+      ),
+      /* A claim, not a capability: every read of the pair runs under
+         `visibleFactorScope`. */
+      supersedesSource: factor.supersedes?.source ?? null,
+      supersedesSourceRowId: factor.supersedes?.sourceRowId ?? null,
+      level1: factor.level1 ?? null,
+      level2: factor.level2 ?? null,
+      level3: factor.level3 ?? null,
+      level4: factor.level4 ?? null,
+      columnText: factor.columnText ?? null,
+      publishedUom: factor.publishedUom,
+      publishedGhgUnit: factor.publishedGhgUnit,
+      scope: factor.scope,
+      scope3Category: factor.scope3Category ?? null,
+      scope2Method: factor.scope2Method ?? null,
+      activityUnit: factor.activityUnit,
+      resultUnit: "kg_co2e" as const,
+      gas: factor.gas,
+      ch4Variant: factor.ch4Variant ?? null,
+      gwpSet: factor.gwpSet,
+      region: factor.region ?? null,
+      biogenic: factor.biogenic,
+      value: factor.value,
+    }));
+
+    let imported = 0;
+    /* Chunked for the reason `INSERT_BATCH` records: Postgres caps a statement
+       at 65,535 bound parameters, and a factor row binds 23 columns — so a
+       500-row statement binds 11,500, well inside it. */
+    for (const batch of chunk(values, INSERT_BATCH)) {
+      const inserted = await tx
+        .insert(emissionFactor)
+        .values(batch)
+        .onConflictDoNothing({
+          target: [emissionFactor.setId, emissionFactor.sourceRowId],
+        })
+        .returning({ id: emissionFactor.id });
+      imported += inserted.length;
+    }
+
+    return { ok: true, imported, skipped: values.length - imported };
   });
 }
 

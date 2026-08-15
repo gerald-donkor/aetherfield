@@ -18,6 +18,7 @@ import {
 import {
   createTenantFactor,
   getVisibleFactor,
+  importTenantFactors,
   recalculateOrganization,
   retireTenantFactor,
   setFactorMapping as setFactorMappingRow,
@@ -26,11 +27,26 @@ import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
 import { factorEligibility } from "../../lib/domain/emissions";
 import {
+  describeRowIssue,
+  duplicateRowErrors,
+  mixedGasBasisError,
+  readFactorImport,
+} from "../../lib/domain/factor-import";
+import {
   createCustomFactorSchema,
+  customFactorSchema,
   CUSTOM_FACTOR_ERRORS,
+  FACTOR_IMPORT_ERRORS,
+  FACTOR_IMPORT_MAX_ROW_ERRORS,
+  formatFactorImportRowFailure,
+  importCustomFactorsSchema,
   retireCustomFactorSchema,
+  type CreateCustomFactorInput,
   type CustomFactorField,
   type CustomFactorResult,
+  type FactorImportField,
+  type FactorImportRowError,
+  type ImportCustomFactorsResult,
   recalculateInputSchema,
   type RecalculateResult,
   type RetireCustomFactorResult,
@@ -38,6 +54,7 @@ import {
 import {
   checkActivityCommitLimit,
   checkActivityImportLimit,
+  checkFactorImportLimit,
   checkFactorMappingLimit,
   formatRetry,
 } from "../../lib/rate-limit";
@@ -866,6 +883,262 @@ export async function createCustomFactor(
   revalidatePath("/activity/mappings");
   revalidatePath("/activity");
   return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  importCustomFactors                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Imports many customer-supplied factor rows from one CSV — prompt 82.
+ *
+ * **Atomic: all rows or none.** A file whose rows all pass is written in one
+ * transaction; a file with any failing row writes nothing and comes back with
+ * the failing lines. The alternative — step 9's staged review — is right for
+ * activity data, where a partial commit is still a usable dataset, and wrong
+ * here: a partly-imported set is a set whose licence and provenance describe
+ * rows that are not all present, and that provenance is rendered as disclosure
+ * evidence.
+ *
+ * Like `createCustomFactor`, it **maps nothing and recalculates nothing**
+ * (prompt 66's decision). An imported row changes no figure until an owner maps
+ * a `(category, unit)` pair to it at `/activity/mappings`, which is the surface
+ * that already recalculates.
+ */
+export async function importCustomFactors(
+  formData: FormData,
+): Promise<ImportCustomFactorsResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
+
+  // -- b. Session, tenant and role, then the rate limit --------------------
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
+    };
+  }
+  if (membership.pendingDeletion) {
+    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
+  }
+
+  const userId = membership.account.user.id;
+  const organizationId = membership.organization.id;
+
+  try {
+    const limit = await checkFactorImportLimit(userId);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many imports. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    /* Fails closed, as every path beside it does. */
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- c. The set choice, then the file, then the rows ---------------------
+  const choice = importCustomFactorsSchema.safeParse({
+    set: setChoiceFrom(formData),
+  });
+  if (!choice.success) {
+    return {
+      ok: false,
+      error: FACTOR_IMPORT_ERRORS.invalid,
+      fieldErrors: factorImportFieldErrors(choice.error),
+    };
+  }
+
+  /* The declared `type` is deliberately not a gate — see `stageImport` for
+     why. The parse below is the real check (AGENTS.md 8.2 rule 3). */
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return {
+      ok: false,
+      error: FACTOR_IMPORT_ERRORS.invalid,
+      fieldErrors: { file: FACTOR_IMPORT_ERRORS.file },
+    };
+  }
+  if (file.size > CSV_MAX_BYTES) {
+    return {
+      ok: false,
+      error: FACTOR_IMPORT_ERRORS.invalid,
+      fieldErrors: { file: CSV_ERRORS.size },
+    };
+  }
+
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  const decoded = decodeUtf8(bytes);
+  if (!decoded.ok) {
+    return {
+      ok: false,
+      error: FACTOR_IMPORT_ERRORS.invalid,
+      fieldErrors: { file: decoded.error },
+    };
+  }
+
+  const parsed = parseCsv(decoded.text, CSV_MAX_ROWS);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: FACTOR_IMPORT_ERRORS.invalid,
+      fieldErrors: { file: parsed.error },
+    };
+  }
+
+  /* Whole-file failures first — a mis-typed header is one legible sentence,
+     never ten thousand row errors. */
+  const read = readFactorImport(parsed.header, parsed.records);
+  if (!read.ok) {
+    return {
+      ok: false,
+      error: FACTOR_IMPORT_ERRORS.invalid,
+      fieldErrors: { file: read.error },
+    };
+  }
+
+  /* **The same schema the single-row form runs**, per row (AGENTS.md 10
+     rule 1). The rules exist once and run twice; nothing about a row is
+     restated for the bulk path. */
+  const rowErrors: FactorImportRowError[] = [...read.rowErrors];
+  const factors: { line: number; factor: CreateCustomFactorInput["factor"] }[] =
+    [];
+  for (const row of read.rows) {
+    const checked = customFactorSchema.safeParse(row.input);
+    if (checked.success) {
+      factors.push({ line: row.line, factor: checked.data });
+      continue;
+    }
+    const issue = checked.error.issues[0];
+    rowErrors.push({
+      line: row.line,
+      message: describeRowIssue(issue.path.join("."), issue.message),
+    });
+  }
+
+  if (rowErrors.length === 0) {
+    /* Two rows that would become one row in the set, and a file with no honest
+       destination. Both are cross-row and neither can exist on the single-row
+       path, which is why they live in `lib/domain/` rather than in the
+       schema. */
+    rowErrors.push(...duplicateRowErrors(factors));
+    const mixed = mixedGasBasisError(factors);
+    if (mixed) rowErrors.push(mixed);
+  }
+
+  if (rowErrors.length > 0) {
+    rowErrors.sort((a, b) => a.line - b.line);
+    return {
+      ok: false,
+      error: formatFactorImportRowFailure(rowErrors.length),
+      rowErrors: rowErrors.slice(0, FACTOR_IMPORT_MAX_ROW_ERRORS),
+    };
+  }
+
+  // -- d. Authorise --------------------------------------------------------
+  /* A factor moves every figure in a disclosure, so AGENTS.md 11.2 rule 2 puts
+     the check here rather than in the component that renders the control. */
+  if (membership.role !== "owner") {
+    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwner };
+  }
+
+  // -- e. Write ------------------------------------------------------------
+  let outcome: Awaited<ReturnType<typeof importTenantFactors>>;
+  try {
+    outcome = await importTenantFactors({
+      organizationId,
+      set: choice.data.set,
+      factors: factors.map((row) => row.factor),
+    });
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  if (!outcome.ok) {
+    if (outcome.reason === "set_exists") {
+      return {
+        ok: false,
+        error: FACTOR_IMPORT_ERRORS.invalid,
+        fieldErrors: { "set.datasetVersion": CUSTOM_FACTOR_ERRORS.setExists },
+      };
+    }
+    if (outcome.reason === "set_not_found") {
+      return {
+        ok: false,
+        error: FACTOR_IMPORT_ERRORS.invalid,
+        fieldErrors: { "set.setId": CUSTOM_FACTOR_ERRORS.setNotFound },
+      };
+    }
+    if (outcome.reason === "mixed_gas_basis") {
+      /* Refused above, so this is a bug rather than a submission. */
+      return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+    }
+    return {
+      ok: false,
+      error:
+        outcome.setGasBasis === "combined_co2e"
+          ? CUSTOM_FACTOR_ERRORS.gasBasisCombined
+          : CUSTOM_FACTOR_ERRORS.gasBasisPerGas,
+    };
+  }
+
+  // -- f. No email. Make the rows visible on the factor surfaces. ----------
+  revalidatePath("/activity/factors");
+  revalidatePath("/activity/mappings");
+  revalidatePath("/activity");
+  return { ok: true, imported: outcome.imported, skipped: outcome.skipped };
+}
+
+/** The set chooser's fields, as they cross from the browser. Shaped for
+    `factorSetChoiceSchema` and judged by it — nothing here decides anything. */
+function setChoiceFrom(formData: FormData): unknown {
+  const text = (name: string) => String(formData.get(name) ?? "");
+  if (text("mode") !== "new") {
+    return { mode: "existing", setId: text("setId") };
+  }
+  return {
+    mode: "new",
+    source: text("source"),
+    datasetVersion: text("datasetVersion"),
+    publicationYear: Number(formData.get("publicationYear")),
+    effectiveFrom: text("effectiveFrom"),
+    effectiveTo: text("effectiveTo"),
+    licence: text("licence"),
+    licenceUrl: text("licenceUrl"),
+    sourceUrl: text("sourceUrl"),
+    sourceReference: text("sourceReference"),
+    notes: text("notes"),
+  };
+}
+
+/** The set chooser's field errors, on the two-segment paths the factor form's
+    mapping already reads. */
+function factorImportFieldErrors(
+  error: z.ZodError,
+): Partial<Record<FactorImportField, string>> {
+  const fieldErrors: Partial<Record<FactorImportField, string>> = {};
+  for (const issue of error.issues) {
+    if (issue.path.length < 2) continue;
+    if (String(issue.path[0]) !== "set") continue;
+    const field = `set.${String(issue.path[1])}` as FactorImportField;
+    fieldErrors[field] ??= issue.message;
+  }
+  return fieldErrors;
 }
 
 /* -------------------------------------------------------------------------- */

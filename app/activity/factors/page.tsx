@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { CustomFactorForm } from "../../_components/activity/custom-factor-form";
+import { FactorImportForm } from "../../_components/activity/factor-import-form";
 import { RetireFactorButton } from "../../_components/activity/retire-factor-button";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
 import { WorkspaceNav } from "../../_components/workspace-nav";
@@ -219,6 +220,38 @@ export default async function ActivityFactorsPage() {
             </ul>
           )}
         </section>
+
+        {canManage ? (
+          <section className="mt-20" aria-labelledby="factor-import-heading">
+            <h2
+              id="factor-import-heading"
+              className="font-sans text-[28px] leading-8 font-bold"
+            >
+              Import factors
+            </h2>
+            <p className="mt-4 max-w-[720px] font-serif text-p2 text-muted">
+              A supplied set arrives as one CSV. Every row imports or none does,
+              so the licence on a set always describes the rows it holds. Rows
+              the set
+              already holds are skipped, which makes re-importing a corrected
+              file safe.
+            </p>
+            <div className="mt-10 border-y border-border py-8">
+              <FactorImportForm
+                sets={activeSets.map((set) => ({
+                  id: set.id,
+                  source: set.source,
+                  datasetVersion: set.datasetVersion,
+                  publicationYear: set.publicationYear,
+                  effectiveFrom: set.effectiveFrom,
+                  effectiveTo: set.effectiveTo,
+                  licence: set.licence,
+                  gasBasis: set.gasBasis,
+                }))}
+              />
+            </div>
+          </section>
+        ) : null}
 
         <section className="mt-20" aria-labelledby="custom-factor-create-heading">
           <h2

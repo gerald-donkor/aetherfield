@@ -190,6 +190,30 @@ const FACTOR_MAPPING_LIMIT = 30;
 const FACTOR_MAPPING_WINDOW = "1 h" as const;
 
 /**
+ * Bulk factor-set CSV import, **keyed by user id** — prompt 82.
+ *
+ * **Both numbers are judgements, not measurements** (AGENTS.md 12 rule 4), on
+ * the same footing as every window above: the flow has never shipped, so there
+ * is nothing to fit against.
+ *
+ * **Tighter than `FACTOR_MAPPING_LIMIT`, and tighter than the activity
+ * upload's 20**, because one accepted call writes up to `CSV_MAX_ROWS` factor
+ * rows in a single transaction — the largest write one form submission can
+ * cause in this codebase. Against that, honest use is small and deliberate: a
+ * customer imports a supplied set once, and re-imports after correcting a file.
+ * Six an hour leaves room for several correction rounds in a sitting while
+ * bounding what one compromised owner session can push into Postgres.
+ *
+ * **Keyed by user id for the reason the upload limiter records**: the path is
+ * authenticated and tenant-scoped, so an IP key would throttle a whole office
+ * behind one NAT while leaving the abusable surface — one account importing in
+ * a loop — unbounded. A user id is the opaque identifier of the session's own
+ * subject, so unlike the newsletter's address key it needs no hash.
+ */
+const FACTOR_IMPORT_LIMIT = 6;
+const FACTOR_IMPORT_WINDOW = "1 h" as const;
+
+/**
  * Setting and retiring a target, **keyed by user id** — build step 11.
  *
  * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
@@ -566,6 +590,25 @@ export async function checkFactorMappingLimit(
     "factor-mapping",
     FACTOR_MAPPING_LIMIT,
     FACTOR_MAPPING_WINDOW,
+    userId,
+  );
+}
+
+/**
+ * Bulk factor-set CSV import, keyed by the **user id**. Stage b of AGENTS.md
+ * 10 — see the constant's docblock for why it is tighter than every limiter
+ * beside it, and why both numbers are judgements.
+ *
+ * @param userId the signed-in account's id, resolved server-side from the
+ * session. Never a value the browser supplied.
+ */
+export async function checkFactorImportLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "factor-import",
+    FACTOR_IMPORT_LIMIT,
+    FACTOR_IMPORT_WINDOW,
     userId,
   );
 }

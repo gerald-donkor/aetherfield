@@ -9918,3 +9918,325 @@ predicate that actually deletes incapable of drifting apart.
 | changing `deleteCv`'s best-effort contract | step 5 set it deliberately; the sweep uses `deleteCvStrict` |
 | AI factor matching | blocked, not deferred: prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, and prompt 76 shipped the provider-free path. Named rather than smuggled past |
 | a step 15 | §5.2 remains the ordered plan; this is post-sequence hardening, as prompts 63–80 were |
+
+## Bulk factor-set CSV import, prompt 82
+
+Imports many customer-supplied emission factors into one tenant-owned factor
+set from a single CSV, atomically. It closes the deferral `docs/backend.md`
+named six separate times: `/activity/factors` accepted **one hand-typed row at
+a time**, and a customer supplying its own licensed set had to fill twenty
+fields per row.
+
+Post-sequence work, as prompts 63-81 were. **Not a step 15** — AGENTS.md 5.2
+remains the complete ordered product build, and every step in it is committed.
+
+### The design fork, settled with the user before the prompt file was written
+
+The user chose **atomic, all rows or none** over a staged-review flow of the
+kind step 9 built for activity data. So there is **no staging table, no
+migration, no new route and no blob write**.
+
+A file whose rows all validate is inserted in one transaction; a file with any
+invalid row writes **nothing** and returns every failing line with its reason.
+"Rollback" is the transaction itself, plus the existing per-row retire control.
+
+The earlier deferral text predicted "a parser, staging UI and rollback"; that
+prediction is superseded here rather than left standing (AGENTS.md 12 rule 8).
+The reason staged review is right for activity data and wrong here: a partial
+commit of activity rows is still a usable dataset, whereas a partly-imported
+factor set is a set whose licence and provenance describe rows that are not all
+present — which is exactly the thing a disclosure cites.
+
+### What was built
+
+| file | what it is |
+| --- | --- |
+| `lib/domain/factor-import.ts` | **new, pure, tested.** The column contract, the whole-file refusals, per-row coercion, the row identity, and the two cross-row checks |
+| `lib/domain/factor-import.test.ts` | 18 tests, under `npm test`'s `lib/domain/` scope |
+| `lib/validation/emissions.ts` | `importCustomFactorsSchema`, `FactorImportRowError`, `FactorImportField`, `ImportCustomFactorsResult`, `FACTOR_IMPORT_MAX_ROW_ERRORS`, `formatFactorImportRowFailure`, `FACTOR_IMPORT_ERRORS` |
+| `lib/rate-limit/index.ts` | `checkFactorImportLimit` on a new `factor-import` prefix |
+| `lib/db/emission-queries.ts` | `importTenantFactors`, the extracted `resolveWritableSet`, and **a pre-existing correlated-subquery defect fixed** (below) |
+| `app/activity/actions.ts` | `importCustomFactors(formData)` |
+| `app/_components/activity/factor-import-form.tsx` | the client leaf |
+| `app/activity/factors/page.tsx` | one new "Import factors" section, inside the existing owner gate |
+| `e2e/factor-import.spec.ts` | one authenticated Chromium walk |
+
+### The column contract, as implemented
+
+Header names are matched **trimmed and case-insensitively, in any order**.
+`FACTOR_IMPORT_COLUMNS` is the single declaration; `FACTOR_IMPORT_HEADER` is
+the same list rendered as the copyable header row on the page, so the hint, the
+tests and the parser cannot drift.
+
+| column | required | accepted values |
+| --- | --- | --- |
+| `scope` | yes | `EMISSION_SCOPES` members verbatim |
+| `activity_unit` | yes | `FACTOR_ACTIVITY_UNITS` members verbatim |
+| `gas` | yes | `GHG_GASES` members verbatim |
+| `gwp_set` | yes | `GWP_SETS` members verbatim |
+| `published_uom` | yes | free text |
+| `published_ghg_unit` | yes | free text |
+| `value` | yes | the decimal grammar `factorDecimal` already enforces |
+| `biogenic` | yes | `true`/`false`/`yes`/`no`/`1`/`0`, case-insensitive |
+| `scope3_category`, `scope2_method`, `ch4_variant` | no | the matching enum, or empty |
+| `level_1`-`level_4`, `column_text`, `region` | no | free text |
+| `supersedes_source`, `supersedes_source_row_id` | no | free text; both or neither |
+
+**Enum values are accepted verbatim and never guessed at.** A scope written as
+the two-word English phrase is not `scope_1`; it is a legible row error naming
+the accepted members, assembled by `describeRowIssue` from the same enum
+constants the schema validates against. Guessing would put a value the customer
+did not supply into a disclosure (AGENTS.md 5.3).
+
+**The row rules are not restated in the domain module.** The action runs
+`customFactorSchema.safeParse` per row — the same schema the single-row form
+runs — so the rules exist once and run twice (AGENTS.md 10 rule 1). What lives
+in `lib/domain/factor-import.ts` is only what a *file* has and a single form
+does not.
+
+**Whole-file refusals, before any row is looked at**: a missing required
+column, a duplicate header, or an **unknown header**, each naming the offending
+names. Silently ignoring an unknown column is how a customer's intended `region`
+column never arrives, with nothing on the page saying so.
+
+**Two cross-row checks**, neither of which can exist on the single-row path:
+
+- **In-file duplicates**, on the identity `source_row_id` is hashed from. Two
+  such rows would collide on `(set_id, source_row_id)` and the insert's
+  conflict clause would discard the second in silence. The error names **both**
+  lines, because either may be the mistake.
+- **A mixed file** — combined CO2e rows beside per-gas rows. A set holds one
+  `gas_basis`, derived and never asked, so such a file has no honest
+  destination. Refused before any write, naming the two lines that disagree.
+  The check sits in the domain layer rather than in `lib/db/`, because it needs
+  line numbers and `lib/db/` has no business formatting them; the query keeps a
+  `mixed_gas_basis` outcome as a defensive backstop.
+
+**The row identity moved into the domain layer.** `factorRowIdentityParts` is
+now the one declaration of which fields make a row *that* row, and
+`sourceRowIdForCustomFactor` imports it rather than restating the list — so the
+in-file duplicate check and the unique index agree by construction. The order,
+the normalisation (trimmed, lowercased) and the conditionally-appended
+supersession pair are unchanged from prompt 71, so **every hash already stored
+still resolves**: a row created before this change re-submits as the idempotent
+no-op it got before, not as a duplicate. `published_ghg_unit` stays out of the
+identity — it is the publisher's wording for the numerator, not part of what
+the row *is*.
+
+### A pre-existing defect this prompt found and fixed
+
+**Three correlated subqueries in `lib/db/emission-queries.ts` had been silently
+answering zero**, and the read-back this prompt required is what surfaced them.
+
+Drizzle interpolates a column reference inside a raw `sql` fragment as a bare
+quoted column name, not as a table-qualified one. So
+
+```sql
+select count(*)::int from "emission_factor"
+where "set_id" = "id" and "deleted_at" is null
+```
+
+resolved **both** sides against the innermost scope: the predicate was
+`emission_factor.set_id = emission_factor.id`, never true, no error raised.
+
+| query | field | was | is |
+| --- | --- | --- | --- |
+| `listFactorSets` | `factorCount` | 0 for every set | DESNZ 2026 v1.2 **7,035**, 2025 v1 **7,029** |
+| `listTenantFactorSets` | `factorCount` | 0 for every set | the real count, read back below |
+| `listTenantFactors` | `mappingCount` | 0 for every row | the real count |
+
+So `/activity/factors` reported "0 active" for a set holding thousands of rows,
+and "0 mapped pairs" for a row that was mapped — which also made the retire
+button's warning under-state what retiring would cost. Fixed by aliasing the
+inner table and naming the outer one explicitly. The correction is recorded at
+`listFactorSets` and referenced from the two siblings.
+
+### The write path
+
+AGENTS.md 10's stages, in 10's order, copying `stageImport` and
+`createCustomFactor`:
+
+- **a. BotID — deliberately absent**, for the reason `stageImport` records
+  verbatim: this path needs a live session and a `member` row, which is
+  strictly stronger than a bot heuristic, and adding it is a two-file
+  commitment in `instrumentation-client.ts` whose half-application makes the
+  server call fail rather than pass.
+- **b.** session, membership, the `pendingDeletion` lock, then
+  `checkFactorImportLimit`, failing closed on a limiter error as every existing
+  path does.
+- **c.** the set choice through `importCustomFactorsSchema`; then file
+  presence, `CSV_MAX_BYTES`, `decodeUtf8`, `parseCsv(text, CSV_MAX_ROWS)`; then
+  the header contract; then `customFactorSchema.safeParse` per row; then the
+  two cross-row checks.
+- **d.** `membership.role !== "owner"` gets `CUSTOM_FACTOR_ERRORS.notOwner`. A
+  factor moves every figure in a disclosure, so AGENTS.md 11.2 rule 2 puts the
+  check in the action, not in the component that renders the control.
+- **e.** `importTenantFactors` — one transaction, chunked at
+  `INSERT_BATCH` (500) rows per statement.
+- **f.** no email. `revalidatePath` for `/activity/factors`,
+  `/activity/mappings` and `/activity`.
+
+**No new limit constant.** The existing `CSV_MAX_BYTES` (2 MB) and
+`CSV_MAX_ROWS` (10,000) are reused, because a whole national dataset fits
+inside both — `lib/db/seed/defra-2026-factors.csv` is **1.1 MB and 8,740 data
+rows** (`du -h`, `wc -l` minus the header).
+
+**No recalculation and no automatic mapping** — prompt 66's decision,
+unchanged. An imported row changes no figure until an owner maps a
+`(category, unit)` pair to it at `/activity/mappings`, which is the surface
+that already recalculates.
+
+**Rows the set already holds are skipped and counted, not failed**, so
+re-importing a corrected file is safe. Everything else that fails aborts the
+transaction.
+
+### The rate limit, and both numbers are judgements
+
+`FACTOR_IMPORT_LIMIT = 6` per `"1 h"`, keyed by the **user id resolved
+server-side**. **A judgement, not a measurement** (AGENTS.md 12 rule 4) — the
+flow has never shipped, so there is nothing to fit against. It is tighter than
+`FACTOR_MAPPING_LIMIT` (30) and tighter than the activity upload's 20, because
+one accepted call writes up to `CSV_MAX_ROWS` rows in a single transaction:
+the largest write one form submission can cause in this codebase.
+
+### Measurements
+
+**Every timing below is warm** (AGENTS.md 7.3's scale-to-zero note): the script
+resolved an organisation and ran a throwaway query before anything was timed.
+Taken against the development Neon branch on the free plan, over the pooled
+connection, from a residential connection — so the round-trip component is
+real and is not a server-side cost.
+
+| file | parse + per-row validate | write (one transaction) | total |
+| --- | --- | --- | --- |
+| 100 rows | 13 ms both runs | 2,560 ms / 2,241 ms | 2,573 ms / 2,254 ms |
+| 8,740 rows | 168 ms / 176 ms | 64,591 ms / 87,115 ms | 64,759 ms / 87,290 ms |
+
+**Two runs are quoted because the spread between them is larger than anything
+they measure.** The pure work — decode, parse, coerce, and 8,740
+`safeParse` calls — is **under 180 ms**. Everything else is the database.
+
+**Why the write dominates, and it is a judgement rather than a measured
+attribution**: `emission_factor` carries a GIN trigram index on an expression
+over the label columns, three btree indexes and two check constraints, and GIN
+maintenance on insert is the expensive part of that set. The attribution was
+not isolated by dropping an index, so it is stated as a judgement (AGENTS.md 12
+rule 4).
+
+**87 s for a maximum-size file sits inside Vercel's 300 s default function
+duration** with room, so the path is not at risk today. It is recorded as the
+thing to watch if `CSV_MAX_ROWS` is ever raised — that is a note, not a
+deferral of work this prompt should have done.
+
+**The row count read back from the database** — as `listTenantFactorSets`
+reports it, not as the action returned it:
+
+| after | action returned | database reports |
+| --- | --- | --- |
+| the 100-row import | `imported=100 skipped=0` | `factorCount` **100** |
+| the 8,740-row import | `imported=8740 skipped=0` | `factorCount` **8,740** |
+| re-importing the identical 100-row file | `imported=0 skipped=100` | still **100** |
+| re-importing the identical 8,740-row file | `imported=0 skipped=8740` | still **8,740** |
+
+**The all-or-nothing proof.** A copy of each file with one row in the middle
+made invalid — line 50 of the 100-row file, line 4,370 of the 8,740-row file —
+produced one row error, wrote nothing, and left the count where it was: **100**
+and **8,740**. The measurement sets were deleted afterwards; nothing this
+measurement created remains in the database.
+
+### Trust boundary
+
+What crosses: a multipart POST to the Server Action carrying a CSV file and the
+set choice, from a browser with a Better Auth session cookie.
+
+- **Authorised by** a live session, a `member` row for the organisation, a
+  non-`pendingDeletion` organisation, and `role === "owner"` — all resolved
+  server-side inside the action (AGENTS.md 11.2 rules 1 and 2).
+- **Validated by** the file checks above and `customFactorSchema` per row.
+  Nothing in the payload names an organisation and nothing may; the tenant
+  comes from the session.
+- **A submitted set id is a claim, not a capability** — re-read under the
+  tenant predicate before a row is written into it, in the extracted
+  `resolveWritableSet`. A missing, retired or foreign id is one
+  indistinguishable `set_not_found`, so there is no existence oracle.
+- **Rejected requests return a typed result** — never a thrown string, never a
+  swallowed error, never a silent success (AGENTS.md 8.2 rule 4, 10 rule 2). A
+  transaction that aborts leaves zero rows.
+- No new route handler, no new public path, no environment conditional, no
+  test-only route.
+
+### Secrets and data
+
+No new environment variable, no `.env.example` change, no `NEXT_PUBLIC_*`, no
+new secret read, **no model call** (AGENTS.md 5.3: the import performs no
+matching and invents no value).
+
+The uploaded file is a customer's commercial reference data. It is **parsed in
+memory and never persisted as a file** — no blob write, unlike step 9's staged
+import, because there is no staged state to reconstruct. What is stored is the
+factor rows themselves, tenant-scoped: `organization_id` is set on every row,
+so AGENTS.md 9.2 rule 6 is unchanged.
+
+**Nothing logs a row, a file, a header, a cell value, an address or a tenant
+identifier.** The new code adds no `console` call at all, matching every file
+under `app/`. `withSafeQueryErrors` covers the new query, so a database failure
+cannot print the statement or its bound parameters.
+
+Retention: prompt 81's phase-one sweep is untouched. Imported factors are
+tenant data and exit with the organisation under prompt 73's 30-day erasure.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **12 files, 255 tests, all passing** — 11 files and 237 tests before, so the new file contributes 18 |
+| `npm run build` | succeeded; route table identical to the parent's, `/activity/factors` still dynamic |
+| the prerender comparison | below |
+| `npm run test:e2e:local` | **100 passed, 2 skipped**, 4.2 m. The two skips are this file's Firefox copies; the two Chromium walks are in the pass count, and a targeted re-run named them: "imports every row of a valid file into a new set" (15.8 s) and "refuses a file with one bad row and writes nothing" (8.1 s) |
+| `npm run test:e2e:webkit` | **not run — an environment gap, not a pass.** `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux", exactly as prompts 78-80 recorded |
+| `npm run db:generate` | **not run — the schema is untouched.** No migration belongs to this change |
+
+
+### The prerender comparison
+
+`docs/automation.md`'s clean two-build procedure: both sides copied out with
+`.claude/` and `.agents/` excluded, `node_modules` hard-linked in, built in the
+same environment, then normalising the build id, both chunk name patterns and
+the inline flight payload. Run **after** this section and the code were both on
+disk, so Tailwind v4 scanned the same prose on both sides.
+
+| | base (`eafc364`) | impl |
+| --- | --- | --- |
+| prerendered HTML files | 21 | 21 |
+| **identical after normalising** | — | **21 of 21** |
+| differing | — | **0** |
+| added or removed | — | **none** |
+| CSS chunks | one, **68,506 B** | one, **68,559 B** |
+| rules added / removed | — | **1 added, 0 removed** |
+
+**The parent's CSS byte count was remeasured at this commit** rather than
+carried forward, as the prompt required. The one added rule is a line-height
+utility that the import leaf's copyable header block actually uses — it traces
+to a class that was written, not to a word in prose (`docs/automation.md`'s
+scanner trap).
+
+`Prerender impact: none — no route markup or render-mode changes`, **verified
+rather than assumed**.
+
+### What prompt 82 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| a staging table, a review route, a blob write, a migration | the user chose the atomic shape; there is no staged state to persist, and the schema is untouched |
+| partial import of a file with bad rows | the decision above: a partly-imported set is a set whose licence describes rows that are not all present |
+| editing a set's metadata, or retiring a set from the UI | named deferrals, unchanged; the licence text is rendered as disclosure evidence, so a correction path wants its own prompt |
+| market-based scope 2 | untouched prior deferral |
+| automatic mapping or recalculation after import | prompt 66's decision, unchanged |
+| re-pointing existing mappings at newly imported rows | prompt 70's refusal, unchanged: a mapping is a choice and a backfill would silently undo an override |
+| AI-assisted column mapping | blocked, not deferred — prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, prompt 76 shipped the provider-free path. AGENTS.md 5.3 sanctions the surface and does not schedule it |
+| a downloadable template CSV asset | the header contract renders on the page, so there is no second copy to keep in step |
+| sharing the set-chooser fields between the two forms on `/activity/factors` | the import leaf repeats them rather than extracting a shared control out of a settled form. Same primitives, same names, same classes — a refactor of `custom-factor-form.tsx` was not this prompt's scope |
+| any change to a marketing route, `SiteNav`, `SiteFooter`, `Container` or any GSAP surface | out of scope entirely (AGENTS.md 8.1) |
+| a step 15 | AGENTS.md 5.2 remains the ordered plan; this is post-sequence work, as prompts 63-81 were |

@@ -445,6 +445,107 @@ export const createCustomFactorSchema = z
     }
   });
 
+/**
+ * The bulk import's one validated input — **the set choice, and nothing
+ * else** (prompt 82).
+ *
+ * The file itself travels as `FormData` and is checked the way `stageImport`
+ * checks its upload: presence, size, UTF-8, then the parse. No schema can
+ * usefully describe a `File`, and the parse is the real check (AGENTS.md 8.2
+ * rule 3).
+ *
+ * The two cross-field rules are {@link createCustomFactorSchema}'s verbatim,
+ * emitting the same two-segment `["set", …]` paths, so the field-error mapping
+ * the factor form already uses is unchanged.
+ */
+export const importCustomFactorsSchema = z
+  .object({ set: factorSetChoiceSchema })
+  .superRefine((value, ctx) => {
+    if (value.set.mode !== "new") return;
+
+    if (value.set.effectiveTo < value.set.effectiveFrom) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["set", "effectiveTo"],
+        message: "The end date cannot be before the start date.",
+      });
+    }
+
+    if (!value.set.sourceUrl && !value.set.sourceReference) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["set", "sourceReference"],
+        message: "Enter a source URL or an internal source reference.",
+      });
+    }
+  });
+
+export type ImportCustomFactorsInput = z.infer<
+  typeof importCustomFactorsSchema
+>;
+
+/** One refused line of an imported file, and the reason. The line is the
+    physical line the CSV parser reported, so it matches what a text editor
+    shows. */
+export type FactorImportRowError = { line: number; message: string };
+
+/** The set chooser's fields, plus the file. The `set.*` half is
+    {@link CustomFactorField}'s own, so the import form and the single-row form
+    map errors identically. */
+export type FactorImportField =
+  | Extract<CustomFactorField, `set.${string}`>
+  | "file";
+
+/**
+ * `importCustomFactors`'s result — a typed result like every other action's
+ * (AGENTS.md 10 rule 2), widened by the two counts a bulk write has and a
+ * single-row write does not.
+ *
+ * **`imported + skipped` is the whole file**, because the import is atomic: a
+ * file with one bad row writes nothing at all and comes back with `rowErrors`.
+ * `skipped` is rows the set already held — re-running the same file imports
+ * nothing and says so.
+ */
+export type ImportCustomFactorsResult =
+  | { ok: true; imported: number; skipped: number }
+  | {
+      ok: false;
+      error: string;
+      fieldErrors?: Partial<Record<FactorImportField, string>>;
+      rowErrors?: FactorImportRowError[];
+    };
+
+/**
+ * How many refused lines travel back to the browser.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4). A file whose header
+ * is right but whose values are wrong fails every row, and 8,740 sentences is
+ * not an answer a person can act on — twenty is enough to see the pattern, and
+ * the total is stated beside them so nothing is hidden.
+ */
+export const FACTOR_IMPORT_MAX_ROW_ERRORS = 20;
+
+/** The whole-file sentence for a file that has failing rows: how many, and how
+    many are shown. Written once so the action and the leaf cannot disagree. */
+export function formatFactorImportRowFailure(total: number): string {
+  const shown = Math.min(total, FACTOR_IMPORT_MAX_ROW_ERRORS);
+  const rows = `${total.toLocaleString("en-GB")} ${total === 1 ? "row" : "rows"}`;
+  return total > shown
+    ? `Nothing was imported. ${rows} could not be read; the first ${shown} are listed below. Fix them and import the file again.`
+    : `Nothing was imported. ${rows} could not be read. Fix ${total === 1 ? "it" : "them"} and import the file again.`;
+}
+
+/**
+ * The import's own error copy, in the site's measured, operational register
+ * (AGENTS.md 5): what is wrong and what to do. No apology, no exclamation.
+ * The refusals it shares with the single-row path stay in
+ * {@link CUSTOM_FACTOR_ERRORS} rather than being restated here.
+ */
+export const FACTOR_IMPORT_ERRORS = {
+  invalid: "Check the marked fields and try again.",
+  file: "Attach a CSV file of factor rows.",
+} as const;
+
 export const retireCustomFactorSchema = z.object({
   factorId: z.uuid({ error: "Choose a customer-supplied factor." }),
 });
