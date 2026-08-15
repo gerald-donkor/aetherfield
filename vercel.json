@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/purge-organizations",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/purge-submissions",
+      "schedule": "0 4 * * *"
     }
   ],
   "functions": {
@@ -15,6 +19,9 @@
       "maxDuration": 300
     },
     "app/api/cron/purge-organizations/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/cron/purge-submissions/route.ts": {
       "maxDuration": 300
     }
   }

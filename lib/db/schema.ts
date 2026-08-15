@@ -35,6 +35,7 @@ import {
 import { TARGET_ALERT_STATUSES } from "../validation/alerts";
 import { ORGANIZATION_DELETION_STATUSES } from "../validation/organization";
 import { REPORT_NARRATIVE_STATUSES } from "../validation/reports";
+import { RETENTION_PURGE_ERRORS } from "../validation/retention";
 import {
   PROJECTION_BASES,
   TARGET_BASELINE_SOURCES,
@@ -1453,3 +1454,72 @@ export type NewActivityEmission = typeof activityEmission.$inferInsert;
 
 /** Which basis a set's rows were taken on — see `factorGasBasis`. */
 export type FactorGasBasis = (typeof factorGasBasis.enumValues)[number];
+
+/* -------------------------------------------------------------------------- */
+/*  Phase-one retention — prompt 81                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Why a sweep failed, **built from `lib/validation/retention.ts` rather than
+    restated** (AGENTS.md 9.2 rule 2). `pgEnum` wants a mutable tuple and the
+    constant is `readonly`, so it is spread — the same shape every enum above
+    takes. A closed vocabulary, never an exception message: a driver error can
+    quote a row's data, and this column is read by us (AGENTS.md 8.3 rule 2). */
+export const retentionPurgeError = pgEnum("retention_purge_error", [
+  ...RETENTION_PURGE_ERRORS,
+]);
+
+/**
+ * One row per retention sweep — the audit trail that makes "retention is finite
+ * and stated" checkable rather than asserted (AGENTS.md 8.3 rule 5).
+ *
+ * **Counts only. Never an id, an email address, a name or a blob pathname.**
+ * The whole change exists to remove personal data from this database, and a
+ * table recording *which* people were erased would reinstate it in a form that
+ * outlives every record it names — a permanent archive keyed by exactly the
+ * data the sweep just deleted. AGENTS.md 8.3 rule 2 forbids logging an address;
+ * storing one here would be worse, because it persists. Per-entity counts,
+ * the run's timestamp and a wall-clock duration answer every operational
+ * question ("did it run", "how much did it remove", "is it slowing down")
+ * without naming anybody.
+ *
+ * **Not the `organization_deletion` shape, deliberately.** That table tracks a
+ * grace window per record because the window is a promise made to a customer at
+ * request time. Here the window is a pure function of columns that already
+ * exist (`lib/domain/retention.ts`), so there is nothing per-record to store —
+ * only what each run did.
+ *
+ * `error` is nullable and a *run-level* outcome: a completed sweep that hit one
+ * failed blob delete records the failure in `failures` and leaves this null
+ * unless the run itself could not finish. Nothing is lost either way — every
+ * due record is due again on the next run.
+ */
+export const retentionPurgeRun = pgTable(
+  "retention_purge_run",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** When the run happened (AGENTS.md 9.2 rule 3). */
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Wall-clock milliseconds, so a sweep drifting towards its `maxDuration`
+        is visible before it starts timing out. */
+    durationMs: integer("duration_ms").notNull(),
+    leadsDeleted: integer("leads_deleted").notNull().default(0),
+    subscribersDeleted: integer("subscribers_deleted").notNull().default(0),
+    applicationsDeleted: integer("applications_deleted").notNull().default(0),
+    /** CV objects removed from Blob storage. Tracked apart from
+        `applications_deleted` because the blob is deleted strictly first, so a
+        run can legitimately show one without the other. */
+    blobsDeleted: integer("blobs_deleted").notNull().default(0),
+    /** Records that failed and were left for the next run. */
+    failures: integer("failures").notNull().default(0),
+    error: retentionPurgeError("error"),
+  },
+  (t) => [
+    /** The trail is read newest first. */
+    index("retention_purge_run_created_at_idx").on(t.createdAt),
+  ],
+);
+
+export type RetentionPurgeRun = typeof retentionPurgeRun.$inferSelect;
+export type NewRetentionPurgeRun = typeof retentionPurgeRun.$inferInsert;

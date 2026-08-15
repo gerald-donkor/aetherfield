@@ -1,5 +1,6 @@
 import { Heading, Link, Text } from "react-email";
 
+import { RETENTION_WINDOW_TEXT } from "../../domain/retention";
 import { Shell, heading, paragraph } from "./shared";
 
 /**
@@ -16,7 +17,12 @@ import { Shell, heading, paragraph } from "./shared";
  * sending marketing mail in production rather than papered over here.
  *
  * The footer text replaces the `Shell`'s usual one-liner, so the unsubscribe
- * link sits where a reader looks for it, in the rule-separated block.
+ * link sits where a reader looks for it, in the rule-separated block. It also
+ * carries the retention sentence, and this is the one of the four confirmations
+ * whose subject has **no** age-based expiry to state: consent is live while the
+ * subscription stands, so what is stated instead is that unsubscribing is what
+ * starts the clock. The window comes from
+ * `RETENTION_WINDOW_TEXT.unsubscribedSubscriber` rather than being restated.
  */
 
 export const NEWSLETTER_WELCOME_SUBJECT = "You're subscribed to Aetherfield Journal";
@@ -60,7 +66,9 @@ export function NewsletterWelcome({
           <Link href={unsubscribeUrl} style={footerLink}>
             unsubscribe
           </Link>
-          .
+          . A confirmed address is kept for as long as the subscription stands;
+          once you unsubscribe, the record is erased automatically{" "}
+          {RETENTION_WINDOW_TEXT.unsubscribedSubscriber} later.
         </>
       }
     >

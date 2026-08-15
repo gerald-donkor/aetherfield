@@ -1,5 +1,6 @@
 import { Heading, Text } from "react-email";
 
+import { RETENTION_WINDOW_TEXT } from "../../domain/retention";
 import { Shell, heading, label, paragraph, value } from "./shared";
 
 /**
@@ -59,8 +60,21 @@ export function ApplicationConfirmation({
     <Shell
       preview={`We have your application. Role: ${role}.`}
       /* No domain is named: Aetherfield has none assigned, and inventing one
-         here would put a fabricated address in front of a real person. */
-      footerText="You are receiving this because you applied for a role on the Aetherfield website. It is a one-off confirmation, not a subscription."
+         here would put a fabricated address in front of a real person.
+
+         The retention sentence names the CV explicitly, because the file is the
+         part of this submission a person most wants an end date on, and the
+         window is read from `RETENTION_WINDOW_TEXT.application` rather than
+         restated so the copy and the sweep cannot drift apart. */
+      footerText={
+        <>
+          You are receiving this because you applied for a role on the
+          Aetherfield website. It is a one-off confirmation, not a subscription.
+          We keep an application and the CV file it carries for{" "}
+          {RETENTION_WINDOW_TEXT.application} from the day it is sent, and both
+          are then erased automatically.
+        </>
+      }
     >
       <Heading as="h1" style={heading}>
         We have your application

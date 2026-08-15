@@ -1,5 +1,6 @@
 import { Button, Heading, Link, Text } from "react-email";
 
+import { RETENTION_WINDOW_TEXT } from "../../domain/retention";
 import { Shell, heading, paragraph } from "./shared";
 
 /**
@@ -85,7 +86,19 @@ export function NewsletterConfirmation({
   return (
     <Shell
       preview="Confirm your subscription to Aetherfield Journal."
-      footerText="You are receiving this because this address was entered on the Aetherfield website. Nothing is sent to it until the link above is used, and if that was not you, no action is needed."
+      /* The retention sentence covers the *unconfirmed* state, which is the
+         only state this message's recipient is in. Its window is read from
+         `RETENTION_WINDOW_TEXT.pendingSubscriber` rather than restated, exactly
+         as `expiresIn` is threaded in rather than written here. */
+      footerText={
+        <>
+          You are receiving this because this address was entered on the
+          Aetherfield website. Nothing is sent to it until the link above is
+          used, and if that was not you, no action is needed. An address that is
+          not confirmed is erased automatically after{" "}
+          {RETENTION_WINDOW_TEXT.pendingSubscriber}.
+        </>
+      }
     >
       <Heading as="h1" style={heading}>
         Confirm your subscription

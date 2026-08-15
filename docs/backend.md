@@ -2782,6 +2782,17 @@ are handled outcomes. There is no bulk action, restore UI, scheduled retention
 job or permanent row purge. This is a manual active-workspace control, **not a
 finite retention policy**; that open policy question remains unresolved.
 
+> **Corrected at prompt 81** (§12 rule 8). The last clause is no longer true:
+> the policy question is resolved and the repository now disagrees with it.
+> `/submissions`'s controls are unchanged and are still a manual
+> active-workspace control — that part stands — but a **scheduled retention job
+> now exists**, and a soft-deleted lead, subscriber or application is no longer
+> a permanent hidden row: stamping `deleted_at` starts a 30-day grace window and
+> the nightly sweep at `/api/cron/purge-submissions` then hard-deletes the row,
+> and an application's private CV blob with it. See "Finite retention for
+> phase-one personal data, prompt 81" at the end of this file for the windows,
+> the sweep's order and what is stated where.
+
 The client controls use an explicit confirm/cancel state before removal,
 keyboard buttons, pending text and a focused polite status result. Success
 revalidates only `/submissions`; no client data-fetching layer or cache was
@@ -9485,3 +9496,425 @@ comments were reworded. Added to `docs/automation.md`.
 | scheduled recalculation, threshold alerts | step 14 |
 | an xlsx parser in the application | the workbook is converted once by a committed script and the derived CSV is read with the existing pure `parseCsv` |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
+
+## Finite retention for phase-one personal data, prompt 81
+
+Implemented on 15 Aug 2026. It closes §8.3 rule 5 — *"Retention is finite and
+stated. Do not build a permanent archive by default."* — for the three **public**
+phase-one flows, which collect the most sensitive data in the repository: names,
+work email addresses, employers, free-text messages, and CV files. Prompt 73
+closed the same rule for **tenant** data; before this change a demo request
+captured on day one was retained forever, and an admin's removal in
+`/submissions` stamped `deleted_at` without ever ending the row's life. Step 7's
+record said so in its own words, and that passage is corrected in place above
+(§12 rule 8).
+
+Not a step 15. §5.2 remains the ordered plan; this is approved post-sequence
+hardening, on the same footing as prompts 63–80.
+
+### The policy, decided with the user
+
+| record | erased when |
+| --- | --- |
+| `lead` (a demo request) | `created_at` + **24 months** |
+| `application` — the row **and** its private CV blob | `created_at` + **12 months** |
+| `subscriber`, `status = 'pending'` | `created_at` + **30 days** |
+| `subscriber`, `status = 'unsubscribed'` | `unsubscribed_at` + **12 months** |
+| `subscriber`, `status = 'confirmed'` | **never by age** — consent is live, and the person holds a working one-click unsubscribe. Unsubscribing starts the 12-month clock above |
+| any of the three with `deleted_at` set | `deleted_at` + **30 days**, whichever comes first |
+
+**Every number above is a product decision recorded as a decision, not a
+measurement** (§12 rule 4) — exactly as prompt 73's 30-day organisation window
+says of itself. There is no traffic behind them and no legal advice behind them.
+They are defensible, not derived.
+
+The per-entity reasoning, which is the part a later session needs:
+
+- **A lead gets the longest window, 24 months.** It is the least sensitive of
+  the three — a work address and a company, given in order to be contacted about
+  a product — and it is the record with a genuine ongoing purpose: a sales
+  conversation started from a demo request can reasonably span two annual
+  reporting cycles, which is the unit this product's customers work in.
+- **An application gets 12 months, and the CV goes with it.** A CV is the most
+  sensitive artefact this repository holds — an address, an employment history,
+  often a phone number — and its purpose expires with the hiring round. Twelve
+  months keeps a candidate reachable for a role that reopens within the year
+  without turning the blob store into a permanent CV archive. **The blob is
+  named explicitly in the policy** because a row delete that leaves the bytes is
+  the failure this design exists to prevent.
+- **A `pending` subscriber gets 30 days, the shortest window in the table.**
+  That address never completed double opt-in, so there is no consent to hold it
+  under: it exists only as evidence that a confirmation link was issued, and
+  once the link's own expiry has long passed there is nothing it can be used
+  for. Holding an unconfirmed address indefinitely is the exact pattern double
+  opt-in exists to avoid.
+- **A `confirmed` subscriber never ages out**, and that is deliberate rather
+  than an omission. Consent is live, the person holds a working one-click
+  unsubscribe in every issue, and expiring a live subscription on a timer would
+  silently drop a reader who never asked to leave. The retention question here
+  is answered by the opt-out, not by a clock.
+- **Unsubscribing is what starts the clock** — 12 months from `unsubscribed_at`,
+  not from `created_at`. The row has to outlive the opt-out, because it *is* the
+  suppression record: erasing it the same day would let a re-import or a
+  re-signup mail an address that asked to stop. Twelve months is the same
+  reasoning the `email-best-practices` skill's `compliance.md` records for
+  consent records under CASL (three years) applied conservatively downward — we
+  keep the suppression evidence, not the subscription.
+- **The soft-delete window is 30 days and it can only shorten a life, never
+  extend one** — "whichever comes first". An admin's removal in `/submissions`
+  starts a grace window and then a hard delete, mirroring prompt 73's
+  grace-then-purge rather than inventing a second shape. It is what turns §9.2
+  rule 5's soft delete into "one operation with an audit trail" instead of a
+  permanent archive of hidden rows.
+
+### The sweep
+
+`app/api/cron/purge-submissions/route.ts` + `sweep.ts`, copying
+`purge-organizations`'s shape rather than abstracting over it — the same
+reasoning that file already carries, and the same reason it is not shared with
+the recalculation handler: the two handlers are eleven lines of gate each, and a
+shared wrapper would put the `CRON_SECRET` check one indirection away from the
+endpoint that deletes personal data.
+
+- **Fail-closed authorisation.** A constant-time `CRON_SECRET` bearer check that
+  also fails closed on an *unset* secret, answering `401` with no body and no
+  detail to every rejected caller. No BotID: the caller is not a browser, and
+  §7.3 records that a path missing from `initBotId()`'s list makes
+  `checkBotId()` **fail** rather than pass.
+- **The rate limit fails closed too**, as the organisation purge's does and
+  unlike the recalculation's. That one is idempotent, and refusing it during a
+  Redis outage costs a night of stale figures; this one deletes personal data
+  irreversibly, so a limiter that cannot be consulted is a reason to wait a
+  night. **Nothing is lost — every due row is due again tomorrow.** It shares
+  `checkCronSweepLimit`'s existing `cron-sweep` bucket: one scheduler, one call
+  each per night.
+- **Applications: blob first, then the row.** `cv_pathname` is `not null`, so
+  prompt 73's "null the pointer as each blob succeeds" trick is unavailable.
+  Instead the blob is deleted with `deleteCvStrict()` and the row is deleted
+  **only** on `true`; a failed blob delete counts a failure, leaves the row
+  standing, and retries tomorrow. Deleting the row first would orphan a person's
+  CV in Blob storage permanently with the pointer to it gone — the exact failure
+  prompt 73 designed against, and here the orphan is a CV. `deleteCv()`'s
+  step-5 best-effort/no-throw contract is untouched.
+- **Leads and subscribers are one statement each**, no blobs involved.
+- **One record's failure does not end the sweep.** Each is wrapped, counted, and
+  the sweep continues.
+- **One `now` is threaded in from the caller** rather than `now()` per
+  statement, so two records a second apart cannot land on different sides of a
+  boundary — the same rule prompt 73's sweep states. The cut-off arithmetic is
+  pure and lives in `lib/domain/retention.ts` with tests beside it, which is the
+  layer §6.2 requires to be independently testable and the one `npm test` is
+  scoped to.
+- **The response body is counts only** — leads, subscribers, applications, blobs
+  deleted, failures. No id, no address, no pathname: it lands in Vercel's
+  function logs, and §8.3 rule 2 forbids all three there. Nothing anywhere in
+  the sweep logs an identifier, an address or a pathname.
+
+### The audit trail
+
+One new table, `retention_purge_run`: one row per sweep run, carrying the
+per-entity counts, the run's timestamp, its wall-clock duration, and a nullable
+error drawn from a **closed vocabulary**, never an exception message — an
+exception can quote a person's data, which is the argument prompt 73's
+`purge_error` already makes.
+
+**Counts only, and never an identifier.** A table recording *which* addresses
+were erased would defeat the change entirely: it would replace a finite archive
+of personal data with a permanent one. What the trail has to answer is "did the
+sweep run, and how much did it remove", and counts answer it.
+
+It is deliberately **not** the `organization_deletion` shape and must not be
+made to copy it. That table tracks a grace window per record because there is
+nothing else that could; here the window is a pure function of columns that
+already exist on `lead`, `subscriber` and `application`, so a per-record marker
+row would be a second source of truth for a date the schema already implies.
+
+### What is stated, and where
+
+"Stated" (§8.3 rule 5) is satisfied in **two places only**, which was the user's
+decision:
+
+1. **This document** — the policy table above.
+2. **The four person-facing confirmation emails**, one plain sentence each in
+   the existing `Shell` `footerText`, saying the window and saying that erasure
+   is automatic. Each reads its number from `RETENTION_WINDOW_TEXT` in
+   `lib/domain/retention.ts` rather than hand-typing a duplicate, so the copy
+   and the sweep that enforces it cannot drift apart — the argument
+   `newsletter-confirmation.tsx` already makes for `expiresIn`. The footer prop
+   has been a `ReactNode` since step 4, so carrying an interpolation needed no
+   change to `shared.tsx`.
+
+| template | sentence added |
+| --- | --- |
+| `demo-request-confirmation.tsx` | "We keep a demo request for 24 months from the day it is made, and it is then erased automatically." |
+| `application-confirmation.tsx` | "We keep an application and the CV file it carries for 12 months from the day it is sent, and both are then erased automatically." |
+| `newsletter-confirmation.tsx` | "An address that is not confirmed is erased automatically after 30 days." |
+| `newsletter-welcome.tsx` | "A confirmed address is kept for as long as the subscription stands; once you unsubscribe, the record is erased automatically 12 months later." |
+
+The windows in that table are the rendered values of `RETENTION_WINDOW_TEXT`;
+the source reads the constant in every case.
+
+**The two internal notification templates get nothing.**
+`demo-request-notification.tsx` and `application-notification.tsx` go to
+Aetherfield, and the recipient of a retention statement is the data subject —
+telling the team its own policy inside a lead alert is noise, not a disclosure.
+
+**No marketing route's markup changes**, so §8.1 is untouched and there was
+nothing to re-approve. There is no retention line on `/`, `/journal`,
+`/careers` or `/job-listing/[slug]`.
+
+### Measured results
+
+Measured on 15 Aug 2026 against the real Neon database (`neon-purple-candle`),
+fixtures seeded and read back over the **direct** connection
+(`DATABASE_URL_UNPOOLED`) while the sweep itself ran through the app's pooled
+client, from a throwaway `dotenv -e .env.local -- tsx --conditions=react-server`
+harness that was deleted afterwards. **Every fixture address was synthetic
+(`…@example.invalid`) and no address appears below** (§8.3).
+
+**A pre-check ran first, and it is the reason a live sweep was safe to run at
+all**: with the policy's cut-offs applied to the existing data, `0` leads, `0`
+subscribers and `0` applications were due (1 real application exists, dated
+2026-08-09, well inside its 12-month window and not soft-deleted). No
+pre-existing row was erased by any run below, and the fixtures were deleted
+afterwards — the tables are back to that same single real application.
+
+#### 1. The live sweep against seeded fixtures
+
+15 fixtures: a due and a surviving row either side of all five boundaries, a
+soft-deleted row of each of the three kinds, an `unsubscribed` row with a **null**
+`unsubscribed_at` (the `coalesce` fallback), a five-year-old `confirmed`
+subscriber, and a `confirmed` subscriber that is soft-deleted past its grace.
+
+**The margin is 300 s either side, not one second, and that is a correction
+rather than a shortcut.** The first run planted rows at ±1 s and deleted *every*
+survivor: the harness seeds, and only then does `sweep()` take its own clock, so
+the measured drift between the fixture clock and the sweep clock was **1,060 ms**
+— larger than the margin being tested. That run measured deletion working and
+measured nothing about the boundaries. The margin was raised above the drift and
+the run repeated; **the exact one-second pinning of both sides of every boundary
+is `lib/domain/retention.test.ts`, where `now` is injected and the drift is
+zero.** Recording the first run here rather than only the second is the point
+(§12 rule 3).
+
+| | fixtures before | after |
+| --- | --- | --- |
+| `lead` | 4 | 2 |
+| `subscriber` | 7 | 3 |
+| `application` | 4 | 2 |
+
+Drift on the recorded run: **1,001 ms**, against the 300 s margin. The sweep
+returned `{"leads":2,"subscribers":4,"applications":2,"blobsDeleted":2,"failures":0}`.
+
+**The seven survivors, read back, are exactly the seven predicted** — and each
+one is a rule:
+
+| survivor | the rule it proves |
+| --- | --- |
+| `lead-survive` | inside the 24-month window |
+| `lead-softdel-survive` | inside the 30-day soft-delete grace |
+| `app-survive` | inside the 12-month window |
+| `app-softdel-survive` | inside the grace — **and its `cv_pathname` names a blob that was never uploaded**, so a missing object does not drag a live row out |
+| `sub-pending-survive` | inside the 30-day pending window |
+| `sub-unsub-survive` | dated from `unsubscribed_at`, inside 12 months |
+| `sub-confirmed-ancient` | **five years old and untouched** — a `confirmed` subscriber never ages out |
+
+The eight deleted were `lead-due`, `lead-softdel-due`, `sub-pending-due`,
+`sub-unsub-due`, `sub-unsub-nullstamp` (the `coalesce` fallback — a row whose
+`unsubscribed_at` is null is dated from `created_at` and is not immortal),
+`sub-confirmed-softdel` (**live consent does not protect a row an admin removed**
+— the soft-delete window is the one thing that reaches a `confirmed` row),
+`app-due` and `app-softdel-due`.
+
+The audit row written by that run:
+
+```
+{"duration_ms":10413,"leads_deleted":2,"subscribers_deleted":4,
+ "applications_deleted":2,"blobs_deleted":2,"failures":0,"error":null}
+```
+
+Counts only, exactly as the table's docblock requires. **Neon's scale-to-zero
+was not controlled for and the 10.4 s is not a warm figure** — it spans three
+blob round trips and several pooled queries against a database that may have
+been resuming (§7.3). It is recorded as an observation, not a latency budget.
+
+#### 2. The CV blob is actually gone
+
+Three throwaway PDFs were uploaded through the existing `putCv()` helper and
+attached to three applications — one due, one due by soft-delete, one surviving.
+`head()` before the sweep reported **5 bytes** for each of the two due ones.
+After the sweep:
+
+```
+blob HEAD after sweep (due):     GONE BlobNotFoundError :: Vercel Blob: The requested blob does not exist
+blob HEAD after sweep (softdel): GONE BlobNotFoundError :: Vercel Blob: The requested blob does not exist
+blob HEAD after sweep (survive): PRESENT 5 bytes
+```
+
+A row delete that left the bytes is the failure this design exists to prevent,
+and the survivor's object proves the sweep is not simply deleting everything.
+
+**One finding worth carrying forward: `del()` does not distinguish a missing
+blob.** The `app-softdel-survive` fixture pointed at a pathname that was never
+uploaded, and in the first run an equivalent row's `deleteCvStrict()` returned
+`true` and counted toward `blobsDeleted`. So `blobs_deleted` is "delete calls
+that did not fail", not "objects that existed and are now gone". That is the
+right behaviour for a retry-tomorrow sweep — an already-deleted object must not
+stall the row forever — but the count should not be read as an object census.
+
+#### 3. The blob-failure path
+
+Induced for real rather than mocked: the same sweep was run in a process whose
+`BLOB_READ_WRITE_TOKEN` was well-formed but invalid, so `del()` throws inside
+`deleteCvStrict`, which returns `false` by its own contract. Nothing in the
+sweep was stubbed. One due application and one due lead were planted.
+
+```
+sweep summary: {"leads":1,"subscribers":0,"applications":0,"blobsDeleted":0,"failures":1}
+rows left:     {"app_left":"1","lead_left":"0"}
+audit row:     {"duration_ms":3826,"leads_deleted":1,"subscribers_deleted":0,
+                "applications_deleted":0,"blobs_deleted":0,"failures":1,
+                "error":"blob-delete-failed"}
+```
+
+All four required properties hold: **the row survived** (`app_left: 1`), the
+failure was **counted**, the sweep **continued** past it and still erased the
+lead, and the recorded reason is from the closed vocabulary — not an exception
+message, and it names no pathname.
+
+#### 4. The 401 path
+
+Against `npm run start` on port 3210, serving the build measured below (the
+served CSS chunks were confirmed to match that build first, per
+`docs/automation.md`'s stale-server trap). `CRON_SECRET` is 64 characters; **the
+value was never printed** (§8.4).
+
+| request | result |
+| --- | --- |
+| no `authorization` header | `401`, **0 bytes** |
+| wrong secret, different length | `401`, **0 bytes** |
+| right-length (64-char) wrong secret | `401`, **0 bytes** |
+| the secret with no `Bearer ` prefix | `401`, **0 bytes** |
+| the correct bearer token | `200`, `{"leads":0,"subscribers":0,"applications":0,"blobsDeleted":0,"failures":0}` |
+| `POST` with the correct token | `405` — the handler exports `GET` only |
+
+Every rejection is indistinguishable from the others: same status, no body, no
+detail. The authorised call returning all-zero counts is itself correct — the
+only fixtures on the database at that moment were the seven survivors, none of
+them due.
+
+#### 5. The command checks
+
+| check | result |
+| --- | --- |
+| `npm run db:generate` | one migration, `lib/db/migrations/0015_organic_alice.sql` — the new type, table and index only; **no existing table altered** |
+| `npm run db:migrate` | `[✓] migrations applied successfully!`, and the table was **read back over the direct connection** rather than trusted: nine columns with the right types and defaults, `error` nullable and `USER-DEFINED`/`retention_purge_error`, both indexes present, the enum's three labels in order, `drizzle.__drizzle_migrations` row `id 16`. Prompt 76's "exits 0 having applied nothing" caveat did **not** bite this time |
+| `npm run lint` | exit **0**, no output |
+| `npm run typecheck` | exit **0**, no output |
+| `npm test` | **11 files, 237 tests passed** in 897 ms — the 215 that existed plus the 22 new retention boundary tests |
+| `npm run build` | exit **0**; route table below |
+| `npm run test:e2e:local` | **98 passed (3.1m)**, Chromium and Firefox. The authenticated matrix is unaffected |
+| `npm run test:e2e:webkit` | **exit 1: "Podman is required for WebKit on Arch Linux."** — the same environment gap prompt 81 predicted. **This is not a pass and is not recorded as one** |
+
+The route table, quoted as produced. The one change is the new `ƒ` cron path;
+every marketing route is still `○` or `●`:
+
+```
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /about
+├ ƒ /account
+├ ƒ /activity
+├ ƒ /activity/[importId]
+├ ƒ /activity/factors
+├ ƒ /activity/mappings
+├ ƒ /api/auth/[...all]
+├ ƒ /api/cron/purge-organizations
+├ ƒ /api/cron/purge-submissions
+├ ƒ /api/cron/recalculate
+├ ƒ /api/newsletter/unsubscribe
+├ ● /article/[slug]
+│ ├ /article/how-to-build-a-climate-ready-data-stack
+│ ├ /article/sustainability-isnt-a-side-project-making-impact-operational
+│ ├ /article/inside-the-aetherfield-model-how-we-turn-data-into-action
+│ └ [+3 more paths]
+├ ○ /careers
+├ ƒ /dashboard
+├ ○ /design-system
+├ ○ /forgot-password
+├ ƒ /invitation/[id]
+├ ● /job-listing/[slug]
+│ ├ /job-listing/data-scientist
+│ ├ /job-listing/product-manager
+│ └ /job-listing/ux-designer
+├ ○ /journal
+├ ƒ /newsletter/confirm
+├ ƒ /newsletter/unsubscribe
+├ ƒ /reports
+├ ƒ /reports/[reportId]
+├ ƒ /reports/[reportId]/export
+├ ○ /reset-password
+├ ○ /sign-in
+├ ○ /sign-up
+├ ƒ /submissions
+├ ƒ /submissions/applications/[id]/cv
+├ ƒ /targets
+└ ○ /verify-email
+```
+
+#### 6. The prerender comparison
+
+`docs/automation.md`'s clean two-build procedure, in the same environment on
+both sides: build the working tree, snapshot `.next/server/app` and
+`.next/BUILD_ID`, `git stash push -u`, rebuild, snapshot, `git stash pop`, then
+diff normalising **only** the build id. The JS chunk names were deliberately
+left un-normalised.
+
+| | before | after |
+| --- | --- | --- |
+| prerendered HTML files | 21 | 21 |
+| **identical after normalising `BUILD_ID`** | — | **21 of 21** |
+| differing | — | **0** |
+| files added or removed | — | **none** |
+| CSS chunks | `00u7jgtk688mf.css` **11,186 B** + `3qi1cinspn7re.css` **407,960 B** | **identical names, identical bytes** — 419,146 B total |
+
+**The CSS byte count is remeasured, not carried forward** — the 68,506 figure
+this prompt warned against does not describe this tree, which builds two chunks
+totalling 419,146 B. The chunk names are content-addressed and match across both
+builds, so the stylesheet is unchanged: **0 rules added, 0 removed.**
+
+`Prerender impact: none — no route changes`, **verified rather than assumed**.
+
+#### 7. The stated sentences, rendered
+
+Not asserted from the source — the four templates were rendered with
+`render()` (there is no email-preview script, and §2 records why) and the
+retention sentence extracted from the output:
+
+| template | the sentence, as rendered |
+| --- | --- |
+| `demo-request-confirmation` | "We keep a demo request for **24 months** from the day it is made, and it is then erased automatically." |
+| `application-confirmation` | "We keep an application and the CV file it carries for **12 months** from the day it is sent, and both are then erased automatically." |
+| `newsletter-confirmation` | "An address that is not confirmed is erased automatically after **30 days**." |
+| `newsletter-welcome` | "A confirmed address is kept for as long as the subscription stands; once you unsubscribe, the record is erased automatically **12 months** later." |
+| `demo-request-notification` | *(none — internal)* |
+| `application-notification` | *(none — internal)* |
+
+Every number came out of `RETENTION_WINDOW_TEXT` rather than a hand-typed
+duplicate, which is what makes the sentence in a person's inbox and the
+predicate that actually deletes incapable of drifting apart.
+
+### What prompt 81 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| a restore UI, or undo for a purged record | the purge is the end of the lifecycle; the 30-day `deleted_at` window *is* the undo, and `/submissions`'s existing controls already stamp it |
+| a retention line on `/`, `/journal`, `/careers` or `/job-listing/[slug]` | the user's decision above — it would change prerendered markup and would need its own approved §8.1 deviation |
+| a retention sentence in the two internal notification templates | the recipient is Aetherfield, not the data subject |
+| a per-record configurable window, or an admin settings screen | one policy, stated once. Not a step, and §5.2's "do not overbuild" is explicit |
+| phase-two tenant data | prompt 73 already gave it an exit, on its own window |
+| Better Auth's `user`, `session`, `account`, `verification` tables | generated tables with their own lifecycle, and a staff account is not a submission (§9.1) |
+| changing `deleteCv`'s best-effort contract | step 5 set it deliberately; the sweep uses `deleteCvStrict` |
+| AI factor matching | blocked, not deferred: prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, and prompt 76 shipped the provider-free path. Named rather than smuggled past |
+| a step 15 | §5.2 remains the ordered plan; this is post-sequence hardening, as prompts 63–80 were |
