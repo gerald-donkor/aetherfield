@@ -11342,12 +11342,36 @@ The promotion was attempted three times and blocked each time by the local
 permission classifier, not by Vercel and not by a technical obstacle. **Google
 sign-in remains broken in production**, exactly as before this prompt. This is
 the one item of prompt 87's stated scope that was not delivered, and it is
-recorded as not done rather than as done. The commands are:
+recorded as not done rather than as done.
+
+> **Corrected 15 Aug 2026 (§12 rule 8).** Both variables were promoted to
+> Production by the user on that date, so the paragraph above is now stale as to
+> state — it is kept because the *reason* it was not done in prompt 87 still
+> describes that prompt's outcome accurately. `vercel env ls production` lists
+> both, Sensitive, and Vercel stamped them Sensitive on its own; the values
+> cannot be read back from the platform. **The commands this section originally
+> recorded were defective and are corrected below.**
+
+**The quoting trap, which cost one wrong write.** `.env.local` stores both
+values *quoted* (`GOOGLE_CLIENT_ID="…"`). Next.js strips surrounding quotes when
+it loads that file, so local Google sign-in works; `vercel env add` does not,
+and stores them literally. The first promotion attempt therefore wrote a client
+ID beginning with `"`, which the CLI warned about in one easily-missed line —
+`! Value includes surrounding quotes (these will be stored literally)` — and
+which `vercel env ls` cannot reveal afterwards, because the variable is
+Sensitive. Production would have failed with `invalid_client` while every
+listing looked correct. The variable was removed and re-added with the quotes
+stripped:
 
 ```
-grep '^GOOGLE_CLIENT_ID=' .env.local | cut -d= -f2- | vercel env add GOOGLE_CLIENT_ID production
-grep '^GOOGLE_CLIENT_SECRET=' .env.local | cut -d= -f2- | vercel env add GOOGLE_CLIENT_SECRET production --sensitive
+vercel env rm GOOGLE_CLIENT_ID production --yes
+grep '^GOOGLE_CLIENT_ID=' .env.local | cut -d= -f2- | sed 's/^"//; s/"$//' | vercel env add GOOGLE_CLIENT_ID production
+grep '^GOOGLE_CLIENT_SECRET=' .env.local | cut -d= -f2- | sed 's/^"//; s/"$//' | vercel env add GOOGLE_CLIENT_SECRET production --sensitive
 ```
+
+**The absence of that warning line is the only check available at write time**,
+since a Sensitive value cannot be read back. Any future promotion of a value out
+of `.env.local` strips quotes the same way and watches for the same line.
 
 Environment variables apply to deployments built *after* they are set, so a
 redeploy is required once they land.
@@ -11355,7 +11379,9 @@ redeploy is required once they land.
 **The Google Cloud Console redirect URI** —
 `https://aetherfield-rho.vercel.app/api/auth/callback/google` — must be added to
 the OAuth client by hand. **Google sign-in is not to be reported as working
-until both this and the two variables above are done and confirmed.**
+until both this and the two variables above are done and confirmed.** As of this
+correction the two variables are done; the redirect URI and a real sign-in
+against production are not confirmed here.
 
 **Preview has no `BETTER_AUTH_URL`** (D3), so anything on a preview deployment
 that resolves an emailed link still throws. Deliberate; wants its own prompt if
