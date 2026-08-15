@@ -337,6 +337,17 @@ have an honest `BETTER_AUTH_URL`; add their deployed origins before deploying
 auth rather than inventing one now. Rotation uses `BETTER_AUTH_SECRETS`
 (plural), recorded but not configured.
 
+> **Corrected 15 Aug 2026 by prompt 87 (§12 rule 8).** The first sentence above
+> was true when written and is now false: production has been deploying from
+> `main` since at least 9 Aug 2026 — the oldest deployment `vercel ls` still
+> lists — on the alias `https://aetherfield-rho.vercel.app`.
+> The instruction in the second sentence was carried out at prompt 87 —
+> Production's `BETTER_AUTH_URL` is that alias, added as a deployed origin and
+> not an invented one. **Preview still has no `BETTER_AUTH_URL`**, deliberately;
+> the refusal to invent one stands there, for the reason recorded in prompt 87's
+> D3. There is still **no assigned custom domain** — that half of the sentence
+> remains true. See "Completing the production environment, prompt 87" below.
+
 Auth now stores a person's name, lower-cased email and password hash. Request
 bodies, email addresses, passwords and secrets are not logged. BotID remains
 the prompt-approved §8.2 gap until step 2 establishes it for public write paths;
@@ -11168,3 +11179,207 @@ A dev server was running, so both sides were built in copies under
 | **AI-assisted anything** | blocked, not deferred |
 | **any change to a marketing route, `Container`, `SiteNav`, `SiteFooter` or a GSAP surface** | out of scope entirely (§8.1), and verified by the prerender diff |
 | **a step 15** | §5.2 remains the ordered plan; this is post-sequence work as prompts 63–85 were |
+
+---
+
+## Completing the production environment, prompt 87
+
+**Scope: the deployed environment, not the code.** No file under `app/` or
+`lib/` was edited, no dependency changed, and no feature was added. This prompt
+promoted environment variables that existed only in Development, added ones that
+existed nowhere on Vercel, and pushed the five commits production was behind.
+It is the first entry here that records a deployment rather than a build.
+
+### What was broken in production, measured 15 Aug 2026
+
+Read from `vercel env ls`, `vercel ls`, `vercel inspect` and
+`git ls-remote origin main`, before anything was written. Names only; no value
+was echoed at any point (§8.4).
+
+| variable | environments it existed in | consequence in production |
+| --- | --- | --- |
+| `RESEND_API_KEY` | **none on Vercel** — only in the untracked local `.env.local` | no email at all was sendable |
+| `BETTER_AUTH_URL` | Development only | `appBaseUrl()` (`lib/email/config.ts`) throws when unset — newsletter confirm/unsubscribe, organisation invitations and step 14's threshold alerts all fail on it |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Development only | Google sign-in broken on the deployed `/sign-in` and `/sign-up` |
+| `LEAD_NOTIFICATION_EMAIL` / `APPLICATION_NOTIFICATION_EMAIL` | none | a supported state — the notification is skipped, logging no address. A demo request was captured and nobody was told |
+
+**The compound consequence was worse than any single row, and neither document
+that reasoned about it saw the whole.** `lib/auth/server.ts` sets
+`requireEmailVerification: true` with `sendOnSignUp`, so email/password signup
+cannot complete without a working Resend key — and this file's step 6 record
+gave the mitigation as *"Google remains the available signup path in the
+meantime"*, while Google's credentials were Development-only. **Production
+therefore had no working signup path at all.** Each document closed the other's
+gap on paper and neither closed it in the environment.
+
+### Decisions taken with the user, 15 Aug 2026
+
+- **D1. `LEAD_NOTIFICATION_EMAIL` and `APPLICATION_NOTIFICATION_EMAIL` are both
+  `geralddonkor1@gmail.com` in Production.** Chosen deliberately over a
+  role-based address: under the sandbox sender it is the *only* recipient Resend
+  will deliver to, so it is the sole value that makes an internal notification
+  arrive today. Confirmed against the `resend` skill this session rather than
+  restated from this file — its documented failure mode is a 403 when sending
+  from `resend.dev` to anything but the Resend account's own address. **Two
+  variables, not one reused**: collapsing sales and recruiting into a single
+  address is a decision nobody has made, and this prompt did not make it either.
+- **D2. Google's credentials are promoted to Production, and the Google Cloud
+  Console redirect URI is the user's step.** The implementation cannot add
+  `https://aetherfield-rho.vercel.app/api/auth/callback/google` to the OAuth
+  client. **Both halves are open — see the open items below.**
+- **D3. `BETTER_AUTH_URL` is set for Production only; Preview is recorded as a
+  known gap rather than guessed at.** A preview deployment's URL is
+  per-deployment, so no single stored value is honest for it. The alternative —
+  teaching `appBaseUrl()` to fall back to `VERCEL_URL` — is a code change to the
+  module resolving every emailed link, on a path this prompt does not exercise.
+  It gets its own prompt if preview deploys ever send mail. This is the same
+  refusal step 6 made: add the deployed origin, do not invent one.
+
+### The production environment as written
+
+Four of the six intended variables landed. Each value was piped through stdin
+rather than passed as `--value`, so no secret appeared in a command line, a
+shell history entry or a terminal (§8.4). `vercel env pull` was **not run at any
+point** — `RESEND_API_KEY` existed only in `.env.local`, and a pull replaces
+that file entirely, which would have destroyed the only copy. After this change
+the value is on Vercel and that hazard is closed, which is itself part of why
+the promotion was worth doing.
+
+| variable | environment | type | source |
+| --- | --- | --- | --- |
+| `RESEND_API_KEY` | Production | Sensitive | local `.env.local`, unprinted |
+| `BETTER_AUTH_URL` | Production | Sensitive | `https://aetherfield-rho.vercel.app` |
+| `LEAD_NOTIFICATION_EMAIL` | Production | Sensitive | D1 |
+| `APPLICATION_NOTIFICATION_EMAIL` | Production | Sensitive | D1 |
+
+**All four came out Sensitive, including the two that are not secrets.** Only
+`RESEND_API_KEY` was added with an explicit `--sensitive`; the CLI applied the
+same type to the URL and to both addresses on its own, under a project or team
+policy this prompt did not set and did not investigate. Recorded as observed
+behaviour, not as an intention. The practical consequence is that these four
+cannot be read back off Vercel — `vercel env ls` shows `Hidden` for their
+values — so `BETTER_AUTH_URL`'s production value is recoverable only from this
+file or the dashboard.
+
+**No `NEXT_PUBLIC_*` variable was added**, which keeps AGENTS.md §8.4's line
+true that this project has no public environment variable at all.
+
+### The deployment
+
+`git push origin main`, `eafc364..3e8e42f`. The GitHub integration deploys
+production on a push to `main`; **no second deployment path was introduced** and
+`vercel --prod` was not run.
+
+- **id** `dpl_9UzcpLqU7UVS9Z7QvYNJDfeZGV8u`
+- **target** production, **status** Ready, **build duration** 1m
+- **created** Sat 15 Aug 2026 22:14:43 GMT
+- **aliases** `https://aetherfield-rho.vercel.app`,
+  `https://aetherfield-dgsloxx417s-projects.vercel.app`,
+  `https://aetherfield-git-main-dgsloxx417s-projects.vercel.app`
+
+The five commits it carries: `b0f0ef1` bulk factor-set CSV import, `d9ffbdd`
+connection-acquisition resilience, `8b21f34` factor-set lifecycle, `b51c4ea`
+market-based scope 2, `3e8e42f` the rung-5 grid average.
+
+**Ordering, which matters and is guaranteed rather than inferred:** all four
+environment writes completed before `git push` ran, so the build necessarily
+started with them in place. The previous production deployment is 21h older,
+which corroborates that this deployment is the push's and not a pre-existing
+one.
+
+### Verification
+
+Local, at `3e8e42f`, before the push — a failing check would have ended the
+prompt:
+
+- `tsc --noEmit` — no diagnostics
+- `eslint` — no output
+- `vitest run` — `Test Files 12 passed (12)`, `Tests 283 passed (283)`
+- `next build` — compiled in 10.0s, 32 static pages generated
+
+The route table AGENTS.md §8.1 fixes was emitted unchanged: `/`, `/about`,
+`/careers`, `/journal`, `/design-system` as `○ Static`; `/article/[slug]` (6
+paths) and `/job-listing/[slug]` (3) as `● SSG`.
+
+Live, against the production alias after the deployment reached Ready:
+
+| path | status |
+| --- | --- |
+| `/`, `/journal`, `/about`, `/careers`, `/sign-in`, `/sign-up` | `200` |
+| `/api/cron/purge-organizations`, `/api/cron/purge-submissions`, `/api/cron/recalculate` | `401` |
+
+**The three cron paths failing closed to an unauthenticated request is proven on
+a real deployment**, not assumed from the code. `CRON_SECRET` is Production and
+Preview only.
+
+`vercel logs` on the new deployment returned exactly the nine requests those
+checks made, all at level `info`, **no errors and no warnings**. The six
+marketing paths were served as `◇` and the three cron paths ran as `λ`
+functions, which independently confirms the prerendered pages are still
+prerendered as deployed rather than only as built.
+
+**No prerender diff was run here, and none was required.** This prompt adds no
+code; the diff that matters was run per-commit by each of the five prompts whose
+work was deployed. Saying so explicitly rather than implying a diff happened.
+
+**The E2E matrix was not run.** It builds and serves locally on port 3100 and
+tells us nothing about the deployed environment, which is the only thing this
+prompt changed. The live checks above are the ones that bear on it.
+
+### Trust boundary — unchanged in code, materially changed in effect
+
+Three write paths that were inert in production because their key was missing
+are now live. `RESEND_API_KEY` makes `lib/email/send.ts` able to send, so the
+demo-request, newsletter, application, invitation and alert paths reach a real
+provider for the first time on this alias. Every one keeps the §10 order it
+already had — BotID, rate limit, schema parse, write, then best-effort email —
+and this prompt weakened none of it. A failed email still never fails the write.
+
+### Open items this prompt did not close
+
+**`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are still Development-only.**
+The promotion was attempted three times and blocked each time by the local
+permission classifier, not by Vercel and not by a technical obstacle. **Google
+sign-in remains broken in production**, exactly as before this prompt. This is
+the one item of prompt 87's stated scope that was not delivered, and it is
+recorded as not done rather than as done. The commands are:
+
+```
+grep '^GOOGLE_CLIENT_ID=' .env.local | cut -d= -f2- | vercel env add GOOGLE_CLIENT_ID production
+grep '^GOOGLE_CLIENT_SECRET=' .env.local | cut -d= -f2- | vercel env add GOOGLE_CLIENT_SECRET production --sensitive
+```
+
+Environment variables apply to deployments built *after* they are set, so a
+redeploy is required once they land.
+
+**The Google Cloud Console redirect URI** —
+`https://aetherfield-rho.vercel.app/api/auth/callback/google` — must be added to
+the OAuth client by hand. **Google sign-in is not to be reported as working
+until both this and the two variables above are done and confirmed.**
+
+**Preview has no `BETTER_AUTH_URL`** (D3), so anything on a preview deployment
+that resolves an emailed link still throws. Deliberate; wants its own prompt if
+preview deploys ever send mail.
+
+**No sending domain, so `FROM` is unchanged.** This is the real blocker on
+customer-facing email and it stays open — the three-step procedure is recorded
+at step 3 above. **Email is not "working" beyond internal notification to D1's
+address**, and under the sandbox sender no other recipient is deliverable. The
+practical reading: a demo request from a stranger now notifies the D1 address,
+but that stranger's confirmation email does not arrive.
+
+**`requireEmailVerification` was not weakened** to route around the sandbox
+sender. Step 6's refusal stands.
+
+**No custom domain** — `vercel domains ls` reports 0. **No `vercel.ts`, no CI
+workflow file**; the GitHub integration already deploys `main` and a second path
+is the thing to avoid. **Neon branching for preview deployments** remains open
+from step 1.
+
+### One standing constraint, discovered here
+
+**The GitHub repository is public** (`gh api repos/gerald-donkor/aetherfield` →
+`private: false`). `.env.local` is gitignored and no secret is in the tree, so
+this push was safe as it stood — but a public repository is a standing
+constraint on every future commit, and it is recorded here because prompt 87 is
+where it was discovered.
