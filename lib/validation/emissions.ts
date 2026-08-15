@@ -550,6 +550,89 @@ export const retireCustomFactorSchema = z.object({
   factorId: z.uuid({ error: "Choose a customer-supplied factor." }),
 });
 
+/* -------------------------------------------------------------------------- */
+/*  A set's lifecycle — correcting its provenance, and retiring it             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The ten provenance and applicability fields of a set an owner may correct —
+ * prompt 84 decision 1.
+ *
+ * **Derived from {@link newFactorSetSchema}, never restated.** The editable
+ * field list is exactly that schema minus `mode`, so the rules a set was created
+ * under are the rules it is corrected under, and a field added to one is a field
+ * added to both. The Zod docs prefer the `.shape` spread over `.extend()`, and
+ * spreading also puts `setId` first, which is the order the form reads in.
+ *
+ * **`gasBasis` is absent, and that is decision 2.** The basis is derived from
+ * the rows themselves (`co2e` is combined, any other gas is per-gas) and
+ * `resolveWritableSet` refuses a row whose derived basis differs from its set's.
+ * Editing it here would relabel the meaning of every stored row without touching
+ * one. `organizationId`, `supersededBySetId`, `createdAt` and `retrievedAt` are
+ * absent for the same reason in a different direction: none of them is the
+ * owner's to state.
+ *
+ * The two cross-field rules are {@link createCustomFactorSchema}'s verbatim.
+ * **Their paths are single-segment here** — this form has no `set` wrapper — so
+ * the action maps them with its own reader rather than
+ * `customFactorFieldErrors`, which skips any issue with `path.length < 2`.
+ */
+export const editFactorSetSchema = z
+  .object({
+    /** A claim, not a capability — `lib/db/emission-queries.ts` re-reads it
+        under the tenant predicate inside the updating transaction. */
+    setId: z.uuid({ error: "Choose a factor set." }),
+    ...newFactorSetSchema.omit({ mode: true }).shape,
+  })
+  .superRefine((value, ctx) => {
+    if (value.effectiveTo < value.effectiveFrom) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["effectiveTo"],
+        message: "The end date cannot be before the start date.",
+      });
+    }
+
+    if (!value.sourceUrl && !value.sourceReference) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceReference"],
+        message: "Enter a source URL or an internal source reference.",
+      });
+    }
+  });
+
+export type EditFactorSetInput = z.infer<typeof editFactorSetSchema>;
+
+/** The edit form's field names, taken from the schema so a field cannot be
+    named here that the schema does not carry. */
+export type EditFactorSetField = keyof EditFactorSetInput & string;
+
+export type EditFactorSetResult = SubmitResult<EditFactorSetField>;
+
+export const retireFactorSetSchema = z.object({
+  setId: z.uuid({ error: "Choose a factor set." }),
+});
+
+/**
+ * Retiring a set answers with the consequence it caused, the way
+ * {@link RetireCustomFactorResult} does — and with one number more.
+ *
+ * `factorCount` is the set's live rows, which stay live: retirement is the set's
+ * `deleted_at` and **does not cascade** (prompt 84 decision 4). Every read path
+ * already excludes them through the set join, so cascading would be a second
+ * source of truth for one fact. `mappingCount` is the active `(category, unit)`
+ * mappings pointing at any of those rows, counted inside the retiring
+ * transaction so the announced number is the number that was true at the write.
+ */
+export type RetireFactorSetResult =
+  | { ok: true; mappingCount: number; factorCount: number }
+  | {
+      ok: false;
+      error: string;
+      fieldErrors?: Partial<Record<"setId", string>>;
+    };
+
 export type CreateCustomFactorInput = z.infer<typeof createCustomFactorSchema>;
 
 /** Distributes over the union, so `set.setId` and `set.mode` are covered
@@ -585,6 +668,13 @@ export const CUSTOM_FACTOR_ERRORS = {
     "That customer-supplied factor is not available. It may already have been retired.",
   setExists:
     "Your organisation already has a set with this source and version. Choose it above instead of creating a second one.",
+  /* The same collision reached from the edit form, where "choose it above" is
+     not the way out — this set already exists and it is the source or the
+     version that has to move (prompt 84). */
+  setRenameExists:
+    "Your organisation already has another set with this source and version. Give this one a different source or version.",
+  notOwnerSet:
+    "Only an owner can correct or retire a factor set. Its licence and effective dates are rendered as evidence beside every figure its rows produce.",
   setNotFound:
     "That factor set is not available. It may have been retired. Choose another, or create a new set.",
   gasBasisCombined:

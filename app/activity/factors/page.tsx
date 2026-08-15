@@ -4,7 +4,9 @@ import type { ReactNode } from "react";
 
 import { CustomFactorForm } from "../../_components/activity/custom-factor-form";
 import { FactorImportForm } from "../../_components/activity/factor-import-form";
+import { FactorSetForm } from "../../_components/activity/factor-set-form";
 import { RetireFactorButton } from "../../_components/activity/retire-factor-button";
+import { RetireSetButton } from "../../_components/activity/retire-set-button";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
@@ -37,6 +39,12 @@ export default async function ActivityFactorsPage() {
      twenty fields before being refused. */
   const canManage = membership.role === "owner";
   const activeSets = sets.filter((set) => set.deletedAt === null);
+  /* The rows section reads each row's set state from this rather than from a
+     second query — see the row list below for why a live row in a retired set
+     is not "Active". */
+  const retiredSetIds = new Set(
+    sets.filter((set) => set.deletedAt !== null).map((set) => set.id),
+  );
 
   return (
     <>
@@ -93,7 +101,9 @@ export default async function ActivityFactorsPage() {
             </div>
           ) : (
             <ul aria-label="Customer-supplied factor sets">
-              {sets.map((set) => (
+              {sets.map((set) => {
+                const retiredAt = set.deletedAt;
+                return (
                 <li key={set.id} className="border-b border-border py-5 first:border-t">
                   {/* A `<dl>`, because `Detail` emits `<dt>`/`<dd>` and those
                       are only legal inside one. */}
@@ -146,10 +156,56 @@ export default async function ActivityFactorsPage() {
                         : "Per gas"}
                       <br />
                       Added {DATE_FORMAT.format(set.createdAt)} UTC
+                      {retiredAt ? (
+                        <>
+                          <br />
+                          Set retired {DATE_FORMAT.format(retiredAt)} UTC
+                        </>
+                      ) : null}
                     </Detail>
                   </dl>
+
+                  {/* Presentation only. Each action's own owner check is what
+                      enforces this (AGENTS.md 11.2 rule 2). A retired set keeps
+                      its row and loses its controls: un-retiring is a second
+                      decision with its own surface and is not built here. */}
+                  {canManage && !retiredAt ? (
+                    <div className="mt-6">
+                      <details className="group">
+                        <summary className="cursor-pointer font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                          Correct or retire this set
+                        </summary>
+                        <div className="mt-8 border-t border-border pt-8">
+                          <FactorSetForm
+                            set={{
+                              id: set.id,
+                              source: set.source,
+                              datasetVersion: set.datasetVersion,
+                              publicationYear: set.publicationYear,
+                              effectiveFrom: set.effectiveFrom,
+                              effectiveTo: set.effectiveTo,
+                              licence: set.licence,
+                              licenceUrl: set.licenceUrl,
+                              sourceUrl: set.sourceUrl,
+                              sourceReference: set.sourceReference,
+                              notes: set.notes,
+                              gasBasis: set.gasBasis,
+                            }}
+                          />
+                          <div className="mt-10 border-t border-border pt-8">
+                            <RetireSetButton
+                              setId={set.id}
+                              factorCount={set.factorCount}
+                              label={`${set.source} — ${set.datasetVersion}`}
+                            />
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </section>
@@ -179,6 +235,13 @@ export default async function ActivityFactorsPage() {
             <ul aria-label="Customer-supplied factor rows">
               {factors.map((factor) => {
                 const retired = factor.deletedAt !== null;
+                /* Retiring a set does **not** cascade to its rows (prompt 84
+                   decision 4) — every read path already excludes them through
+                   the set join. So a live row in a retired set is out of use
+                   and must not read "Active". The page already holds `sets` and
+                   the row's `setId`, so this is a lookup, not a second query. */
+                const setRetired =
+                  retiredSetIds.has(factor.setId) && !retired;
                 return (
                   <li
                     key={factor.id}
@@ -201,7 +264,11 @@ export default async function ActivityFactorsPage() {
                           {factor.region ?? "Not stated"}
                         </MiniDetail>
                         <MiniDetail label="State">
-                          {retired ? "Retired" : "Active"}
+                          {retired
+                            ? "Retired"
+                            : setRetired
+                              ? "Set retired"
+                              : "Active"}
                           <br />
                           {factor.mappingCount.toLocaleString("en-GB")} mapped{" "}
                           {factor.mappingCount === 1 ? "pair" : "pairs"}

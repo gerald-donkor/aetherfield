@@ -21,7 +21,9 @@ import {
   importTenantFactors,
   recalculateOrganization,
   retireTenantFactor,
+  retireTenantFactorSet,
   setFactorMapping as setFactorMappingRow,
+  updateTenantFactorSet,
 } from "../../lib/db/emission-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
@@ -36,6 +38,11 @@ import {
   createCustomFactorSchema,
   customFactorSchema,
   CUSTOM_FACTOR_ERRORS,
+  editFactorSetSchema,
+  type EditFactorSetField,
+  type EditFactorSetResult,
+  retireFactorSetSchema,
+  type RetireFactorSetResult,
   FACTOR_IMPORT_ERRORS,
   FACTOR_IMPORT_MAX_ROW_ERRORS,
   formatFactorImportRowFailure,
@@ -1235,8 +1242,243 @@ export async function retireCustomFactor(
 }
 
 /* -------------------------------------------------------------------------- */
+/*  editFactorSet                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Corrects one tenant-owned factor set's provenance and applicability —
+ * prompt 84.
+ *
+ * **The correction is the whole point.** `licence`, `sourceUrl` and
+ * `sourceReference` are rendered as disclosure evidence beside every figure the
+ * set's rows produce, and before this the only way out of a typo was to create a
+ * second set and import every row into it again.
+ *
+ * It **recalculates nothing** (prompt 66's decision, prompt 70's refusal, both
+ * unchanged). A corrected effective window changes which factor applies at the
+ * next recalculation and nothing before it, and it changes no filed report:
+ * `report.evidence` is an immutable stored snapshot. The surface says both.
+ */
+export async function editFactorSet(
+  input: unknown,
+): Promise<EditFactorSetResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
+
+  // -- b. Session, tenant and role, then the rate limit --------------------
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
+    };
+  }
+  /* The lock — see `setFactorMapping` for why it is checked here (prompt 73). */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
+  }
+
+  const userId = membership.account.user.id;
+  const organizationId = membership.organization.id;
+
+  try {
+    const limit = await checkFactorMappingLimit(userId);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many changes. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- c. Parse, with the shared schema -----------------------------------
+  const parsed = editFactorSetSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: editFactorSetFieldErrors(parsed.error),
+    };
+  }
+
+  // -- d. Authorise --------------------------------------------------------
+  if (membership.role !== "owner") {
+    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwnerSet };
+  }
+
+  // -- e. Write ------------------------------------------------------------
+  let outcome: Awaited<ReturnType<typeof updateTenantFactorSet>>;
+  try {
+    outcome = await updateTenantFactorSet({
+      organizationId,
+      data: parsed.data,
+    });
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  if (!outcome.ok) {
+    if (outcome.reason === "set_exists") {
+      return {
+        ok: false,
+        error: CUSTOM_FACTOR_ERRORS.invalid,
+        fieldErrors: { datasetVersion: CUSTOM_FACTOR_ERRORS.setRenameExists },
+      };
+    }
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: { setId: CUSTOM_FACTOR_ERRORS.setNotFound },
+    };
+  }
+
+  // -- f. No email. Make the correction visible on the factor surfaces. -----
+  /* The same three `retireCustomFactor` revalidates. **`/reports` is not a
+     fourth**, and that is checked rather than assumed: `app/reports/page.tsx`
+     renders `listReports`, which reads stored report rows, and a filed report's
+     provenance is the immutable `report.evidence` snapshot it was built with.
+     The live read of the set — `listPeriodFactorSets` in
+     `lib/db/report-evidence.ts` — runs at generation time, so the next report
+     built picks the correction up with no cached page to invalidate. */
+  revalidatePath("/activity/factors");
+  revalidatePath("/activity/mappings");
+  revalidatePath("/activity");
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  retireFactorSet                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Soft-retires one tenant-owned factor set, and answers with what it cost: the
+ * live rows it takes out of use, and the active `(category, unit)` mappings that
+ * pointed at them. Both counts are the server's own, read inside the retiring
+ * transaction.
+ *
+ * **`emission_factor_set.deleted_at` had nine readers and no writer** before
+ * this. Retirement was designed for, filtered for, and unreachable.
+ */
+export async function retireFactorSet(
+  input: unknown,
+): Promise<RetireFactorSetResult> {
+  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
+
+  // -- b. Session, tenant and role, then the rate limit --------------------
+  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+  if (!membership) {
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
+    };
+  }
+  if (membership.pendingDeletion) {
+    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
+  }
+
+  const userId = membership.account.user.id;
+  const organizationId = membership.organization.id;
+
+  try {
+    const limit = await checkFactorMappingLimit(userId);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: `That's a few too many changes. Try again in ${formatRetry(
+          limit.retryAfterSeconds,
+        )}.`,
+      };
+    }
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  // -- c. Parse, with the shared schema -----------------------------------
+  const parsed = retireFactorSetSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: { setId: "Choose a factor set." },
+    };
+  }
+
+  // -- d. Authorise --------------------------------------------------------
+  if (membership.role !== "owner") {
+    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwnerSet };
+  }
+
+  // -- e. Tenant-owned soft retirement ------------------------------------
+  let outcome: Awaited<ReturnType<typeof retireTenantFactorSet>>;
+  try {
+    outcome = await retireTenantFactorSet({
+      organizationId,
+      setId: parsed.data.setId,
+    });
+  } catch {
+    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
+  }
+
+  if (!outcome.retired) {
+    return {
+      ok: false,
+      error: CUSTOM_FACTOR_ERRORS.invalid,
+      fieldErrors: { setId: CUSTOM_FACTOR_ERRORS.setNotFound },
+    };
+  }
+
+  // -- f. No email. Existing calculated emissions remain reproducible. -----
+  /* `/reports` is not revalidated here either, and for the same reason
+     `editFactorSet` records. */
+  revalidatePath("/activity/factors");
+  revalidatePath("/activity/mappings");
+  revalidatePath("/activity");
+  return {
+    ok: true,
+    mappingCount: outcome.mappingCount,
+    factorCount: outcome.factorCount,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Shared helpers                                                             */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * The set-edit form's field errors.
+ *
+ * **Single-segment paths, which is why this exists** rather than reusing
+ * `customFactorFieldErrors`: that one skips any issue with `path.length < 2`,
+ * because its form nests every field under `set` or `factor`. This form has no
+ * wrapper, so its issue paths are one segment and that reader would drop all of
+ * them.
+ */
+function editFactorSetFieldErrors(
+  error: z.ZodError,
+): Partial<Record<EditFactorSetField, string>> {
+  const fieldErrors: Partial<Record<EditFactorSetField, string>> = {};
+  for (const issue of error.issues) {
+    if (issue.path.length !== 1) continue;
+    const field = String(issue.path[0]) as EditFactorSetField;
+    fieldErrors[field] ??= issue.message;
+  }
+  return fieldErrors;
+}
 
 function customFactorFieldErrors(
   error: z.ZodError,

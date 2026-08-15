@@ -47,8 +47,11 @@ import {
   type FactorCandidate,
   type FactorRowIdentity,
 } from "../domain/factor-selection";
-import type { CreateCustomFactorInput } from "../validation/emissions";
-import { withSafeQueryErrors } from "./query-error";
+import type {
+  CreateCustomFactorInput,
+  EditFactorSetInput,
+} from "../validation/emissions";
+import { readSqlState, withSafeQueryErrors } from "./query-error";
 
 /**
  * Every read and write of the four factor and emission tables — build step 10.
@@ -749,6 +752,189 @@ async function retireTenantFactorImpl(input: {
 
     if (rows.length === 0) return { retired: false };
     return { retired: true, mappingCount: counted?.count ?? 0 };
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  A set's lifecycle                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What correcting a set can answer with besides success.
+ *
+ * Both refusals are **expected outcomes, not exceptions** (AGENTS.md 10 rule 2):
+ * the action turns each into a typed field error, so a throw from here is a bug.
+ */
+export type UpdateTenantFactorSetOutcome =
+  | { ok: true }
+  | { ok: false; reason: "set_not_found" }
+  | { ok: false; reason: "set_exists" };
+
+/**
+ * Corrects one tenant-owned set's provenance and applicability — prompt 84.
+ *
+ * **The set id is a claim, not a capability.** It is re-read inside the
+ * transaction under `organization_id = $1` — which is non-null, so a published
+ * set is not addressable at all — and `deleted_at is null`. A missing, retired,
+ * published or foreign id is one indistinguishable `set_not_found`, exactly as
+ * {@link resolveWritableSet} and {@link getVisibleFactor} treat theirs. No
+ * existence oracle (decision 6).
+ *
+ * **`gas_basis` is not writable here** (decision 2): the basis is derived from
+ * the rows, and editing it would relabel every stored row's meaning without
+ * touching a row.
+ *
+ * **The unique violation is caught, not pre-checked.** Drizzle's `update` has no
+ * conflict clause — only `insert` carries `onConflictDoNothing` — so the
+ * `(organization_id, source, dataset_version)` collision is answered by reading
+ * the driver's SQLSTATE off the throw. A select before the update would lose the
+ * race with a concurrent create, and losing that race is what the catch is for.
+ * The catch sits **outside** the transaction on purpose: the failed statement has
+ * already aborted it, so returning a value from inside would try to commit an
+ * aborted transaction.
+ */
+export const updateTenantFactorSet = withSafeQueryErrors(
+  "emission-queries.updateTenantFactorSet",
+  updateTenantFactorSetImpl,
+);
+
+/** Postgres' `unique_violation` (Appendix A). */
+const UNIQUE_VIOLATION = "23505";
+
+async function updateTenantFactorSetImpl(input: {
+  organizationId: string;
+  data: EditFactorSetInput;
+}): Promise<UpdateTenantFactorSetOutcome> {
+  const data = input.data;
+
+  try {
+    return await getDb().transaction(async (tx) => {
+      const [set] = await tx
+        .select({ id: emissionFactorSet.id })
+        .from(emissionFactorSet)
+        .where(
+          and(
+            eq(emissionFactorSet.id, data.setId),
+            eq(emissionFactorSet.organizationId, input.organizationId),
+            isNull(emissionFactorSet.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!set) return { ok: false as const, reason: "set_not_found" as const };
+
+      const rows = await tx
+        .update(emissionFactorSet)
+        .set({
+          source: data.source,
+          datasetVersion: data.datasetVersion,
+          publicationYear: data.publicationYear,
+          effectiveFrom: data.effectiveFrom,
+          effectiveTo: data.effectiveTo,
+          licence: data.licence,
+          licenceUrl: data.licenceUrl ?? null,
+          sourceUrl: data.sourceUrl ?? null,
+          sourceReference: data.sourceReference ?? null,
+          notes: data.notes ?? null,
+        })
+        .where(
+          and(
+            eq(emissionFactorSet.id, set.id),
+            eq(emissionFactorSet.organizationId, input.organizationId),
+            isNull(emissionFactorSet.deletedAt),
+          ),
+        )
+        .returning({ id: emissionFactorSet.id });
+
+      /* Retired between the read and the write. The same answer the read gives,
+         so the two orderings are indistinguishable from outside. */
+      if (rows.length === 0) {
+        return { ok: false as const, reason: "set_not_found" as const };
+      }
+      return { ok: true as const };
+    });
+  } catch (error) {
+    if (readSqlState(error) === UNIQUE_VIOLATION) {
+      return { ok: false, reason: "set_exists" };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Soft-retires one tenant-owned factor set and **reports what it cost**.
+ *
+ * **It does not cascade to the set's rows** (decision 4). Every read path
+ * already excludes a retired set's rows through the set join, so writing
+ * `deleted_at` onto each row would add a second source of truth for one fact and
+ * make an un-retire a per-row repair rather than one update. The rows stay live
+ * and the surface says so.
+ *
+ * Both counts are taken **inside the same transaction as the update**, for the
+ * reason {@link retireTenantFactor} records: a count read before the write can
+ * be stale by the time the write lands.
+ */
+export const retireTenantFactorSet = withSafeQueryErrors(
+  "emission-queries.retireTenantFactorSet",
+  retireTenantFactorSetImpl,
+);
+
+async function retireTenantFactorSetImpl(input: {
+  organizationId: string;
+  setId: string;
+}): Promise<
+  | { retired: false }
+  | { retired: true; mappingCount: number; factorCount: number }
+> {
+  return getDb().transaction(async (tx) => {
+    /* Active mappings pointing at any live row of the set. Both sides carry the
+       tenant predicate and both filter `deleted_at is null`. */
+    const [mapped] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(activityFactorMapping)
+      .innerJoin(
+        emissionFactor,
+        eq(emissionFactor.id, activityFactorMapping.factorId),
+      )
+      .where(
+        and(
+          eq(emissionFactor.setId, input.setId),
+          eq(emissionFactor.organizationId, input.organizationId),
+          isNull(emissionFactor.deletedAt),
+          eq(activityFactorMapping.organizationId, input.organizationId),
+          isNull(activityFactorMapping.deletedAt),
+        ),
+      );
+
+    const [factors] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(emissionFactor)
+      .where(
+        and(
+          eq(emissionFactor.setId, input.setId),
+          eq(emissionFactor.organizationId, input.organizationId),
+          isNull(emissionFactor.deletedAt),
+        ),
+      );
+
+    const rows = await tx
+      .update(emissionFactorSet)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(emissionFactorSet.id, input.setId),
+          eq(emissionFactorSet.organizationId, input.organizationId),
+          isNull(emissionFactorSet.deletedAt),
+        ),
+      )
+      .returning({ id: emissionFactorSet.id });
+
+    if (rows.length === 0) return { retired: false };
+    return {
+      retired: true,
+      mappingCount: mapped?.count ?? 0,
+      factorCount: factors?.count ?? 0,
+    };
   });
 }
 

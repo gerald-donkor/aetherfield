@@ -10411,3 +10411,160 @@ only, and no marketing route imports it.
 | move to `@neondatabase/serverless` | AGENTS.md §7.2 settled the driver; a slow handshake argues for reusing connections, not for abandoning them |
 | a Neon plan change to defeat scale-to-zero | out of scope, and the 240 s lifetime handles the consequence |
 | forward `cause` on `DatabaseQueryError` | prompt 80's decision stands; `driverFault` is two matched identifiers, not the cause |
+
+## The factor set's lifecycle — correcting provenance, retiring a set, prompt 84
+
+Makes `emission_factor_set` correctable and retirable from `/activity/factors`.
+It closes the deferral this file named six separate times — prompts 67, 68, 69,
+70, 73 and 82 all recorded "editing a set's metadata, and retiring a set from
+the UI" as open, and prompt 82's table said it "wants its own prompt".
+
+Post-sequence work, as prompts 63–83 were. **Not a step 15** — AGENTS.md §5.2
+remains the complete ordered product build, and every step in it is committed.
+
+### The two gaps it closed
+
+1. **`emission_factor_set.deleted_at` was a column nothing ever wrote.** Eight
+   predicates in `lib/db/emission-queries.ts` filter `isNull(deletedAt)` on it
+   and `app/activity/factors/page.tsx` derived `activeSets` from it, but no
+   action and no query set it. Retirement was designed for, filtered for, and
+   unreachable.
+2. **A set's provenance was uncorrectable.** `licence`, `licenceUrl`,
+   `sourceUrl` and `sourceReference` are selected straight off the set by
+   `listPeriodFactorSets` in `lib/db/report-evidence.ts` and rendered as
+   disclosure evidence, and the only escape from a typo was to create a second
+   set and import every row again. Prompt 82 made that worse: a mistyped set can
+   now arrive with thousands of rows behind it.
+
+### The decisions, and their reasons
+
+Each is a decision, not a measurement (AGENTS.md §12 rule 4).
+
+| # | decision | why |
+| --- | --- | --- |
+| D1 | **Ten editable fields**: `source`, `datasetVersion`, `publicationYear`, `effectiveFrom`, `effectiveTo`, `licence`, `licenceUrl`, `sourceUrl`, `sourceReference`, `notes` | exactly `newFactorSetSchema` minus `mode`, so the edit schema **derives** from it (`.omit({ mode: true }).shape`, spread) rather than restating a field list that could drift |
+| D2 | **`gasBasis` is not editable**, and the copy says so rather than rendering a disabled control | the basis is derived from the rows (`co2e` → `combined_co2e`, any other gas → `per_gas`) and `resolveWritableSet` refuses a row whose derived basis differs from its set's. Editing it would relabel every stored row's meaning without touching a row |
+| D3 | **Editing the effective window is allowed**, and the surface states what it costs | prompt 68 made selection date-effective, so a corrected window changes which factor applies **at the next recalculation** and nothing before it. It changes no filed report: `report.evidence` is an immutable stored snapshot (`lib/db/schema.ts`) |
+| D4 | **Retirement is the set's `deleted_at` and does not cascade to its rows** | every read path already excludes a retired set's rows through the set join, so cascading would add a second source of truth for one fact and make an un-retire a per-row repair. The rows list therefore stops calling such a row "Active" |
+| D5 | **Retirement reports its cost from inside the retiring transaction** | a count read before the update can be stale by the time it lands — `retireTenantFactor`'s docblock records exactly this |
+| D6 | **A published set is not addressable here.** Missing, already-retired, published and foreign are one indistinguishable `set_not_found` | both queries filter `eq(emissionFactorSet.organizationId, organizationId)`, which is non-null, so `organization_id is null` cannot match. No existence oracle, exactly as `resolveWritableSet` and `getVisibleFactor` treat theirs |
+| D7 | **Both operations are owner-only**, checked inside the action after the session and the `pendingDeletion` lock | AGENTS.md §11.2 rule 2. `canManage` on the page stays presentation |
+
+### What was built
+
+| file | what it is |
+| --- | --- |
+| `lib/validation/emissions.ts` | `editFactorSetSchema` (derived from `newFactorSetSchema`, carrying `createCustomFactorSchema`'s two cross-field rules on **single-segment** paths), `EditFactorSetInput`, `EditFactorSetField`, `EditFactorSetResult`, `retireFactorSetSchema`, `RetireFactorSetResult`; two messages added to `CUSTOM_FACTOR_ERRORS` |
+| `lib/db/query-error.ts` | `readSqlState` widened to `unknown` and **exported** — one reader, used twice, rather than a second copy of the shape inside a query module |
+| `lib/db/emission-queries.ts` | `updateTenantFactorSet`, `retireTenantFactorSet`, `UpdateTenantFactorSetOutcome`, both wrapped in `withSafeQueryErrors`. No existing query changed |
+| `app/activity/actions.ts` | `editFactorSet`, `retireFactorSet`, and `editFactorSetFieldErrors` |
+| `app/_components/activity/factor-set-form.tsx` | **new** client leaf, component-only, one instance per set |
+| `app/_components/activity/retire-set-button.tsx` | **new** client leaf, `RetireFactorButton`'s arm → confirm → announce pattern |
+| `app/activity/factors/page.tsx` | both controls per set inside a `<details>`, owner-only; a retired set marked and stripped of controls; a live row in a retired set reads "Set retired" |
+| `e2e/factor-set-lifecycle.spec.ts` | **new**, Chromium-only, three assertions |
+
+**No migration, and `npm run db:generate` was not run** — the schema is
+untouched. `deleted_at` and all ten editable columns already existed.
+
+### The two queries
+
+**`updateTenantFactorSet({ organizationId, data })`** →
+`{ ok: true } | { ok: false; reason: "set_not_found" } | { ok: false; reason: "set_exists" }`.
+
+One transaction: the set is re-read under `id = $1 and organization_id = $2 and
+deleted_at is null` — **a claim, not a capability** — then updated under the same
+predicate, `returning({ id })`. A zero-row return is `set_not_found`, so a set
+retired between the read and the write answers the same as one that never
+existed.
+
+**Drizzle's `update` carries no conflict clause** — only `insert` has
+`onConflictDoNothing` — so the `(organization_id, source, dataset_version)`
+partial unique index is answered by catching the throw and reading SQLSTATE
+`23505` off it through `readSqlState`. A pre-check `select` alone loses the race
+with a concurrent create, and the race is what the catch is for. **The catch sits
+outside the transaction on purpose**: the failed statement has already aborted
+it, so returning a value from inside would try to commit an aborted transaction.
+
+**`retireTenantFactorSet({ organizationId, setId })`** →
+`{ retired: false } | { retired: true; mappingCount: number; factorCount: number }`.
+
+One transaction, both counts first and the update second (D5). `mappingCount`
+joins `activity_factor_mapping` to `emission_factor` on `factor_id`, filtering
+`deleted_at is null` and `organization_id` on **both** sides; `factorCount` is
+the set's live rows, which stay live.
+
+### The two actions
+
+Both copy `retireCustomFactor`'s stage order exactly (AGENTS.md §10 rule 3): no
+BotID on an authenticated path (the existing comment points at `stageImport`);
+session, tenant and the `pendingDeletion` lock; `checkFactorMappingLimit` keyed
+by user id; parse with the shared schema; **then** the owner check; then the
+write. Typed result throughout, never a throw, never a bare string. No `console`
+call anywhere in the new code.
+
+| action | input | success | refusals |
+| --- | --- | --- | --- |
+| `editFactorSet(input: unknown)` | `setId` + the ten fields of D1 | `{ ok: true }` | field errors from the shared schema; `set_exists` → `datasetVersion: CUSTOM_FACTOR_ERRORS.setRenameExists`; `set_not_found` → `setId: CUSTOM_FACTOR_ERRORS.setNotFound`; `notOwnerSet`; the four tenant-state sentences; the rate-limit sentence |
+| `retireFactorSet(input: unknown)` | `setId` | `{ ok: true, mappingCount, factorCount }` | `set_not_found` → `setId`; `notOwnerSet`; the same tenant-state and rate-limit sentences |
+
+**`/reports` is not a fourth `revalidatePath`, and that was checked rather than
+assumed.** `app/reports/page.tsx` renders `listReports`, which reads stored
+report rows, and a filed report's provenance is the immutable `report.evidence`
+snapshot it was built with. The live read of the set — `listPeriodFactorSets` —
+runs at generation time, so the next report built picks a correction up with no
+cached page to invalidate. The three paths revalidated are
+`retireCustomFactor`'s: `/activity/factors`, `/activity/mappings`, `/activity`.
+
+### Verified, prompt 84
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **255 passed**, 12 files, 725 ms — unchanged, as predicted. No `lib/domain/` code was added; the new logic is a query and an action, which `npm test`'s scope deliberately excludes |
+| `npm run build` | compiled in 10.1 s; route table **unchanged** — `/`, `/about`, `/careers`, `/journal`, `/design-system` `○ Static`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG`, `/activity/factors` `ƒ` |
+| `npm run test:e2e:local` | **103 passed, 5 skipped** (3.5 min), Chromium and Firefox natively |
+| `npm run test:e2e:webkit` | "Podman is required for WebKit on Arch Linux." — **an environment gap, not a pass**, as prompts 78–83 recorded |
+| `npm run db:generate` | **not run.** The schema is untouched |
+
+**Prerender comparison.** Two builds by `docs/automation.md`'s clean recipe —
+`next dev` was running, so both sides were built in `~/.cache/aetherfield-diff`
+with `.claude/` and `.agents/` excluded from each. Base is `d9ffbdd`.
+
+| | result |
+| --- | --- |
+| prerendered HTML files | 21 on each side, same paths |
+| identical after normalising `BUILD_ID` and the CSS/JS chunk names | **21 of 21** |
+| differing | **0** |
+| CSS chunk | `0nfq7xy4zoxgc.css` on **both** sides, 68,559 bytes each, same MD5 — **byte delta 0**, and an identical content hash |
+
+The CSS is unchanged because the two new leaves reuse utilities the workspace
+already ships; no new Tailwind class reached the one chunk. The first `impl`
+build of the pair failed on six `fonts.gstatic.com` 404s — a transient network
+fault in `next/font`, not a code failure — and was rebuilt from clean.
+
+### One test bug found and fixed by the walk
+
+The first run of `e2e/factor-set-lifecycle.spec.ts` failed its third assertion.
+Set B's row label was `E2E lifecycle diesel <run> B` — a **superstring** of set
+A's — and the rows list is newest first, so `filter({ hasText })` plus `.first()`
+read set B's still-active row while asserting about set A's retired one. The two
+labels are now unrelated words. The implementation was correct; the locator was
+not.
+
+### What prompt 84 deliberately did not do
+
+| not done | why |
+| --- | --- |
+| un-retiring a set | reversal is a second decision with its own surface. Retirement is the deferral being closed; this is the new one |
+| editing `gasBasis` | D2 |
+| editing `organizationId`, `supersededBySetId`, `createdAt`, `retrievedAt` | none of them is the owner's to state |
+| editing an individual factor **row** | a row is retired and re-added; prompt 67 settled that and it is not reopened |
+| a migration | the schema is untouched; `npm run db:generate` was not run |
+| cascading retirement onto the set's rows | D4 |
+| re-pointing mappings, or recalculating after an edit | prompt 70's refusal and prompt 66's decision, both unchanged. The surface *says* a recalculation is what applies the change; it does not trigger one |
+| removing the per-row "Retire" control from a row in a retired set | the row is still a row and retiring it is still valid; only its **state** wording changed |
+| market-based scope 2 | untouched prior deferral, unrelated to this path |
+| AI-assisted anything | blocked, not deferred — prompt 75 reached AI Gateway and got "AI Gateway requires a valid credit card on file to service requests", the user declined the card, and prompt 76 shipped the provider-free path |
+| any change to a marketing route, `Container`, `SiteNav`, `SiteFooter` or a GSAP surface | out of scope entirely (AGENTS.md §8.1) |
+| a step 15 | §5.2 remains the ordered plan; this is post-sequence work as prompts 63–83 were |

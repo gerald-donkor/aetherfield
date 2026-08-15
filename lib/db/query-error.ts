@@ -100,10 +100,19 @@ const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
  * Every property read is inside the `try`, including the read of `cause`
  * itself: the error object is provider-controlled, and a getter that throws
  * must not turn a sanitized failure into a second, worse one.
+ *
+ * **It takes `unknown` and is exported, for the reason {@link readDriverFault}
+ * is** — prompt 84. A data-layer function that has to tell one *expected*
+ * refusal apart from a failure needs the code, and `update` carries no
+ * `onConflictDoNothing` to answer a unique violation with, so
+ * `updateTenantFactorSet` catches the throw and reads `23505` off it. That is
+ * one reader, used twice; a second local copy of this shape inside a query
+ * module is what must not happen.
  */
-function readSqlState(error: DrizzleQueryError): string | undefined {
+export function readSqlState(error: unknown): string | undefined {
   try {
-    const cause: unknown = error.cause;
+    const cause: unknown =
+      error instanceof DrizzleQueryError ? error.cause : error;
     if (typeof cause !== "object" || cause === null) return undefined;
     const code: unknown = (cause as { code?: unknown }).code;
     if (typeof code !== "string") return undefined;
