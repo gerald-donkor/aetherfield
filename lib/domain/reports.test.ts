@@ -7,6 +7,7 @@ import {
   buildReportEvidence,
   reportPeriod,
   reportSections,
+  findSpelledQuantity,
   reportTonnes,
   truncateNarrative,
   NARRATIVE_TRUNCATION_LOOKBACK,
@@ -847,5 +848,98 @@ describe("truncateNarrative", () => {
       const result = validateNarrative(out, EVIDENCE, NARRATIVE_MAX_CHARS);
       if (!result.ok) expect(result.refusal).toBe("empty");
     }
+  });
+});
+
+describe("findSpelledQuantity", () => {
+  /* Prompt 103. NUMBER_TOKEN matches digits only, so the closed allowlist was
+     blind to a figure written out — and the system prompt used to invite exactly
+     that. Every word in the list is a judgement; there is no corpus to measure
+     it against. */
+
+  const found = (text: string) => findSpelledQuantity(text);
+
+  it("catches a fraction", () => {
+    expect(found("Emissions fell by roughly a fifth.")).toBe("fifth");
+    expect(found("Two thirds of records are calculated.")).toBe("Two");
+    expect(found("About half the sites reported.")).toBe("half");
+  });
+
+  it("catches a spelled cardinal used as a percentage", () => {
+    expect(found("Around forty per cent of records are mapped.")).toBe("forty");
+    expect(found("Some three hundred records were committed.")).toBe("three");
+  });
+
+  it("catches a multiplier", () => {
+    expect(found("Scope 1 is more than double the prior period.")).toBe("double");
+    expect(found("Emissions doubled over the period.")).toBe("doubled");
+    expect(found("The figure is twice the baseline.")).toBe("twice");
+    expect(found("Consumption halved.")).toBe("halved");
+  });
+
+  it("catches a vague quantifier that still asserts a magnitude", () => {
+    expect(found("Most of the records carry a factor.")).toBe("Most");
+    expect(found("The majority of sites reported.")).toBe("majority");
+    expect(found("Nearly all records are calculated.")).toBe("Nearly all");
+  });
+
+  it("does not fire on prose that carries no quantity", () => {
+    expect(
+      found("Emissions were recorded across the scopes shown in this report."),
+    ).toBeNull();
+    expect(found("Scope 1 and scope 2 are stated separately.")).toBeNull();
+    expect(found("The basis of preparation is stated below.")).toBeNull();
+  });
+
+  it("does not read 'a third party' as the fraction", () => {
+    expect(found("Data was assured by a third party.")).toBeNull();
+    expect(found("No third parties were involved.")).toBeNull();
+  });
+
+  it("does not read 'all three scopes' as a quantity", () => {
+    /* The word analogue of the 1/2/3 the allowlist admits structurally: a GHG
+       disclosure is about three scopes and prose that cannot say so is
+       unusable. An existing test caught this as a false positive. */
+    expect(
+      found("Emissions were recorded across all three scopes in the period."),
+    ).toBeNull();
+  });
+
+  it("does not read 'the most recent period' as a magnitude", () => {
+    expect(found("The most recent period is shown.")).toBeNull();
+  });
+
+  it("leaves 'one', 'first' and 'second' alone, deliberately", () => {
+    /* Structural in English prose, and a fabricated magnitude of one is close to
+       meaningless — the judgement recorded on SPELLED_QUANTITY. */
+    expect(found("No one figure explains the change.")).toBeNull();
+    expect(found("The first section states the period.")).toBeNull();
+  });
+});
+
+describe("validateNarrative rejects a spelled-out quantity", () => {
+  const accept = (text: string) =>
+    validateNarrative(text, EVIDENCE, NARRATIVE_MAX_CHARS);
+
+  it("refuses with the offending phrase and a 'spelled_figure' refusal", () => {
+    const result = accept("Emissions fell by roughly a fifth this period.");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.refusal).toBe("spelled_figure");
+      expect(result.reason).toContain("fifth");
+    }
+  });
+
+  it("still refuses an unsupported digit first, when both are present", () => {
+    /* The digit loop runs first, and its message is the more specific one. */
+    const result = accept("The total is 4321.000 tCO2e, nearly double.");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("unsupported_figure");
+  });
+
+  it("leaves the digit check's lookaround behaviour untouched", () => {
+    expect(
+      accept("Figures are stated in tCO2e, converted from kgCO2e under AR5."),
+    ).toEqual({ ok: true });
   });
 });

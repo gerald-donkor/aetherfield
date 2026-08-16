@@ -352,6 +352,142 @@ function buildCaveats(
  */
 const NUMBER_TOKEN = /(?<![A-Za-z0-9.])\d[\d,]*(?:\.\d+)?%?(?![A-Za-z0-9])/g;
 
+/**
+ * Quantities written as words — prompt 103, and the gap this closes is the worst
+ * one in the narrative guardrail.
+ *
+ * **{@link NUMBER_TOKEN} matches digits only**, so every check built on the
+ * closed allowlist was blind to a figure spelled out. "emissions fell by roughly
+ * a fifth", "around forty per cent of records", "more than double the prior
+ * period" all passed unchecked — and the system prompt's rule 3 **used to tell
+ * the model to do exactly that** ("describe it in words instead"). The blind
+ * spot and the instruction to walk into it were in the same system. Rule 3 now
+ * says to omit the claim; this list is the enforcement, because a system prompt
+ * is a request and never the control.
+ *
+ * ---
+ *
+ * **Every word here is a judgement and the list cannot be measured.** There is
+ * no corpus of real narratives — step 13's flow has not run against real tenant
+ * data — so no false-positive or false-negative rate exists for it (§12 rule 4).
+ * It was assembled by hand, and these are the calls made:
+ *
+ * - **Cardinals start at "two".** "one" is overwhelmingly structural in English
+ *   prose — "one of the", "no one", "one another" — and a fabricated magnitude
+ *   of one is close to meaningless. Including it would reject a large share of
+ *   ordinary careful writing for almost no protection.
+ * - **Fractions start at "third", plus "half".** "first" and "second" are
+ *   positions, not fractions, and excluding them costs nothing.
+ * - **"many", "few" and "several" are deliberately absent.** They are vague
+ *   without asserting a magnitude against the report's own figures, and
+ *   including them would reject prose that says something true and unquantified.
+ *   "most", "the majority", "nearly all", "almost all", "the bulk of" and
+ *   "a minority" *do* assert one, and are in.
+ *
+ * A word matched here is **surfaced, not silently accepted** (§5.3), and the
+ * disposition is rejection — see {@link validateNarrative}.
+ */
+const SPELLED_QUANTITY = new RegExp(
+  String.raw`\b(?:` +
+    [
+      /* Cardinals, "two" upward. */
+      "two",
+      "three",
+      "four",
+      "five",
+      "six",
+      "seven",
+      "eight",
+      "nine",
+      "ten",
+      "eleven",
+      "twelve",
+      "thirteen",
+      "fourteen",
+      "fifteen",
+      "sixteen",
+      "seventeen",
+      "eighteen",
+      "nineteen",
+      "twenty",
+      "thirty",
+      "forty",
+      "fifty",
+      "sixty",
+      "seventy",
+      "eighty",
+      "ninety",
+      "hundreds?",
+      "thousands?",
+      "millions?",
+      "billions?",
+      "dozens?",
+      /* Fractions. */
+      "halves",
+      "half",
+      "thirds?",
+      "quarters?",
+      "fifths?",
+      "sixths?",
+      "sevenths?",
+      "eighths?",
+      "ninths?",
+      "tenths?",
+      /* Multipliers. */
+      "doubled?",
+      "tripled?",
+      "quadrupled?",
+      "halved",
+      "twofold",
+      "threefold",
+      "fourfold",
+      "tenfold",
+      "twice",
+      "thrice",
+      /* Vague quantifiers that still assert a magnitude. */
+      "most",
+      "majority",
+      "nearly all",
+      "almost all",
+      "bulk of",
+      "minority",
+    ].join("|") +
+    String.raw`)\b`,
+  "gi",
+);
+
+/**
+ * Phrases that begin with a listed word but are not quantitative claims.
+ *
+ * Matched against the text **from the start of the hit**, so only these exact
+ * continuations are excused. Kept deliberately short: every entry is a hole in
+ * the check, and a long exclusion list would give the words back.
+ */
+const SPELLED_QUANTITY_EXCLUSIONS = [
+  /^third\s+part(y|ies)\b/i,
+  /^most\s+recent(ly)?\b/i,
+  /**
+   * "all three scopes", "both two scopes" — the **word analogue of the `1`, `2`
+   * and `3` {@link allowedNumberTokens} already admits structurally**, and for
+   * the identical reason: a greenhouse gas disclosure is *about* three scopes,
+   * and prose that cannot say so is unusable. Caught by an existing test that
+   * predates this check.
+   */
+  /^(two|three)\s+scopes?\b/i,
+];
+
+/** A quantity written in words, or `null`. Pure — a string in, a verdict out. */
+export function findSpelledQuantity(text: string): string | null {
+  for (const match of text.matchAll(SPELLED_QUANTITY)) {
+    const rest = text.slice(match.index);
+    if (SPELLED_QUANTITY_EXCLUSIONS.some((pattern) => pattern.test(rest))) {
+      continue;
+    }
+    return match[0];
+  }
+  return null;
+}
+
 /** Thousands separators are a presentation choice the model may make; the value
     underneath is what must match. A trailing `%` is kept — a percentage and a
     count are different claims and must not satisfy each other. */
@@ -568,7 +704,11 @@ export type NarrativeValidation =
   | { ok: true }
   | {
       ok: false;
-      refusal: "empty" | "too_long" | "unsupported_figure";
+      refusal:
+        | "empty"
+        | "too_long"
+        | "unsupported_figure"
+        | "spelled_figure";
       reason: string;
     };
 
@@ -627,6 +767,25 @@ export function validateNarrative(
         reason: `The drafted narrative contained "${match[0]}", which is not a figure in this report.`,
       };
     }
+  }
+
+  /* **Quantities written as words** — prompt 103. The allowlist above cannot
+     check these against anything: there is no computed figure named "a fifth".
+     **The disposition is rejection**, not silent acceptance and not a third
+     status. Rejecting matches the existing binary, stores nothing but a status
+     and a reason, and errs in the only acceptable direction for a document that
+     will be filed. A `needs_review` state was considered and is the more honest
+     answer — it would let a reporter judge the phrase in context rather than
+     regenerate — but it is a schema change, a migration and a UI change, and
+     none of those belong in a validator fix. Recorded as the alternative in
+     `docs/backend.md`, step 13. */
+  const spelled = findSpelledQuantity(text);
+  if (spelled !== null) {
+    return {
+      ok: false,
+      refusal: "spelled_figure",
+      reason: `The drafted narrative contained "${spelled}", a quantity written in words. Every figure in a report must be one this report computed.`,
+    };
   }
 
   return { ok: true };

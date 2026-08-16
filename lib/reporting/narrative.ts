@@ -33,6 +33,14 @@ import {
  * enforcement. AGENTS.md 5.3's hard rule survives a model that ignores every
  * word of it.
  *
+ * **Rules 3 and 4 were changed at prompt 103, and the old rule 3 was a defect.**
+ * It read "describe it in words instead", which invited precisely the phrasing
+ * the digit-only allowlist could not see — the guardrail's blind spot and the
+ * instruction to walk into it were in the same system. Rule 3 now says to omit
+ * the claim, and rule 4 forbids quantities written as words. `findSpelledQuantity`
+ * in `lib/domain/reports.ts` is the enforcement half; this is the request half.
+ * **Neither closes the gap fully** — see `docs/backend.md`, step 13.
+ *
  * ## What crosses to the provider, and what does not
  *
  * Only the **rendered deterministic sections** — the labels and already-rounded
@@ -108,8 +116,8 @@ const SYSTEM_PROMPT = [
   "ABSOLUTE RULES:",
   "1. Every number in the report has already been calculated. You must never calculate, estimate, derive, interpolate, round, convert, forecast or invent any number.",
   "2. You may only write a number if it appears verbatim in the REPORT DATA below. Copy it exactly, digit for digit, including decimal places.",
-  "3. If a figure you want to mention is not in the REPORT DATA, describe it in words instead, or leave it out.",
-  "4. Never state a percentage, a change, a ratio, a total or a year that is not in the REPORT DATA.",
+  "3. If a figure you want to mention is not in the REPORT DATA, omit the claim entirely. Do not describe it in words, and do not approximate it.",
+  "4. Never state a percentage, a change, a ratio, a total or a year that is not in the REPORT DATA — in digits or in words. Never write a quantity as a word: no 'a fifth', 'forty per cent', 'double', 'twice', 'most', 'the majority', 'nearly all'.",
   "5. Never claim the inventory is complete, verified, assured, audited or compliant with any framework.",
   "6. Repeat the stated caveats. If records have no calculated emission, say so plainly.",
   "",

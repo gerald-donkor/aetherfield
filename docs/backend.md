@@ -8860,6 +8860,122 @@ Nothing in the schema layer double-enforces the length — `NARRATIVE_MAX_CHARS`
 is a bare constant in `lib/validation/reports.ts` and no Zod schema caps the
 narrative — so there is no second truncation to collide with.
 
+### The allowlist saw digits only, and the prompt invited words, prompt 103
+
+The worst finding in the step-13 review, and this record must not overstate its
+fix. `NUMBER_TOKEN` matches **digits only**:
+
+```ts
+const NUMBER_TOKEN = /(?<![A-Za-z0-9.])\d[\d,]*(?:\.\d+)?%?(?![A-Za-z0-9])/g;
+```
+
+So the closed allowlist — which §5.3 names as the enforcement of "an LLM never
+produces a number that appears in a disclosure" — was blind to any figure
+written out. "emissions fell by roughly a fifth", "around forty per cent of
+records", "more than double the prior period" all validated.
+
+**And the system prompt told the model to write exactly that.** Old ABSOLUTE
+RULE 3, verbatim:
+
+> 3. If a figure you want to mention is not in the REPORT DATA, describe it in
+>    words instead, or leave it out.
+
+The guardrail's blind spot and the instruction to walk into it were in the same
+system. A model following rule 3 *correctly* produced an unvalidated
+quantitative claim and the allowlist reported success.
+
+#### The system prompt, changed verbatim
+
+> 3. If a figure you want to mention is not in the REPORT DATA, omit the claim
+>    entirely. Do not describe it in words, and do not approximate it.
+>
+> 4. Never state a percentage, a change, a ratio, a total or a year that is not
+>    in the REPORT DATA — in digits or in words. Never write a quantity as a
+>    word: no 'a fifth', 'forty per cent', 'double', 'twice', 'most', 'the
+>    majority', 'nearly all'.
+
+The register instruction and every other rule are untouched. **This is the
+request half; it is not the control** — a system prompt never is.
+
+#### The detector, and every part of it is a judgement
+
+`findSpelledQuantity(text)` in `lib/domain/reports.ts` — pure, a string in and a
+verdict out. A closed word list in four groups: cardinals, fractions,
+multipliers, and vague quantifiers that still assert a magnitude.
+
+**There is no corpus to measure it against.** Step 13's flow has not run against
+real tenant data, so it has no false-positive or false-negative rate and this
+record does not claim one (§12 rule 4). The list was assembled by hand. The
+calls made, and why:
+
+| call | reasoning |
+| --- | --- |
+| **cardinals start at "two"** | "one" is overwhelmingly structural — "one of the", "no one", "one another" — and a fabricated magnitude of one is close to meaningless. Including it would reject a large share of ordinary careful writing for almost no protection |
+| **fractions start at "third", plus "half"** | "first" and "second" are positions, not fractions |
+| **"many", "few", "several" excluded** | vague *without* asserting a magnitude against the report's figures. "most", "the majority", "nearly all", "almost all", "the bulk of", "a minority" do assert one, and are in |
+
+Three exclusions, kept deliberately short because each is a hole in the check:
+`third part(y|ies)`, `most recent(ly)`, and `(two|three) scopes?`.
+
+**That last one was found by an existing test, not by inspection**, and it
+matters: "Emissions were recorded across all three scopes" is unavoidable prose
+in a greenhouse gas disclosure, and rejecting it would have made the feature
+unusable. It is the **word analogue of the `1`, `2` and `3` that
+`allowedNumberTokens` already admits structurally**, for the identical reason.
+
+#### The disposition is rejection, and the alternative is recorded
+
+A spelled quantity returns `refusal: "spelled_figure"` and the draft is stored as
+`status: "rejected"` with its text discarded — the existing path, no schema
+change, no migration, no new UI.
+
+**`needs_review` was considered and is arguably the more honest answer.** §5.3
+asks for a low-confidence result to be *surfaced* rather than silently accepted,
+and a third state would let a reporter judge the phrase in context instead of
+regenerating blind. It is a schema change, a migration and a UI change, and none
+of those belong in a validator fix. It is the obvious follow-up if rejection
+proves too blunt in practice.
+
+The digit check runs **first**, so when both faults are present the more specific
+message wins. Its lookarounds are untouched — `tCO2e`, `kgCO2e` and `AR5` still
+do not read as figures, and that is tested.
+
+#### The residual gap, in plain terms
+
+**This narrows the gap. It does not close it, and nothing can.** A closed word
+list is not a natural-language understanding system: "the reduction was
+substantial", "emissions were far lower than the baseline", "coverage improved
+markedly" are all unvalidated quantitative claims that no token check will ever
+catch. Paraphrase, comparison and implication are open-ended in a way an
+allowlist is not.
+
+**Human review is what closes it**, and §5.3 already says so — a report is a
+reviewed draft and nothing auto-publishes. The token check stops the specific,
+citable, fabricated *figure*, which is the failure mode that ends up in a
+regulatory filing. It does not stop vague overstatement, and this file should
+not be read as claiming otherwise.
+
+#### Tests
+
+Fifteen new cases: one per detector category, the `spelled_figure` refusal and
+its message, digit-first precedence when both faults are present, the unchanged
+`tCO2e`/`kgCO2e`/`AR5` behaviour, and the four false-positive cases that
+matter — "a third party", "no third parties", "the most recent period", "all
+three scopes" — plus "one"/"first" left alone deliberately.
+
+#### Verification, prompt 103
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed** (290 before, +12), 750 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+
+No model, temperature or `MAX_OUTPUT_TOKENS` change. No AI environment variable
+exists and none was added (§5.3). No model checks the model's output — the check
+is deterministic and in `lib/domain/`.
+
 ### What step 13 deliberately did not do
 
 | not done | why |
