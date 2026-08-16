@@ -11565,11 +11565,32 @@ and this record.
 
 ### The topology, read back rather than assumed
 
-`neonctl` is not installed; `npx -y neonctl@latest` (3.2.2) works, and it
-authenticates from `NEON_API_KEY`. The resource was provisioned `--no-claim`, so
-it sits in the Vercel-managed Neon org and a personal Neon OAuth login does not
-address it — the key is minted from the console reached by
+`neonctl` is not installed; `npx -y neonctl@latest` (3.2.2) works, and at prompt
+89 it authenticated from `NEON_API_KEY`, minted from the console reached by
 `vercel integration open neon neon-purple-candle` (Vercel SSO).
+
+> **Corrected at prompt 90 — an API key is not required.** This paragraph used
+> to add that the resource was provisioned `--no-claim`, so it sits in the
+> Vercel-managed Neon org and "a personal Neon OAuth login does not address it".
+> **That is false as of 16 Aug 2026 and is corrected here rather than left
+> standing** (§12 rule 8). With `NEON_API_KEY` absent from the environment
+> entirely, `npx -y neonctl@latest branches list --project-id
+> royal-glade-46788829` authenticated from the cached OAuth credential at
+> `~/.config/neon/credentials.json` and listed the Vercel-managed project's
+> branches correctly.
+>
+> **Why it changed is reasoning, not measurement, and is labelled as such.** The
+> likely cause is that Neon's docs say a team member only appears in the
+> Vercel-managed organization once they "click **Open in Neon** from the Vercel
+> integration page and complete authentication" — a one-time step that links the
+> Vercel identity to Neon. That step was performed during prompt 90, when the
+> Neon Console was opened to revoke the key. Plausible and consistent with the
+> observed before/after, but not independently proven.
+>
+> **The practical rule: run `neonctl auth` once and use the OAuth session.** An
+> API key is the fallback for a non-interactive context, not the requirement.
+> Prefer OAuth — it is not a long-lived organization-wide credential sitting in
+> a file, which is exactly the problem the key turned out to be.
 
 Before the change, `neonctl branches list` returned **exactly one branch**:
 
@@ -11992,6 +12013,14 @@ Neon cleanup, which is the documented manual path and the one to use — waiting
 on retention is the slow path. The project is back to 2 branches of 10, and the
 throwaway git branch was deleted locally and on `origin`.
 
+**Confirmed again after the production deploy that followed this work.** Pushing
+`main` triggered a production deployment (`● Ready`, 1 m), and `neonctl branches
+list` afterwards returned **exactly `main` and `development`** — no `preview/*`
+left behind, and **no branch created for the production deployment**. That last
+part is the check that the `Create Database Branch For Deployment → Production`
+box is genuinely off: production still runs on `main`, which is the whole point
+of leaving it unchecked.
+
 ### A protection bypass token this created — removed
 
 **`vercel curl` silently generated one.** Before the run the project's
@@ -12034,10 +12063,18 @@ dropped from `.env.local` — confirmed by `grep`: zero `NEON_API_KEY` lines
 remain, and `RESEND_API_KEY` is still present, which is the one that matters
 because `.env.local` holds its only Development copy.
 
-**Minting a replacement is therefore a console operation, not a CLI one.** Any
-later session needing `neonctl` — branch work, a preview-branch prune — starts
-by creating a new key there, and should revoke it again when finished rather
-than leaving an organization-wide credential in an untracked file.
+**A replacement is not needed, and this file briefly claimed otherwise.** The
+first version of this paragraph said minting one was a Console-only operation
+that any later branch work must start with. **That is wrong**, and it is
+corrected here in the same change rather than left standing (§12 rule 8): with
+no `NEON_API_KEY` in the environment at all, `neonctl` authenticates from its
+cached OAuth credential and addresses this project fine — see the correction
+under "The topology, read back rather than assumed" at prompt 89.
+
+**So the standing guidance is `neonctl auth`, not a key.** An organization-wide
+credential in an untracked file is a worse default than an interactive login,
+and the key existed only because prompt 89 believed OAuth could not reach the
+Vercel-managed org.
 
 ### Verification
 
