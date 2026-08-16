@@ -4,9 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { retireTarget } from "../../targets/actions";
 import { Button } from "../primitives";
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 export function RetireTargetControl({ targetId }: { targetId: string }) {
   const statusRef = useRef<HTMLParagraphElement>(null);

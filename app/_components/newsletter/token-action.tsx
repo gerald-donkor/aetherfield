@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { confirmSubscription, unsubscribe } from "../../_actions/newsletter";
 import type { NewsletterTokenState } from "../../../lib/validation/newsletter";
 import { Button, ButtonLink } from "../primitives";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The one button on `/newsletter/confirm` and `/newsletter/unsubscribe`.
@@ -37,7 +38,11 @@ type Kind = "confirm" | "unsubscribe";
     side of the boundary, where the rest of the site's copy lives. */
 const COPY: Record<
   Kind,
-  { action: string; pending: string; states: Record<NewsletterTokenState, string> }
+  {
+    action: string;
+    pending: string;
+    states: Record<NewsletterTokenState, string>;
+  }
 > = {
   confirm: {
     action: "Confirm subscription",
@@ -114,9 +119,7 @@ export function NewsletterTokenAction({
       if (result.ok) setState(result.state);
       else setError(result.error);
     } catch {
-      setError(
-        "We couldn't reach the server. Check your connection and try again.",
-      );
+      setError(NETWORK_ERROR);
     } finally {
       setPending(false);
     }

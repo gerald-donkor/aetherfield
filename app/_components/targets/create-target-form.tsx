@@ -16,9 +16,7 @@ import {
 } from "../../../lib/validation/targets";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 const SELECT_CLASS =
   "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";

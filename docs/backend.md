@@ -900,6 +900,80 @@ was removed, and neither `SiteFooter` nor `SiteNav` was touched.
 
 The 24 files lost 595 lines and gained 315.
 
+### One network-failure sentence, not two, prompt 106
+
+`const NETWORK_ERROR` was declared in **sixteen** files under
+`app/_components/`, and **the text was not the same in all of them**. The review
+that raised this suspected one further inlined literal; the actual survey found
+**nine**, in eight files, and that is the correction this record exists to make
+(§12 rule 1 cuts both ways).
+
+| exact text | named constants | inlined literals | total |
+| --- | --- | --- | --- |
+| `We couldn't reach the server. Check your connection and try again.` | 12 | 7 | **19** |
+| `We couldn't reach the server. Please try again.` | 4 | 2 | **6** |
+
+Two distinct strings, twenty-five occurrences, twenty-four files. So the copy a
+person saw for one identical failure depended on which control they had pressed.
+
+#### The sentence chosen, and it is a judgement
+
+The **longer** one, everywhere. There is no measurement of comprehension to
+appeal to, so this is a judgement and is labelled as one (§12 rule 4). Two
+reasons: it is already the large majority, so the smallest number of surfaces
+change; and it is the only one of the two that is **operational**, which is the
+register AGENTS.md §5 sets — a failure a person can act on should say what to
+check.
+
+**No site carried a comment or docblock justifying the shorter text.** Each of
+the six was checked individually before it was flattened, and that absence is
+the evidence the divergence was accidental rather than deliberate.
+
+#### The copy that changed, listed rather than described as a no-op
+
+Six surfaces now say "Check your connection and try again" where they said
+"Please try again". This is a **user-visible copy change**, all of it on
+authenticated pages:
+
+- `activity/import-controls.tsx` — the staged-import confirm controls
+- `activity/recalculate-control.tsx`
+- `alerts/alert-preference-control.tsx`
+- `reports/report-controls.tsx`
+- `app/submissions/action-controls.tsx` — both inlined literals
+
+#### Where it lives
+
+`lib/validation/result.ts`, beside `SubmitResult` — the module that already owns
+the vocabulary every write path speaks. It is deliberately **not**
+`server-only` (§6.3), it reads no secret and imports nothing, so a marketing
+route's client leaf can import it freely. Three of the adopting leaves are on
+prerendered pages (`demo-request-dialog`, `subscribe-dialog`, `apply-dialog`),
+which is why the prerender check below was run rather than assumed.
+
+#### Prerender check
+
+Two clean worktrees, same recipe as prompt 105. **All 21 prerendered HTML files:
+rendered markup identical**, differing in the inline RSC flight payload only. No
+route changed mode. Per-page client JavaScript: `+38` bytes on `/`, `/journal`,
+`/about` and `/design-system`, and `-2` on `/careers`, with no change in chunk
+count — the constant is one string folded into chunks those pages already load,
+and none of the three marketing dialogs' own text changed.
+
+#### Verification, prompt 106
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 724 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| prerender diff | 21 of 21 markup-identical, above |
+
+No other user-facing string changed, the per-path action constants
+(`FACTOR_MAPPING_FAILURE` and friends) are untouched and stay per-path, nothing
+that reads a secret or imports `lib/db/` was added to `lib/validation/`, and the
+`catch` blocks still log nothing (§8.3 rule 2).
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.

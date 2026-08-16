@@ -13,6 +13,7 @@ import {
 } from "../../../lib/validation/activity";
 import { Button, FileField } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The activity-file upload leaf — build step 9.
@@ -33,9 +34,6 @@ import { FormStatus } from "../form-status";
  * authenticated workspace, and moving to the staged import is the outcome —
  * there is nothing else for this form to swap to.
  */
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../_components/primitives";
 import type { SubmissionKind } from "../../lib/validation/submissions";
 import { changeStaffRole, removeSubmission } from "./actions";
+import { NETWORK_ERROR } from "../../lib/validation/result";
 
 function ResultMessage({ message }: { message: string }) {
   const ref = useRef<HTMLParagraphElement>(null);
@@ -54,7 +55,7 @@ export function StaffRoleControl({
           : result.error,
       );
     } catch {
-      setMessage("We couldn't reach the server. Please try again.");
+      setMessage(NETWORK_ERROR);
     } finally {
       setPending(false);
     }
@@ -69,11 +70,7 @@ export function StaffRoleControl({
         disabled={pending}
         className="min-w-[132px]"
       >
-        {pending
-          ? "Updating..."
-          : isStaff
-            ? "Revoke staff"
-            : "Grant staff"}
+        {pending ? "Updating..." : isStaff ? "Revoke staff" : "Grant staff"}
       </Button>
       <ResultMessage message={message} />
     </div>
@@ -101,7 +98,7 @@ export function RemoveSubmissionControl({
       setMessage(result.ok ? `${label} removed.` : result.error);
       if (!result.ok) setConfirming(false);
     } catch {
-      setMessage("We couldn't reach the server. Please try again.");
+      setMessage(NETWORK_ERROR);
       setConfirming(false);
     } finally {
       setPending(false);

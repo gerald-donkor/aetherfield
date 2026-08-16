@@ -6,6 +6,7 @@ import { useState } from "react";
 import { commitImport, discardImport } from "../../activity/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Commit and discard — build step 9.
@@ -20,8 +21,6 @@ import { FormStatus } from "../form-status";
  * tenant, re-read the import scoped to it and re-check its status before
  * writing anything.
  */
-
-const NETWORK_ERROR = "We couldn't reach the server. Please try again.";
 
 function ResultMessage({ message }: { message: string }) {
   return (

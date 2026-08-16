@@ -13,6 +13,7 @@ import {
 } from "../../../lib/validation/activity";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The column-mapping override — build step 9, and **the review step AGENTS.md
@@ -32,9 +33,6 @@ import { FormStatus } from "../form-status";
  * entry nobody asked for. Its classes are `Field`'s control classes verbatim,
  * so it cannot drift from the fields beside it.
  */
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 const SELECT_CLASS =
   "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";

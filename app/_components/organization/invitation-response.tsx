@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { respondToInvitation } from "../../invitation/[id]/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Accept or decline an invitation — prompt 63's client leaf on
@@ -23,9 +24,6 @@ import { FormStatus } from "../form-status";
  * (AGENTS.md 8.2 rule 5) — the same left rule the auth screens and the
  * create-organisation form use.
  */
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 export function InvitationResponse({
   invitationId,

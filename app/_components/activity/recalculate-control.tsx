@@ -6,6 +6,7 @@ import { useState } from "react";
 import { recalculate } from "../../activity/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The recalculate control — build step 10.
@@ -20,8 +21,6 @@ import { FormStatus } from "../form-status";
  * 11.2 rule 2): `recalculate` re-resolves the tenant, re-checks the rate limit
  * and predicates every query on the organisation before writing anything.
  */
-
-const NETWORK_ERROR = "We couldn't reach the server. Please try again.";
 
 export function RecalculateControl({
   importId = null,

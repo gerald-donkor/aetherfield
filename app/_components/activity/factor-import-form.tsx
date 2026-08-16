@@ -19,6 +19,7 @@ import {
 } from "../../../lib/validation/emissions";
 import { Button, Field, FileField, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Imports a CSV of customer-supplied factor rows — prompt 82.
@@ -56,9 +57,6 @@ const GAS_BASIS_LABEL = {
   combined_co2e: "combined CO2e rows",
   per_gas: "per-gas rows",
 } as const;
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 /* Both local to this form for the reason `custom-factor-form.tsx` records:
    `FieldFrame` is shared with nine prerendered routes (AGENTS.md 8.1), and the

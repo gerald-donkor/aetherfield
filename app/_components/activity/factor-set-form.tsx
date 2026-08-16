@@ -7,6 +7,7 @@ import { editFactorSet } from "../../activity/actions";
 import type { EditFactorSetField } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Corrects one customer-supplied factor set's provenance — prompt 84.
@@ -44,9 +45,6 @@ type EditableFactorSet = {
   notes: string | null;
   gasBasis: "combined_co2e" | "per_gas";
 };
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 /* Local to this form for the reason `factor-import-form.tsx` records:
    `FieldFrame` is shared with nine prerendered routes (AGENTS.md 8.1), and the

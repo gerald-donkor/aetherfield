@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { retireCustomFactor } from "../../activity/actions";
 import { Button } from "../primitives";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Retires one customer-supplied factor row — prompt 67 decisions 3 and 8.
@@ -75,9 +76,7 @@ export function RetireFactorButton({
         setMessage(result.fieldErrors?.factorId ?? result.error);
       }
     } catch {
-      setMessage(
-        "We couldn't reach the server. Check your connection and try again.",
-      );
+      setMessage(NETWORK_ERROR);
     } finally {
       setPending(false);
     }

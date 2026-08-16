@@ -27,3 +27,30 @@ export type SubmitResult<TField extends string = never> =
       error: string;
       fieldErrors?: Partial<Record<TField, string>>;
     };
+
+/**
+ * What a leaf shows when the Server Action call itself never completes — the
+ * `catch` around the invocation, not a typed `{ ok: false }` the action
+ * returned.
+ *
+ * **Declared in sixteen files, and in two different sentences, until prompt
+ * 106.** Twelve constants and seven inlined literals said "Check your
+ * connection and try again"; four constants and two more inlined literals said
+ * only "Please try again". The copy a person saw for one identical failure
+ * depended on which control they had pressed.
+ *
+ * **The longer sentence won, and the choice is a judgement** — there is no
+ * measurement of comprehension to appeal to (§12 rule 4). Two reasons: it is
+ * already the large majority, so fewer surfaces change; and it is the only one
+ * of the two that is *operational*, which is the register AGENTS.md §5 sets. A
+ * failure the user can act on should say what to check. **No site carried a
+ * comment or docblock justifying the shorter text**, which is the evidence that
+ * the divergence was accidental rather than deliberate.
+ *
+ * It lives here because this module already owns the vocabulary every write
+ * path speaks, it is deliberately **not** `server-only` (§6.3), and it imports
+ * nothing — so a marketing route's client leaf can import it without pulling
+ * anything into a prerendered page's bundle.
+ */
+export const NETWORK_ERROR =
+  "We couldn't reach the server. Check your connection and try again.";

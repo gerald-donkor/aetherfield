@@ -21,6 +21,7 @@ import {
   type ApplicationFieldErrors,
 } from "../../../lib/validation/application";
 import { Button, Field, FileField, Seal, TextareaField } from "../primitives";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The apply dialog — build step 5's client leaf, and a copy of
@@ -249,9 +250,7 @@ export function ApplyDialog({
       setErrors({ ...NO_FIELD_ERRORS, ...result.fieldErrors });
       setMessage(result.error);
     } catch {
-      setMessage(
-        "We couldn't reach the server. Check your connection and try again.",
-      );
+      setMessage(NETWORK_ERROR);
     } finally {
       setPending(false);
     }
@@ -319,9 +318,7 @@ export function ApplyDialog({
                 done
                   ? "mt-4 text-center text-accent"
                   : "mt-6 border-l-2 border-ink pl-4"
-              } ${
-                message ? "block" : "hidden"
-              }`}
+              } ${message ? "block" : "hidden"}`}
             >
               {message}
             </div>
@@ -391,7 +388,11 @@ export function ApplyDialog({
                   disabled={pending}
                   className="mt-6"
                 />
-                <Button type="submit" className="mt-8 w-full" disabled={pending}>
+                <Button
+                  type="submit"
+                  className="mt-8 w-full"
+                  disabled={pending}
+                >
                   {pending ? "Sending application..." : "Send application"}
                 </Button>
               </form>

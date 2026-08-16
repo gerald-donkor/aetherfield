@@ -5,6 +5,7 @@ import { useState } from "react";
 import { setAlertEmailPreference } from "../../account/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The alert-email off switch on `/account` — build step 14.
@@ -24,8 +25,6 @@ import { FormStatus } from "../form-status";
  * rate limit and writes only the calling account's own row. The nightly sweep
  * re-reads the stored preference on its own, in SQL.
  */
-
-const NETWORK_ERROR = "We couldn't reach the server. Please try again.";
 
 export function AlertPreferenceControl({
   emailAlerts,

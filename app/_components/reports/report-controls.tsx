@@ -6,6 +6,7 @@ import { useState } from "react";
 import { deleteReport, generateNarrative } from "../../reports/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The two report controls — build step 13.
@@ -20,8 +21,6 @@ import { FormStatus } from "../form-status";
  * each action re-resolves the tenant, re-checks its rate limit and predicates
  * every statement on the organisation before writing anything.
  */
-
-const NETWORK_ERROR = "We couldn't reach the server. Please try again.";
 
 function ReportAction({
   idle,

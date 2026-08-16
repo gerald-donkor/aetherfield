@@ -14,6 +14,7 @@ import {
 import type { Scope2MarketBasis } from "../../../lib/validation/emissions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 type SearchFactor = {
   id: string;
@@ -131,9 +132,7 @@ export function FactorPicker({
       setMessage(result.error);
       setPendingId(null);
     } catch {
-      setMessage(
-        "We couldn't reach the server. Check your connection and try again.",
-      );
+      setMessage(NETWORK_ERROR);
       setPendingId(null);
     }
   }

@@ -11,6 +11,7 @@ import {
   type ReportField,
 } from "../../../lib/validation/reports";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The create-report leaf — build step 13.
@@ -27,9 +28,6 @@ import { FormStatus } from "../form-status";
  * organisation and every figure are resolved server-side; there is no hidden
  * field here to forge.
  */
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 export function CreateReportForm() {
   const router = useRouter();

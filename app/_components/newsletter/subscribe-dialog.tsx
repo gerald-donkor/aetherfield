@@ -10,6 +10,7 @@ import {
 } from "../../../lib/validation/newsletter";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The newsletter's client leaf — build step 4, and a copy of
@@ -140,9 +141,7 @@ export function NewsletterSubscribeDialog({
       setErrors({ ...NO_FIELD_ERRORS, ...result.fieldErrors });
       setMessage(result.error);
     } catch {
-      setMessage(
-        "We couldn't reach the server. Check your connection and try again.",
-      );
+      setMessage(NETWORK_ERROR);
     } finally {
       setPending(false);
     }

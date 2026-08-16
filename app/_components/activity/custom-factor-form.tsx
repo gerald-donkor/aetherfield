@@ -23,6 +23,7 @@ import {
 } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Adds one customer-supplied factor row — prompt 66, corrected by prompt 67.
@@ -73,9 +74,6 @@ const GAS_BASIS_LABEL = {
   combined_co2e: "combined CO2e rows",
   per_gas: "per-gas rows",
 } as const;
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 /* Bottom-aligns a field's label/hint/control stack inside its grid item. A grid
    item stretches to its row's height, so a field carrying a hint used to start

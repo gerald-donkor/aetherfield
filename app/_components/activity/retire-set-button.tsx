@@ -6,6 +6,7 @@ import { useState } from "react";
 import { retireFactorSet } from "../../activity/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * Retires one customer-supplied factor set — prompt 84.
@@ -73,9 +74,7 @@ export function RetireSetButton({
         setMessage(result.fieldErrors?.setId ?? result.error);
       }
     } catch {
-      setMessage(
-        "We couldn't reach the server. Check your connection and try again.",
-      );
+      setMessage(NETWORK_ERROR);
     } finally {
       setPending(false);
     }

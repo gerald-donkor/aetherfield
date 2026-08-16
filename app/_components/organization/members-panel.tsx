@@ -16,6 +16,7 @@ import {
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The organisation's members surface — prompt 63, closing what build step 8
@@ -42,9 +43,6 @@ import { FormStatus } from "../form-status";
  * `inviteMemberSchema` runs here so a mistyped address is caught before a round
  * trip, and the action re-runs the same schema as the actual check.
  */
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 type PanelMember = {
   id: string;

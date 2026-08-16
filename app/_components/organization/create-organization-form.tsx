@@ -11,6 +11,7 @@ import {
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The create-organisation client leaf — build step 8, and a copy of
@@ -39,9 +40,6 @@ const INTRO =
    and `react/no-unescaped-entities` rejects one written inline. */
 const SUCCESS_BODY =
   "You are the owner. Data import and reporting arrive with later releases, and the workspace is ready for them.";
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 export function CreateOrganizationForm({
   className = "",

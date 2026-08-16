@@ -15,6 +15,7 @@ import {
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
+import { NETWORK_ERROR } from "../../../lib/validation/result";
 
 /**
  * The organisation's deletion surface — prompt 73.
@@ -39,9 +40,6 @@ import { FormStatus } from "../form-status";
  * schema *and* compares the value against the slug on the membership row it
  * resolved server-side, which is the check.
  */
-
-const NETWORK_ERROR =
-  "We couldn't reach the server. Check your connection and try again.";
 
 function RestoreControl({ organizationName }: { organizationName: string }) {
   const [pending, setPending] = useState(false);
