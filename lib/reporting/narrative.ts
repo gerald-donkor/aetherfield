@@ -2,7 +2,7 @@ import "server-only";
 
 import { generateText } from "ai";
 
-import { reportSections } from "../domain/reports";
+import { reportSections, truncateNarrative } from "../domain/reports";
 import {
   NARRATIVE_MAX_CHARS,
   NARRATIVE_MAX_PROMPT_CHARS,
@@ -188,9 +188,18 @@ export async function draftNarrative(
     if (text === "") {
       return { ok: false, reason: "The narrative service returned no prose." };
     }
+    /* **A boundary cut, not a bare slice, and the ordering below it is
+       load-bearing** — prompt 102. `text.slice(0, NARRATIVE_MAX_CHARS)` can land
+       mid-numeral and turn `1,234.5 tCO2e` into `1,23`: a figure no computed
+       value produced, manufactured here rather than by the model. It was caught
+       downstream only because `validateNarrative` runs on what this returns and
+       rejects the unknown token. `truncateNarrative` makes it safe by
+       construction instead, and **the caller must still validate after this** —
+       see the note on `validateNarrative`. Nothing may be stored between the
+       two. */
     return {
       ok: true,
-      text: text.slice(0, NARRATIVE_MAX_CHARS),
+      text: truncateNarrative(text, NARRATIVE_MAX_CHARS),
       model: NARRATIVE_MODEL,
     };
   } catch {

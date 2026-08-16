@@ -8,6 +8,8 @@ import {
   reportPeriod,
   reportSections,
   reportTonnes,
+  truncateNarrative,
+  NARRATIVE_TRUNCATION_LOOKBACK,
   validateNarrative,
   type BuildReportEvidenceInput,
 } from "./reports";
@@ -773,5 +775,77 @@ describe("purity", () => {
     buildReportEvidence(input({ emissions, committedRecords: 1 }));
     expect(emissions).toHaveLength(1);
     expect(emissions[0].kgCo2e).toBe(snapshot);
+  });
+});
+
+describe("truncateNarrative", () => {
+  /* Prompt 102. The bare `slice` these replace could cut `1,234.5` into `1,23` —
+     a figure no computed value produced, manufactured after the model returned
+     (AGENTS.md 5.3). Every case below asserts the cut cannot land inside one. */
+
+  it("returns text at or under the limit untouched", () => {
+    const text = "The inventory totals 1,234.5 tCO2e.";
+    expect(truncateNarrative(text, NARRATIVE_MAX_CHARS)).toBe(text);
+    expect(truncateNarrative(text, text.length)).toBe(text);
+  });
+
+  it("never cuts a figure that straddles the boundary", () => {
+    /* The limit falls between the `3` and the `4` of `1,234.5`. */
+    const head = "Emissions rose. The total is ";
+    const text = `${head}1,234.5 tCO2e.`;
+    const limit = head.length + 4;
+    const out = truncateNarrative(text, limit);
+
+    expect(out.length).toBeLessThanOrEqual(limit);
+    expect(out).toBe("Emissions rose.");
+    expect(out).not.toContain("1,23");
+  });
+
+  it("keeps a figure that ends exactly on the boundary", () => {
+    const text = "The total is 1,234.5 and the rest is prose that runs on.";
+    const limit = "The total is 1,234.5".length;
+    expect(truncateNarrative(text, limit)).toBe("The total is 1,234.5");
+  });
+
+  it("falls back to a word boundary when no sentence end is near enough", () => {
+    /* One sentence end, far outside the lookback, then unbroken prose. */
+    const text =
+      "Done. " + "word ".repeat(NARRATIVE_TRUNCATION_LOOKBACK) + "1,234.5";
+    const limit = 6 + NARRATIVE_TRUNCATION_LOOKBACK * 5 + 4;
+    const out = truncateNarrative(text, limit);
+
+    expect(out.length).toBeLessThanOrEqual(limit);
+    expect(out.endsWith("word")).toBe(true);
+    expect(out).not.toMatch(/1,23$/);
+  });
+
+  it("strips a partial numeral when there is no boundary at all", () => {
+    /* Degenerate: not prose, but it must still not manufacture a figure. */
+    const out = truncateNarrative("abc1,234.5", 6);
+    expect(out).toBe("abc");
+    expect(out.length).toBeLessThanOrEqual(6);
+  });
+
+  it("may return empty in the degenerate case, which validation then refuses", () => {
+    const out = truncateNarrative("1,234.5", 4);
+    expect(out).toBe("");
+    expect(validateNarrative(out, EVIDENCE, NARRATIVE_MAX_CHARS)).toEqual({
+      ok: false,
+      refusal: "empty",
+      reason: "The narrative service returned no prose.",
+    });
+  });
+
+  it("produces nothing the allowlist would reject, over a long draft", () => {
+    /* The end-to-end property: truncate then validate, at every limit that cuts
+       through the figure. None may yield an unsupported token. */
+    const text =
+      "The inventory totals 1984.000 tCO2e. " .repeat(20) + "1984.000 tCO2e";
+    for (let limit = 20; limit < text.length; limit += 1) {
+      const out = truncateNarrative(text, limit);
+      expect(out.length).toBeLessThanOrEqual(limit);
+      const result = validateNarrative(out, EVIDENCE, NARRATIVE_MAX_CHARS);
+      if (!result.ok) expect(result.refusal).toBe("empty");
+    }
   });
 });

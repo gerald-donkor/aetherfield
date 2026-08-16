@@ -8769,6 +8769,97 @@ a clean exit is not evidence.** Added to `docs/automation.md`.
   target or a line of generated prose.
 - No email is sent, no Blob is written and no public or permanent URL is minted.
 
+### The truncation could cut a figure in half, prompt 102
+
+`draftNarrative` ended with `text.slice(0, NARRATIVE_MAX_CHARS)` — a raw
+character cut at 6,000 with no regard for what sat at the boundary. A response
+longer than that could be truncated **mid-numeral**: `1,234.5 tCO2e` becoming
+`1,23`. That is a number no computed figure produced, **manufactured by our own
+code after the model returned**, which is exactly what §5.3's hard rule exists
+to prevent.
+
+**It was safe, and this record says so plainly.** `validateNarrative` runs
+downstream of the slice, `1,23` is not in the closed allowlist, and the draft was
+rejected and stored as `rejected` with its text discarded. Safe **by accident of
+ordering**, not by design, with nothing in either file saying the ordering was
+load-bearing.
+
+#### The ordering claim was verified before anything was changed
+
+The prompt required this, and required a stop-and-report if any path stored
+unvalidated text (§12 rule 9). **No such path exists.** `draftNarrative` has one
+caller, `app/reports/actions.ts`; `validateNarrative` runs on its returned text
+immediately after; and `setReportNarrative` is reached on three branches, of
+which only `outcome.ok` passes `narrative`. The other two store a status and a
+reason and no prose.
+
+#### The boundary rule
+
+`truncateNarrative(text, maxChars)` in `lib/domain/reports.ts` — pure, beside
+`validateNarrative`, no I/O (§6.2):
+
+1. text at or under the limit is returned **untouched**;
+2. else the last **sentence end** within `NARRATIVE_TRUNCATION_LOOKBACK` of the
+   limit — 600 characters, **a judgement**, far enough that ordinary prose
+   usually contains one and short enough that a long final sentence is not worth
+   discarding to reach the one before it;
+3. else the **limit itself**, when the next character is whitespace and the last
+   token is therefore whole — this exists so a complete figure ending exactly on
+   the limit is not thrown away for nothing;
+4. else the **last whitespace**. This is the guarantee rather than the nicety: a
+   numeric token contains no whitespace, so a whitespace cut cannot fall inside
+   one;
+5. **the degenerate case** — no whitespace at all in the first 6,000 characters,
+   which is not prose but must still be handled: hard cut, then strip any
+   trailing run of digits, separators or `%`. **This can discard a complete
+   figure sitting on the boundary.** Discarding a real figure from an
+   already-truncated draft is the acceptable direction to err; inventing one is
+   not. If the result is empty, `validateNarrative` refuses it as `empty`, which
+   is an honest outcome and is tested.
+
+The sentence-end pattern requires the terminator to be **followed by
+whitespace**, which is what keeps a decimal point out of it: `1,234.5` has a `.`
+with a digit after it.
+
+**No narrative under 6,000 characters changes at all**, and that is expected to
+be nearly all of them — the model is capped at 1,200 output tokens. That
+expectation is **a judgement**, not a measurement.
+
+#### The ordering is now written down at both ends
+
+`narrative.ts`'s truncation site says the caller must still validate after it and
+that nothing may be stored between the two; `validateNarrative`'s docblock says
+it must run after any step that shortens the text, because shortening can create
+a token the model never wrote. Either comment alone would have prevented this
+defect.
+
+#### Tests
+
+Seven new cases in `lib/domain/reports.test.ts`: unchanged under the limit; a
+figure straddling the boundary; a figure ending exactly on it; the word-boundary
+fallback when no sentence end is near enough; the degenerate strip; the empty
+result and the `empty` refusal that follows it; and an **exhaustive property
+check** that truncates a long draft at *every* limit from 20 to its full length
+and asserts the result never carries a token the allowlist rejects.
+
+`NARRATIVE_MAX_CHARS` (6,000), `MAX_OUTPUT_TOKENS`, the model, the temperature
+and the system prompt are all unchanged, as is the allowlist and `NUMBER_TOKEN`
+(prompt 103's ground). No environment variable is read; there is still no AI env
+var (§5.3).
+
+#### Verification, prompt 102
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **290 passed** (283 before, +7), 768 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+
+Nothing in the schema layer double-enforces the length — `NARRATIVE_MAX_CHARS`
+is a bare constant in `lib/validation/reports.ts` and no Zod schema caps the
+narrative — so there is no second truncation to collide with.
+
 ### What step 13 deliberately did not do
 
 | not done | why |

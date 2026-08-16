@@ -482,6 +482,88 @@ export function allowedNumberTokens(evidence: ReportEvidence): Set<string> {
   return allowed;
 }
 
+/**
+ * How far back {@link truncateNarrative} will reach for a sentence end before
+ * settling for a word boundary. **A judgement**, not a measurement: far enough
+ * that a paragraph of ordinary prose usually contains one, short enough that a
+ * long final sentence is not worth discarding to reach the one before it.
+ */
+export const NARRATIVE_TRUNCATION_LOOKBACK = 600;
+
+/** A sentence terminator that is followed by whitespace. The trailing-whitespace
+    requirement is what keeps a decimal point out of this: `1,234.5` has a `.`
+    with a digit after it, never a space. */
+const SENTENCE_END = /[.!?](?=\s)/g;
+
+/** A trailing run of the characters a numeric token is built from — the
+    degenerate case's backstop. Mirrors {@link NUMBER_TOKEN}'s character set. */
+const TRAILING_NUMERIC = /[\d.,%]+$/;
+
+/**
+ * Cuts an over-long narrative at a boundary that **cannot fall inside a
+ * figure**.
+ *
+ * **The defect this closes, and it was real if not yet reachable.** The
+ * truncation was a bare `text.slice(0, NARRATIVE_MAX_CHARS)`, which can land
+ * mid-numeral: `1,234.5 tCO2e` becomes `1,23`. That is a number no computed
+ * figure produced, manufactured by our own code *after* the model returned —
+ * precisely what AGENTS.md 5.3's hard rule exists to prevent.
+ *
+ * It was safe only by accident of ordering: {@link validateNarrative} runs
+ * downstream, `1,23` is not in the allowlist, and the draft was rejected. Safe,
+ * but through a property nothing in the code declared. See the load-bearing
+ * note on {@link validateNarrative}.
+ *
+ * The rule, in order:
+ *
+ * 1. **Text at or under the limit is returned untouched.** Expected to be nearly
+ *    every narrative — the model is capped at 1,200 output tokens, well under
+ *    6,000 characters — which makes this whole function a guard rather than a
+ *    routine step. That expectation is a judgement, not a measurement.
+ * 2. **The last sentence end within {@link NARRATIVE_TRUNCATION_LOOKBACK}** of
+ *    the limit, so a truncated report ends on a full stop.
+ * 3. **Otherwise, the limit itself if it already falls on a clean boundary** —
+ *    the next character is whitespace, so the last token in the window is whole.
+ *    Without this, a complete figure ending exactly on the limit would be thrown
+ *    away by step 4 for no reason.
+ * 4. **Otherwise the last whitespace.** This is the guarantee, not the nicety:
+ *    a numeric token contains no whitespace, so a cut at whitespace can never
+ *    fall inside one.
+ * 5. **Degenerate case — no whitespace at all in the first `maxChars`.** Not
+ *    prose, but it must still be handled rather than assumed away: the text is
+ *    hard-cut at the limit and any trailing run of digits, separators or a
+ *    percent sign is stripped. That can discard a *complete* figure sitting on
+ *    the boundary; discarding a real figure from a truncated draft is the
+ *    acceptable direction to err, inventing one is not. If the result is empty,
+ *    `validateNarrative` refuses it as `empty`, which is an honest outcome.
+ *
+ * The result is always `≤ maxChars`. Pure — no I/O, no clock (AGENTS.md 6.2).
+ */
+export function truncateNarrative(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+
+  const window = text.slice(0, maxChars);
+
+  let lastSentence = -1;
+  for (const match of window.matchAll(SENTENCE_END)) {
+    lastSentence = match.index + 1;
+  }
+  if (lastSentence !== -1 && lastSentence >= maxChars - NARRATIVE_TRUNCATION_LOOKBACK) {
+    return window.slice(0, lastSentence).trimEnd();
+  }
+
+  /* The limit already falls on a clean boundary — the next character is
+     whitespace, so the last token in the window is whole. Checked before the
+     search below, which would otherwise discard a complete figure that happens
+     to end exactly on the limit. */
+  if (/\s/.test(text.charAt(maxChars))) return window.trimEnd();
+
+  const lastSpace = window.search(/\s+\S*$/);
+  if (lastSpace !== -1) return window.slice(0, lastSpace).trimEnd();
+
+  return window.replace(TRAILING_NUMERIC, "").trimEnd();
+}
+
 export type NarrativeValidation =
   | { ok: true }
   | {
@@ -502,6 +584,17 @@ export type NarrativeValidation =
  * than being handed a bare failure. It is a number the model produced, not
  * personal data, and it is shown to the tenant that owns the report and to
  * nobody else — nothing on this path is logged.
+ *
+ * ---
+ *
+ * **This must run after {@link truncateNarrative}, and the ordering is
+ * load-bearing.** Any step that shortens the text can create a token the model
+ * never wrote, so the allowlist check has to see the *final* string — the one
+ * that will be stored. Truncating after validating, or storing before
+ * validating, would let a manufactured figure into a disclosure draft. The
+ * single call site is `app/reports/actions.ts`, where the draft is validated
+ * before `setReportNarrative` is reached on any branch; prompt 102 traced every
+ * path and found no branch that stores unvalidated text.
  */
 export function validateNarrative(
   narrative: string,
