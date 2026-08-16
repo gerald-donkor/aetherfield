@@ -11532,11 +11532,13 @@ workflow file**; the GitHub integration already deploys `main` and a second path
 is the thing to avoid. **Neon branching for preview deployments** remains open
 from step 1.
 
-> **Half-closed at prompt 89.** Branching itself is done — a `development`
-> branch now backs local development and the E2E matrix, so neither writes to
-> production any more. **Preview's `DATABASE_URL` is still `main`'s** and that
-> half stays open; no preview deployment has ever existed, so nothing is writing
-> through it today. See "A development database branch, prompt 89" below.
+> **Closed at prompt 90.** Prompt 89 did the local half — a `development` branch
+> backs local development and the E2E matrix. Prompt 90 did the preview half,
+> and **not** by splitting the environment variable as this note once assumed:
+> Neon's native preview branching injects a per-deployment connection string
+> that overrides the row, so no `vercel env` write was needed at all. Measured
+> end to end against a real preview deployment. See "Preview deployments get
+> their own database branch, prompt 90" below.
 
 ### One standing constraint, discovered here
 
@@ -11767,3 +11769,298 @@ only. Both browsers exercise the same fixture, the same sign-ups and the same
 teardown, so the write path under test is the same one; the gap is browser
 coverage, not database coverage. Reported rather than routed around
 (12 rule 9). Installing Podman would close it.
+
+---
+
+## Preview deployments get their own database branch, prompt 90
+
+Built 16 Aug 2026. **Before this, a preview deployment would have resolved
+`DATABASE_URL` to the Neon `main` branch — production's database.** Prompt 89
+closed the local half of that exposure and left this half open. It is now
+closed, and the exposure was prospective throughout: `vercel ls` confirmed every
+deployment this project had ever had was `Production`, so nothing had yet
+written to production through a preview. This closed the hole before the first
+preview deploy opened it.
+
+**No application source file changed.** The change is a setting on the Vercel
+side of the Neon resource, plus `.env.example`'s step-1 comment block and this
+record.
+
+### The approach prompt 89 assumed was wrong, and that is why this was cheap
+
+Prompt 89 deferred this because splitting one integration-managed
+`DATABASE_URL` row into per-environment values risks the integration
+overwriting it. That reasoning was sound and the premise was not: **no split is
+needed.** Neon's Vercel-Managed integration branches for previews natively —
+Vercel webhooks Neon at deployment time, Neon creates `preview/<git-branch>`,
+and the branch's connection variables are injected into that deployment alone,
+overriding the row. The `Production, Preview, Development` row is untouched.
+
+Neon's docs are explicit that the injected values "cannot be accessed or viewed
+in your Vercel project's environment variable settings", so **their absence from
+`vercel env ls` is correct rather than a gap** — a later session looking for a
+Preview `DATABASE_URL` will not find one and should not add one.
+
+### The toggle is dashboard-only — verified, not assumed
+
+The CLI does not expose it. Read back before changing anything:
+
+| command | what it showed |
+| --- | --- |
+| `vercel integration --help` | `add`, `update`, `open`, `list`, `resource`, … — no deployment/branching surface |
+| `vercel integration resource --help` | `connect`, `disconnect`, `remove`, `create-threshold`, `claim`, `inspect` |
+| `vercel integration resource connect --help` | `-e/--environment`, `--prefix`, `--format`, `--yes`. **Nothing else** |
+| `vercel integration resource inspect neon-purple-candle` | `Free · subscription · installation`; `aetherfield (production, preview, development)`; no branching field |
+
+So AGENTS.md §7.4 rule 5 applied: the work stopped, the user made the change in
+the dashboard, and it was read back afterwards. **Nothing was routed around.**
+
+### The shipped UI does not match Neon's documentation, and the labels are a trap
+
+Neon's guide says *Advanced Options → Deployments Configuration → Required →
+Preview*. The dialog that actually ships (**Storage → neon-purple-candle →
+Projects → the row's ⋮ → Configure**) reads differently, and the mismatch cost
+a round trip. Its real controls, as read back before the change:
+
+| control | before | after |
+| --- | --- | --- |
+| Environments | All Environments | **All Environments** (unchanged) |
+| Require Active Resource Before Deploy | Not Required | **Required** |
+| Create Database Branch For Deployment | Preview ☐ · Production ☐ | **Preview ☑** · Production ☐ |
+| Custom Environment Variable Prefix | empty | empty |
+| Sensitive | off | off |
+
+**Two controls in that dialog say "Preview" and they do different things.**
+`Environments` decides which deployments receive the variables at all;
+`Create Database Branch For Deployment` decides which get their own Neon branch.
+Only the second was the target. During the change the `Environments` dropdown
+was opened and **Production was unchecked**, leaving it reading
+`Preview, Development` — saving that would have stripped `DATABASE_URL` and the
+`PG*` / `POSTGRES_*` rows from production deployments. Caught before saving.
+**Anyone opening this dialog again should confirm `Environments` still reads
+`All Environments` before pressing Save.**
+
+**`Create Database Branch For Deployment → Production` stays unchecked.** It
+would put production deployments on a per-deployment branch instead of `main`.
+
+**A prefix would rename `DATABASE_URL`** and break `lib/db/client.ts`; it stays
+empty. `Sensitive` stays off to match the existing `Non-sensitive` rows.
+
+### Saving re-issues the variables — so production was re-verified, not assumed
+
+After the save, `vercel env ls` showed `DATABASE_URL`, `DATABASE_URL_UNPOOLED`,
+`POSTGRES_HOST`, `PGHOST_UNPOOLED` and `PGPASSWORD` as **created "40s ago"**:
+the dialog rewrites the integration-managed rows even when the scoping does not
+change. Names and `Production, Preview, Development` scoping survived intact,
+but "the row is untouched" was worth proving.
+
+Production's values were pulled to a **scratch path** with
+`--environment=production` — never over `.env.local`, which holds the only
+Development copy of `RESEND_API_KEY` — and compared structurally against
+`neonctl`'s strings for `main`. Hostnames were compared, never printed; the
+password was compared as a truncated SHA-256 digest:
+
+| comparison | result |
+| --- | --- |
+| production `DATABASE_URL` host == `main` **pooled** host | YES |
+| production `DATABASE_URL_UNPOOLED` host == `main` **direct** host | YES |
+| production `DATABASE_URL` host == `development` host | NO |
+| production host carries `-pooler` | YES |
+| role and password digest match | YES |
+
+The scratch file was deleted immediately. **Production still resolves to `main`
+on the same credential.**
+
+> **One trap worth naming, because it produced a false alarm.** `neonctl
+> connection-string <branch>` returns the **direct** string by default.
+> Comparing it against `DATABASE_URL`, which is pooled, reports a host mismatch
+> that looks exactly like a broken production. Pass `--pooled true` for the
+> pooled host and `--pooled false` for the direct one, explicitly, both times.
+
+### The branch allowance, read rather than recalled
+
+| field | value | source |
+| --- | --- | --- |
+| `owner.branches_limit` | 10 | `neonctl projects get` |
+| `owner.subscription_type` | `free_v3` | same |
+| branches in use | 2 (`main`, `development`) | `neonctl branches list` |
+| free slots | **8** | |
+| `expirationDays` | **30** | `vercel api /v9/projects/aetherfield` |
+| `deploymentsToKeep` | **10** | same |
+
+**The binding constraint is not the retention period.** Neon's documentation
+warns that Vercel's *default* 180-day retention lets preview branches outlive
+their pull request by months — but this project already runs a **30-day**
+retention, so that warning does not apply as written. What does apply is
+`deploymentsToKeep: 10`: Vercel pins the ten most recent deployments regardless
+of retention, and a pinned preview deployment pins its Neon branch. Against 8
+free slots, **that is the number to watch.**
+
+**Mitigation is manual pruning, not a plan change.** A plan change is billable
+and out of scope. `neonctl branches delete preview/<git-branch>` works at any
+time, and deleting the Vercel deployment does it automatically (below).
+
+### The parent is `main`, it is not configurable, and that is a §8.3 decision
+
+**Measured, not inferred.** Immediately after creation the preview branch's
+25-table count listing was **byte-identical to `main`'s** — `diff` empty. A
+preview branch is a full copy-on-write clone, so it carried:
+
+| | on `main`, and therefore on every preview branch |
+| --- | --- |
+| `user` / `account` / `session` | 1 / 1 / 7 — a real identity and live sessions |
+| `application` | **1 — a real job application with its private CV blob reference** |
+| `organization` / `member` / `verification` | 2 / 1 / 1 |
+| `lead` / `subscriber` | 0 / 0 |
+
+The Vercel-Managed integration exposes **no parent-branch and no schema-only
+option** — that choice exists in the *Neon*-Managed integration, which this
+project does not use, and in `neonctl branches create --schema-only`, which the
+webhook does not call. So unlike prompt 89's `development`, a preview database
+cannot be made empty at creation.
+
+**The user was shown this and chose to enable it anyway, on 16 Aug 2026**, on
+the reasoning that it is strictly better than the alternative: without preview
+branching a preview deployment writes to production itself. Deployment
+protection bounds it further — `ssoProtection` is
+`all_except_custom_domains`, so a preview URL is not publicly reachable.
+
+**The obligation that follows:** a preview branch holds real personal data, so
+deleting it is an AGENTS.md §8.3 duty and not housekeeping. Do not leave preview
+branches lying around, and do not treat the 8-slot allowance as the only reason
+to prune them.
+
+### No per-preview migration step, and no build-script change
+
+Neon's guide shows adding `npx prisma migrate deploy && npm run build` to the
+Vercel build. **This repository must not copy that**, and does not need to.
+
+A full clone carries the parent's `drizzle.__drizzle_migrations` **populated**:
+
+| branch | rows in `drizzle.__drizzle_migrations` |
+| --- | --- |
+| `main` | 18 |
+| `preview/preview-branch-probe` | 18 |
+
+So the schema is already current and the journal already agrees with it —
+there is nothing to apply. **`package.json`'s build script is unchanged**, which
+keeps the build path untouched and leaves §8.1's prerender guarantee a
+formality rather than something needing a diff.
+
+**Prompt 89's silent-failure trap does not apply here, and the distinction is
+the point.** That trap — `db:migrate` exiting **1** with no error message —
+came from a `--schema-only` branch copying the journal *empty* while the tables
+existed. A full clone copies it populated. **The rule is: schema-only branches
+need the drop-and-migrate-from-zero dance, cloned branches need nothing.**
+
+### The proof — measured against a real preview deployment
+
+The first preview deployment this project has ever had. Throwaway branch
+`preview-branch-probe`, one empty commit, pushed to trigger it.
+
+1. `vercel ls` → the deployment reached `● Ready`, `Preview`, 1 m build.
+2. `neonctl branches list` → **`preview/preview-branch-probe`**,
+   `br-tiny-heart-auoszk48`, `ready` — named exactly as the docs describe.
+3. Its 25-table counts were identical to `main`'s (the clone finding above).
+4. A write path was exercised **on the preview URL**.
+5. Counts re-taken on both branches.
+
+**The write path used was `/api/auth/sign-in/email`, not the demo form**, and
+that is a better probe than the one the prompt proposed. `lib/auth/server.ts`
+sets `rateLimit: { enabled: true, storage: "database" }`, so **any** request to
+`/api/auth/*` writes a Postgres `rate_limit` row — no credentials, no BotID
+path, no CSRF token and no form encoding needed. The request returned
+**HTTP 401** (bogus credentials, correctly rejected) having already done its
+database write. The deployment is protection-gated, so it was reached with
+`vercel curl`.
+
+| | before | after |
+| --- | --- | --- |
+| `preview/preview-branch-probe` · `rate_limit` | 6 | **7** |
+| `main` · all 25 tables | — | **unchanged** (`diff` of the two full listings empty) |
+
+**Pass condition met: the write landed on the preview branch and production did
+not move.** `rate_limit` is the positive control prompt 89 established — a
+table of all-zeros on both sides would be equally consistent with the request
+never having reached a database at all.
+
+### Cleanup, and what it proved about the lifecycle
+
+`vercel remove <deployment> --yes`, then polling `neonctl branches list`:
+**the branch was gone within ~15 s.** Deleting the deployment triggers immediate
+Neon cleanup, which is the documented manual path and the one to use — waiting
+on retention is the slow path. The project is back to 2 branches of 10, and the
+throwaway git branch was deleted locally and on `origin`.
+
+### An open item this created — a protection bypass token
+
+**`vercel curl` silently generated one.** Before the run the project's
+`protectionBypass` was `null`; afterwards it held one token,
+`{"scope": "automation-bypass", "isEnvVar": true}`. That is a standing
+credential that bypasses deployment protection on **every** deployment, and it
+was created as a side effect of measurement, not by intent.
+
+**It has not been removed.** `vercel api -X PATCH /v9/projects/aetherfield` was
+blocked by this environment's permission classifier, and it is recorded here
+rather than quietly left (§12 rule 9). Remove it at **Project → Settings →
+Deployment Protection → Protection Bypass for Automation**. Anyone using
+`vercel curl` against a protected deployment should expect to clean this up
+afterwards.
+
+### `NEON_API_KEY` was NOT revoked, and it cannot be revoked with itself
+
+Prompt 90 was the work waiting on the key prompt 89 minted, so the plan was to
+revoke it here as the last step. **That did not happen, and the reason is a
+property of the key rather than an oversight:**
+
+```
+$ neonctl api-keys list
+ERROR: not allowed for organization API keys
+```
+
+The resource was provisioned `--no-claim`, so it lives in the Vercel-managed
+`Vercel: <team>` Neon organization and the key is an **organization** key.
+`neonctl` permits neither `api-keys list` nor `api-keys revoke` for that kind,
+so the key cannot revoke itself and no CLI path exists.
+
+**It is still live in `.env.local`.** To revoke it, open the Neon Console
+through `vercel integration open neon neon-purple-candle` (Vercel SSO) and
+delete it under the organization's API-key settings, then drop the line from
+`.env.local`. Until then it is a working credential for the whole Neon
+organization sitting in an untracked local file — which is where prompt 89 put
+it, and `.env.example` already records that it is local-tooling-only and never
+set on Vercel.
+
+**Recorded as open rather than reported as done** (§12 rules 3 and 9). Anything
+predicting a revocation at this step is corrected by this paragraph (§12
+rule 8).
+
+### Verification
+
+| check | result |
+| --- | --- |
+| `npm run typecheck` | exit 0, no output |
+| `npm run lint` | exit 0, no output |
+| `npm test` | 12 files, **283 passed**, 745 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, exit 0, 3.6 min |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine, exactly as at prompt 89 |
+
+**No prerender diff was run, deliberately.** No source file changed and the
+build script was not touched, so the diff would be a build against itself; the
+route table is the evidence, as at prompt 89.
+
+### What this did not do
+
+- **`BETTER_AUTH_URL` for Preview is still unset**, so an emailed link resolved
+  from a preview deployment still throws. Named in prompt 87 as D3 and
+  deliberately not folded in here: it changes an auth-critical variable, and a
+  preview deployment with an isolated database but no working emailed links is a
+  coherent state. **Still open.**
+- No `vercel env` write of any kind, on any environment. No `vercel env pull`
+  over `.env.local` — production was pulled to a scratch path and deleted.
+- No schema change, no migration, no seed change, no plan change, no change to
+  `lib/db/client.ts`'s timing constants.
+- **No timing re-measurement against a preview endpoint.** Each branch gets its
+  own compute, so a preview endpoint is another one again; prompt 89's numbers
+  cover `development` only. Measuring is welcome, refitting is its own prompt.
