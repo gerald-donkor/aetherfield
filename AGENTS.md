@@ -801,16 +801,24 @@ decision to make a value public:
 
 | variable | step | source |
 | --- | --- | --- |
-| `DATABASE_URL` | 1 | Neon, auto-provisioned |
+| `DATABASE_URL` | 1 | Neon, auto-provisioned — **pooled** |
+| `DATABASE_URL_UNPOOLED` | 1 | Neon, auto-provisioned — the **direct** connection, and the one Drizzle Kit, `pg_dump`, logical replication and `LISTEN`/`NOTIFY` require (§7.3). It was always in `.env.example`; this table simply never carried the row |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | 2 | Upstash, auto-provisioned — **not** `UPSTASH_REDIS_REST_*`, which is what this table predicted and what `Redis.fromEnv()` looks for. The Marketplace integration sets the KV-prefixed names; corrected from `vercel env ls` at step 2 |
 | `RESEND_API_KEY` | 3 | Resend — **added by hand, not auto-provisioned.** The name matched this prediction, but the source did not: `vercel integration add resend` requires `-m domain=<a domain you own>` and Aetherfield owns none, so §7.4 is unsatisfiable for this provider until one exists. Recorded as a deviation in `docs/backend.md`, step 3, with what to do when a domain lands |
 | `LEAD_NOTIFICATION_EMAIL` | 3 | **ours, chosen here** — where a demo request's internal notification goes. Unset is supported: the notification is skipped, logging no address |
 | `BLOB_READ_WRITE_TOKEN` | 5 | Vercel Blob |
+| `APPLICATION_NOTIFICATION_EMAIL` | 5 | **ours, chosen here** — `LEAD_NOTIFICATION_EMAIL`'s sibling, where a job application's internal notification goes. Unset is supported the same way: the notification is skipped, logging no address |
 | `BETTER_AUTH_SECRET` | 6 | **generated locally**, ≥ 32 chars (§7.3) |
 | `BETTER_AUTH_URL` | 6 | the app's base URL |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 6, extended by prompt 41 | **ours, chosen here** — Better Auth's `socialProviders.google` takes `clientId` / `clientSecret` as config and names no variable, so these two names are the project's. Issued by Google Cloud, **added by hand**; no integration provisions them. Both are required — a provider configured with one is not configured |
+| `CRON_SECRET` | build step 14 | **generated locally** (64 base64 chars), **added by hand with `vercel env add`** — Vercel does not set it, despite calling the endpoint. It gates all three cron routes, and an unset value fails closed. Not a phase-one step: phase one's build sequence introduces no cron |
 
 Do not invent a variable name before the step that provisions it — read the name
-the provider actually set with `vercel env ls`.
+the provider actually set with `vercel env ls`. **The canonical list is
+`.env.example`, and this table is reconciled against it** — it fell five rows
+behind before prompt 95 caught it, so a row missing here is a defect in this
+file rather than evidence a variable does not exist. The last row is past phase
+one and says so; every row remains server-only.
 
 ## 8.5 Recording the result
 

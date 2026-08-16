@@ -12154,3 +12154,40 @@ route table is the evidence, as at prompt 89.
 - **No timing re-measurement against a preview endpoint.** Each branch gets its
   own compute, so a preview endpoint is another one again; prompt 89's numbers
   cover `development` only. Measuring is welcome, refitting is its own prompt.
+
+---
+
+## §8.4's variable table reconciled against `.env.example`, prompt 95
+
+AGENTS.md §8.4 calls itself the canonical list of environment variables, and had
+drifted **five rows behind** `.env.example`, which carries thirteen names. The
+table is the contract, so the fix landed in AGENTS.md itself (§12 rule 8); this
+is the record of why, so a later session knows the two were checked against each
+other on **16 Aug 2026** and does not re-derive the list.
+
+| row added | step | source, as it actually happened |
+| --- | --- | --- |
+| `DATABASE_URL_UNPOOLED` | 1 | Neon, auto-provisioned. §7.3 already explained the pooled/direct split at length, which is likely why the table never gained the row |
+| `APPLICATION_NOTIFICATION_EMAIL` | 5 | ours; `LEAD_NOTIFICATION_EMAIL`'s sibling, unset supported |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 6, extended by prompt 41 | ours. Better Auth's `socialProviders.google` takes `clientId` / `clientSecret` as **config** and names no variable, so the names are the project's — confirmed against the `better-auth-best-practices` skill rather than assumed. Issued by Google Cloud and added by hand |
+| `CRON_SECRET` | build step 14 | generated locally, 64 base64 characters, added with `vercel env add`. Vercel calls the endpoint but does **not** set this |
+
+**Judgement calls made explicitly**, as the prompt required:
+
+- **Ordering** follows the table's existing convention, by step. `CRON_SECRET`
+  therefore sorts last.
+- **`CRON_SECRET` has no phase-one step**, and inventing one would have been
+  §12 rule 6. Its row cites **build step 14**, which is where this file records
+  it as new and locally generated; prompt 81's retention purge then reused it
+  rather than adding a second secret. The row says so, and the sentence under
+  the table now notes that its last row is past phase one.
+
+**Names only were read.** No value was opened, echoed or written anywhere, and
+nothing was added to `.env.example` — it was already correct. §8.4's claim that
+**phase one needs no `NEXT_PUBLIC_*` at all** survives intact: all five additions
+are server-only.
+
+**Checks:** lint and typecheck clean, 283 `lib/domain/` tests passing, and
+`npm run build` reproduced the expected route table (`/`, `/about`, `/careers`,
+`/design-system`, `/journal` `○ Static`; `/article/[slug]` and
+`/job-listing/[slug]` `● SSG`). No source file was touched.
