@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { type FormEvent, useRef, useState } from "react";
 
 import { importCustomFactors } from "../../activity/actions";
@@ -69,7 +68,6 @@ const GAS_BASIS_LABEL = {
    factor surfaces are the only dynamic ones. */
 const FIELD_ALIGN = "md:flex md:flex-col md:justify-end";
 
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;
   const kb = bytes / 1024;
@@ -78,7 +76,6 @@ function formatSize(bytes: number): string {
 }
 
 export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
-  const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
 
   const [setChoice, setSetChoice] = useState<string>(
@@ -138,7 +135,6 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
               : ""
           }. New rows are available in factor mapping and change no figure until a category and unit is mapped to them.`,
         );
-        router.refresh();
       } else {
         // An honest failure is a visible state, never a silent success
         // (AGENTS.md 8.2 rule 4).

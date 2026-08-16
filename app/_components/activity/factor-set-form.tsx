@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { editFactorSet } from "../../activity/actions";
@@ -57,8 +56,6 @@ const GAS_BASIS_LABEL = {
 } as const;
 
 export function FactorSetForm({ set }: { set: EditableFactorSet }) {
-  const router = useRouter();
-
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<
@@ -97,7 +94,6 @@ export function FactorSetForm({ set }: { set: EditableFactorSet }) {
         setMessage(
           "Set updated. The corrected provenance is rendered beside every figure its rows produce from now on. Reports already built keep the evidence they were built with, and a changed effective range applies at the next recalculation.",
         );
-        router.refresh();
       } else {
         // An honest failure is a visible state, never a silent success
         // (AGENTS.md 8.2 rule 4).

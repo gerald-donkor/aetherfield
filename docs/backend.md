@@ -1189,6 +1189,97 @@ No message text, timing or focus effect changed; no live-region attribute was
 added; the class string and the component's shape are as prompt 105 left them;
 and no `role` outside a form-result region was touched.
 
+### Thirteen `router.refresh()` calls, determined one by one, prompt 109
+
+Thirteen client leaves called `router.refresh()` in their success branch while
+`app/activity/actions.ts` alone calls `revalidatePath` twenty-nine times, and
+`organization/members-panel.tsx` documented the opposite convention outright.
+Two conventions for one job.
+
+**This was not a blanket deletion**, and treating it as one would have shown a
+reporter a report that no longer exists. The determination is per site: which
+action the leaf calls, what that action revalidates, and whether that is the path
+the leaf is rendered on.
+
+#### The determination table
+
+| leaf | action | action revalidates | leaf renders on | verdict |
+| --- | --- | --- | --- | --- |
+| `activity/retire-factor-button` | `retireCustomFactor` | `/activity/factors`, `/activity/mappings`, `/activity` | `/activity/factors` | **removed** |
+| `activity/factor-import-form` | `importCustomFactors` | same three | `/activity/factors` | **removed** |
+| `activity/factor-set-form` | `editFactorSet` | same three | `/activity/factors` | **removed** |
+| `activity/custom-factor-form` | `createCustomFactor` | same three | `/activity/factors` | **removed** |
+| `activity/retire-set-button` | `retireFactorSet` | same three | `/activity/factors` | **removed** |
+| `activity/factor-picker` | `setFactorMapping` | `/activity`, `/activity/mappings` | `/activity/mappings` | **removed** |
+| `activity/import-controls` | `commitImport` / `discardImport` | `/activity`, `/activity/[id]` | `/activity/[importId]` | **removed** |
+| `activity/mapping-form` | `updateImportMapping` | `/activity/[id]` | `/activity/[importId]` | **removed** |
+| `activity/recalculate-control` | `recalculate` | `/activity`, and `/activity/[id]` when an id is given | both, via `EmissionsSummary` | **removed** — the action's conditional matches the two mount points exactly |
+| `reports/create-report-form` | `createReport` | `/reports` | `/reports` | **removed** |
+| `reports/report-controls` | `generateNarrative` **and** `deleteReport` | `/reports/[id]` (all three branches) / **`/reports` only** | `/reports/[reportId]` | **kept** |
+| `auth/sign-in-form` | `authClient.signIn.email` | — not a Server Action | `/sign-in` | **kept** |
+| `auth/sign-out-button` | `authClient.signOut` | — not a Server Action | anywhere | **kept** |
+
+**Ten removed, three kept**, each keep carrying a comment at the call site
+saying why — which is the part that converts a silent inconsistency into a
+stated one.
+
+#### The three that stay
+
+**`reports/report-controls`** is the interesting one. `ReportAction` is shared by
+`GenerateNarrativeControl` and `DeleteReportControl`. `generateNarrative`
+revalidates `/reports/[id]` on every branch, so for that action the refresh *is*
+redundant. `deleteReport` revalidates **`/reports` only** — not the page the
+control is standing on, which is the page whose report has just stopped
+existing. Without the refresh the reporter keeps looking at a deleted report:
+a stale success, §8.2 rule 4's failure. One component serves both and the
+deleting one decides.
+
+**The two auth leaves keep theirs, and the evidence is clear in the opposite
+direction** from the prompt's default-to-caution. `authClient.signIn.email()`
+and `authClient.signOut()` are **not Server Actions** — no `revalidatePath` runs
+anywhere on either path, so nothing invalidates the client router cache. Each
+follows with `router.replace(...)` then `router.refresh()`, and the refresh is
+what makes the destination render against the session cookie that has just
+changed rather than the cache entry the client already holds. A broken sign-out
+is a far worse outcome than a redundant refresh.
+
+#### Cache Components does not apply here, and that was checked
+
+AGENTS.md's front matter requires loading `next-cache-components` before touching
+revalidation, and it was. **The finding is that it does not bear on this
+change:** `next.config.ts` does not set `cacheComponents`, and there is no
+`use cache` directive anywhere in `app/` or `lib/`. Classic `revalidatePath`
+semantics apply, which is what the table above assumes.
+
+#### The benefit is judged, not measured
+
+**No request-count or timing measurement was taken**, so none is claimed (§12
+rule 4). Ten fewer client-initiated refreshes is a structural fact; that it is
+faster for any user is a judgement. Any latency number here would also have to
+say whether the database was warm (§7.3's scale-to-zero rule), and none was
+gathered.
+
+#### Verification, prompt 109
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 760 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, 3.7 min — Chromium and Firefox |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine |
+
+The E2E suite is the load-bearing check for this prompt, because a wrongly
+removed refresh shows stale data after a successful write and no unit test can
+see it. **The matrix did not complete** — the two native projects passed and
+WebKit did not run. The native pass covers the activity, factor, mapping,
+report and auth flows these thirteen leaves sit in.
+
+No `revalidatePath` call was added or removed in any action, no redirect on
+success was introduced (§10 rule 5), and no leaf was restructured beyond
+deleting the call and its now-unused `useRouter`.
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.

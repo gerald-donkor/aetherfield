@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { retireFactorSet } from "../../activity/actions";
@@ -34,7 +33,6 @@ export function RetireSetButton({
   factorCount: number;
   label: string;
 }) {
-  const router = useRouter();
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -69,7 +67,6 @@ export function RetireSetButton({
                 result.factorCount === 1 ? "row is" : "rows are"
               } no longer selectable. No mapped pairs were using them.`,
         );
-        router.refresh();
       } else {
         setMessage(result.fieldErrors?.setId ?? result.error);
       }

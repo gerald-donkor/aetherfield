@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { updateImportMapping } from "../../activity/actions";
@@ -50,8 +49,6 @@ export function ActivityMappingForm({
   disabled?: boolean;
   className?: string;
 }) {
-  const router = useRouter();
-
   const [draft, setDraft] = useState<ActivityMapping>(mapping);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -85,7 +82,6 @@ export function ActivityMappingForm({
       const result = await updateImportMapping(importId, draft);
       if (result.ok) {
         setMessage("Mapping saved. Every row has been re-checked.");
-        router.refresh();
         setPending(false);
         return;
       }

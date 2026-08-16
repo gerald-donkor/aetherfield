@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createReport } from "../../reports/actions";
@@ -30,7 +29,6 @@ import { NETWORK_ERROR } from "../../../lib/validation/result";
  */
 
 export function CreateReportForm() {
-  const router = useRouter();
   const [title, setTitle] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -57,7 +55,6 @@ export function CreateReportForm() {
       if (result.ok) {
         setTitle("");
         setMessage("Report built. It appears below with its figures.");
-        router.refresh();
       } else {
         // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
         setFieldErrors(result.fieldErrors ?? {});

@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 
 import { setFactorMapping } from "../../activity/actions";
@@ -72,7 +71,6 @@ export function FactorPicker({
   searchInvalid: boolean;
   children: ReactNode;
 }) {
-  const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<
@@ -123,7 +121,6 @@ export function FactorPicker({
               ? "Grid-average fallback saved. This pair's market-based figure is a grid average, recorded as the hierarchy's rung 5 and labelled as a fallback wherever it is shown. The organisation's figures have been recalculated on both lanes."
               : "Market-based rate saved. The organisation's figures have been recalculated on both lanes.",
         );
-        router.refresh();
         setPendingId(null);
         return;
       }

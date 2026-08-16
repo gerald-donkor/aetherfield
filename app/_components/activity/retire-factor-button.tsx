@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { retireCustomFactor } from "../../activity/actions";
@@ -31,7 +30,6 @@ export function RetireFactorButton({
   factorId: string;
   mappingCount: number;
 }) {
-  const router = useRouter();
   const statusRef = useRef<HTMLParagraphElement>(null);
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
@@ -71,7 +69,6 @@ export function RetireFactorButton({
               } now unmapped and outside the total until a factor is chosen again.`
             : "Factor retired. No mapped pairs were using it.",
         );
-        router.refresh();
       } else {
         setMessage(result.fieldErrors?.factorId ?? result.error);
       }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { commitImport, discardImport } from "../../activity/actions";
@@ -41,7 +40,6 @@ export function ActivityImportControls({
   validRowCount: number;
   className?: string;
 }) {
-  const router = useRouter();
   const [confirming, setConfirming] = useState<"commit" | "discard" | null>(
     null,
   );
@@ -65,7 +63,6 @@ export function ActivityImportControls({
               } committed to your activity records.`
             : "Import discarded. The uploaded file has been deleted.",
         );
-        router.refresh();
       } else {
         // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
         setMessage(result.error);

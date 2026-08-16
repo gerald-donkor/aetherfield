@@ -30,6 +30,13 @@ export function SignOutButton() {
               setError("We couldn't sign you out. Try again.");
               return;
             }
+            /* `router.refresh()` is **not** redundant here, and prompt 109
+               kept it deliberately while removing ten others. Better Auth's
+               client is not a Server Action: nothing calls `revalidatePath`,
+               so nothing invalidates the router cache. The session cookie has
+               just changed, and this is what makes the destination render
+               against the new one instead of the entry the client already
+               holds. */
             router.replace("/sign-in");
             router.refresh();
           } catch {

@@ -71,6 +71,10 @@ export function SignInForm() {
         return;
       }
 
+      /* Kept at prompt 109, for the reason `sign-out-button` gives: Better
+         Auth's client is not a Server Action, so no `revalidatePath` runs and
+         nothing invalidates the router cache. The refresh is what makes
+         `/account` render against the session that has just been created. */
       router.replace("/account");
       router.refresh();
     } catch {

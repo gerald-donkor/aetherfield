@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { type FormEvent, useRef, useState } from "react";
 
 import { createCustomFactor } from "../../activity/actions";
@@ -83,7 +82,6 @@ const GAS_BASIS_LABEL = {
    routes (AGENTS.md 8.1) and `/activity/factors` is the only dynamic one. */
 const FIELD_ALIGN = "md:flex md:flex-col md:justify-end";
 
-
 function fieldErrorsFromIssues(error: {
   issues: { path: PropertyKey[]; message: string }[];
 }) {
@@ -109,7 +107,6 @@ export function CustomFactorForm({
   sets: FormFactorSet[];
   supersedableRows: FormSupersedableRow[];
 }) {
-  const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   /* "new", or the id of a set this organisation already owns. */
   const [setChoice, setSetChoice] = useState<string>(
@@ -208,7 +205,6 @@ export function CustomFactorForm({
         setMessage(
           "Customer-supplied factor saved. It is available in factor mapping.",
         );
-        router.refresh();
       } else {
         setErrors(result.fieldErrors ?? {});
         setMessage(result.error);
@@ -440,9 +436,7 @@ export function CustomFactorForm({
             label="Scope"
             error={errors["factor.scope"]}
             value={scope}
-            onChange={(event) =>
-            setScope(event.target.value as EmissionScope)
-            }
+            onChange={(event) => setScope(event.target.value as EmissionScope)}
             disabled={pending}
           >
             {EMISSION_SCOPES.map((value) => (

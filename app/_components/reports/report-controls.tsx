@@ -47,7 +47,17 @@ function ReportAction({
       setMessage(result.ok ? success : result.error);
       /* Refresh on both outcomes: a rejected or failed draft changes the
          report's narrative status, and the page must show that rather than the
-         state it rendered with. */
+         state it rendered with.
+
+         **Kept at prompt 109, which removed ten of these as redundant.** This
+         one is not, and `deleteReport` is why: it revalidates `/reports` and
+         **not** `/reports/[reportId]`, which is the page this control is
+         standing on and the page the report has just stopped existing on.
+         Without the refresh the reporter keeps looking at a report that is
+         gone — a stale success, which is §8.2 rule 4's failure. It is shared
+         with `generateNarrative`, whose own `revalidatePath` *does* cover this
+         page, so for that action the call is redundant; one component serves
+         both and the deleting one decides. */
       router.refresh();
     } catch {
       setMessage(NETWORK_ERROR);

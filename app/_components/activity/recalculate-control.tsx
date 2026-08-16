@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { recalculate } from "../../activity/actions";
@@ -32,7 +31,6 @@ export function RecalculateControl({
   importId?: string | null;
   className?: string;
 }) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -47,7 +45,6 @@ export function RecalculateControl({
             ? "Emissions recalculated for this import."
             : "Emissions recalculated across your activity records.",
         );
-        router.refresh();
       } else {
         // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
         setMessage(result.error);
