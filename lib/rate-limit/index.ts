@@ -392,6 +392,39 @@ const INVITATION_RESPONSE_WINDOW = "1 h" as const;
 const CRON_SWEEP_LIMIT = 6;
 const CRON_SWEEP_WINDOW = "1 h" as const;
 
+/**
+ * The submissions workspace's two admin writes — changing a staff role and
+ * removing a lead, a subscriber or an application — **keyed by user id**,
+ * prompt 97.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), like every window
+ * above it, and with less to fit against than most: build step 7's view has
+ * never been in front of a real admin, so there is no traffic at all.
+ *
+ * **A named limiter rather than a reuse**, for the reason each one above
+ * records, plus one this file has no other instance of: **the callers are
+ * Aetherfield's own admins**, a different population from every tenant-side
+ * limiter here. Sharing a bucket with a tenant flow would let a customer's
+ * afternoon of imports throttle the person removing that customer's data on
+ * request.
+ *
+ * **Both actions share one bucket.** They are reached by the same person from
+ * the same page, in the same sitting, and neither has an honest high-frequency
+ * use.
+ *
+ * **Thirty an hour, and the tension is stated rather than smoothed over.** It
+ * sits at `ALERT_PREFERENCE_LIMIT`'s looseness rather than
+ * `ORGANIZATION_DELETION_LIMIT`'s ten, because unlike deleting an organisation
+ * there *is* honest repetition here: clearing a morning's spam leads is one
+ * call per row. Against that, `removeSubmission`'s application branch deletes a
+ * CV blob per call and that erasure does not come back, so the number also has
+ * to bound what one compromised admin session can destroy — thirty is the
+ * balance struck, and if a real spam wave ever exceeds it the right answer is a
+ * bulk action with its own limit, not a looser window.
+ */
+const SUBMISSION_WRITE_LIMIT = 30;
+const SUBMISSION_WRITE_WINDOW = "1 h" as const;
+
 let redis: Redis | undefined;
 
 function getRedis(): Redis {
@@ -768,6 +801,26 @@ export async function checkInvitationResponseLimit(
  */
 export async function checkCronSweepLimit(): Promise<RateLimitOutcome> {
   return consume("cron-sweep", CRON_SWEEP_LIMIT, CRON_SWEEP_WINDOW, "sweep");
+}
+
+/**
+ * The submissions workspace's two admin writes, keyed by the **user id** —
+ * prompt 97. See the constant's docblock for why the two share one bucket, why
+ * it is not a tenant-side limiter, and why the number is a judgement.
+ *
+ * @param userId the signed-in admin's id, resolved server-side from the session
+ * by `getAdminAccount()`. Never a value the browser supplied — which is also
+ * why stage b runs after the session is resolved rather than before it.
+ */
+export async function checkSubmissionWriteLimit(
+  userId: string,
+): Promise<RateLimitOutcome> {
+  return consume(
+    "submission-write",
+    SUBMISSION_WRITE_LIMIT,
+    SUBMISSION_WRITE_WINDOW,
+    userId,
+  );
 }
 
 async function consume(

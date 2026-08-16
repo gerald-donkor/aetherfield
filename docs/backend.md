@@ -2974,6 +2974,58 @@ flex-start`, `gap-5` is `calc(var(--spacing) * 5)` — and are **reasoned, not
 observed in a browser**. Note also that a screenshot of this row shows a real
 applicant's name, address and CV filename and must never be committed (§8.3).
 
+### The two admin actions gained a limiter, prompt 97
+
+Step 7 shipped `changeStaffRole` and `removeSubmission` **unlimited**. That was
+not an §8.2 breach — §8.2 governs *public* write paths, and both actions refuse
+anyone whose re-read role is not `admin` — but it made them the only two
+mutating authenticated actions in the repository without a limiter, and the
+omission was silent rather than written down as a decision, which every
+comparable omission here is.
+
+| | |
+| --- | --- |
+| limiter | `checkSubmissionWriteLimit(userId)`, prefix `submission-write` |
+| window | **30 per hour**, keyed by the admin's **user id** |
+| bucket | **shared by both actions** — same person, same page, same sitting |
+| on limiter error | **fails closed**, as every authenticated path here does |
+| rejection | `{ ok: false, error }` with `formatRetry` timing. No throw, no bare string (§10 rule 2) |
+
+**The window is a judgement, not a measurement** (§12 rule 4), with less to fit
+against than most: the view has never been in front of a real admin. It was
+judged against its neighbours — it sits at `ALERT_PREFERENCE_LIMIT`'s 30 rather
+than `ORGANIZATION_DELETION_LIMIT`'s 10, because unlike deleting an organisation
+there *is* honest repetition (clearing a morning of spam leads is one call per
+row), while `removeSubmission`'s application branch deletes a **CV blob per
+call** and that erasure does not come back, so the number still has to bound
+what one compromised admin session can destroy. If a real spam wave ever exceeds
+it, the answer is a bulk action with its own limit rather than a looser window.
+
+**A named limiter rather than a reuse**, and for a reason no other limiter in
+the file has: **the callers are Aetherfield's own admins**, not a tenant.
+Sharing a bucket with a tenant flow would let a customer's afternoon of imports
+throttle the person removing that customer's data on request.
+
+**The stage ordering was wrong and is fixed here.** Both actions parsed at
+stage **c** *before* authorising, which inverts §10 rule 3 — the cheap
+rejections must come first. Both now run one helper, `resolveAdminForWrite()`,
+which resolves the admin session and spends the limit, and parse afterwards.
+Stage **d** necessarily precedes **b** because the key *is* the user id and
+there is no key without the session — the same constraint
+`resolveMembershipForWrite()` documents in `app/account/actions.ts`.
+
+**Deliberately not done:** no BotID (authenticated path, and a page path missing
+from `instrumentation-client.ts` makes the call *fail* — §7.3; the absence now
+carries the same explanatory comment every comparable site does), no change to
+either success path or to the application branch's compensating restore, no
+change to `getAdminAccount()`, and no shared preamble across route files. No new
+environment variable; nothing new logged.
+
+**Checks:** lint and typecheck clean, 283 `lib/domain/` tests passing, and
+`npm run build` left the route table as §8.1 states — `/`, `/about`,
+`/careers`, `/design-system`, `/journal` `○ Static`, `/article/[slug]` and
+`/job-listing/[slug]` `● SSG`, `/submissions` still `ƒ Dynamic`.
+
 ## Step 8 — organisations and multi-tenancy
 
 Implemented by prompt 56 on 9 Aug 2026. This opens phase two with Better Auth's
