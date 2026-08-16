@@ -53,7 +53,11 @@ import type {
   Scope2MarketBasis,
   Scope2Method,
 } from "../validation/emissions";
-import { readSqlState, withSafeQueryErrors } from "./query-error";
+import { queryErrorScope, readSqlState } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("emission-queries");
 
 /**
  * Every read and write of the four factor and emission tables — build step 10.
@@ -158,10 +162,7 @@ export type ListedFactorSet = {
  * an existing `activity_emission.factor_id`, so an old figure still re-derives,
  * but the set is no longer offered as current.
  */
-export const listFactorSets = withSafeQueryErrors(
-  "emission-queries.listFactorSets",
-  listFactorSetsImpl,
-);
+export const listFactorSets = safe("listFactorSets", listFactorSetsImpl);
 
 async function listFactorSetsImpl(
   organizationId: string,
@@ -249,10 +250,7 @@ export type TenantFactorRow = {
   deletedAt: Date | null;
 };
 
-export const listTenantFactorSets = withSafeQueryErrors(
-  "emission-queries.listTenantFactorSets",
-  listTenantFactorSetsImpl,
-);
+export const listTenantFactorSets = safe("listTenantFactorSets", listTenantFactorSetsImpl);
 
 async function listTenantFactorSetsImpl(
   organizationId: string,
@@ -289,10 +287,7 @@ async function listTenantFactorSetsImpl(
     .orderBy(desc(emissionFactorSet.createdAt));
 }
 
-export const listTenantFactors = withSafeQueryErrors(
-  "emission-queries.listTenantFactors",
-  listTenantFactorsImpl,
-);
+export const listTenantFactors = safe("listTenantFactors", listTenantFactorsImpl);
 
 async function listTenantFactorsImpl(
   organizationId: string,
@@ -432,10 +427,7 @@ export type CreateTenantFactorOutcome =
  * of the other kind cannot go into it and is refused rather than mislabelled
  * (decision 7).
  */
-export const createTenantFactor = withSafeQueryErrors(
-  "emission-queries.createTenantFactor",
-  createTenantFactorImpl,
-);
+export const createTenantFactor = safe("createTenantFactor", createTenantFactorImpl);
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -634,10 +626,7 @@ export type ImportTenantFactorsOutcome =
  * row's own identity hash, so re-running the same file writes nothing and says
  * so. Anything else that fails aborts the transaction and leaves zero rows.
  */
-export const importTenantFactors = withSafeQueryErrors(
-  "emission-queries.importTenantFactors",
-  importTenantFactorsImpl,
-);
+export const importTenantFactors = safe("importTenantFactors", importTenantFactorsImpl);
 
 async function importTenantFactorsImpl(input: {
   organizationId: string;
@@ -733,10 +722,7 @@ async function importTenantFactorsImpl(input: {
  * already renders the gap, and historical `activity_emission` rows stay
  * re-derivable.
  */
-export const retireTenantFactor = withSafeQueryErrors(
-  "emission-queries.retireTenantFactor",
-  retireTenantFactorImpl,
-);
+export const retireTenantFactor = safe("retireTenantFactor", retireTenantFactorImpl);
 
 async function retireTenantFactorImpl(input: {
   organizationId: string;
@@ -809,10 +795,7 @@ export type UpdateTenantFactorSetOutcome =
  * already aborted it, so returning a value from inside would try to commit an
  * aborted transaction.
  */
-export const updateTenantFactorSet = withSafeQueryErrors(
-  "emission-queries.updateTenantFactorSet",
-  updateTenantFactorSetImpl,
-);
+export const updateTenantFactorSet = safe("updateTenantFactorSet", updateTenantFactorSetImpl);
 
 /** Postgres' `unique_violation` (Appendix A). */
 const UNIQUE_VIOLATION = "23505";
@@ -890,10 +873,7 @@ async function updateTenantFactorSetImpl(input: {
  * reason {@link retireTenantFactor} records: a count read before the write can
  * be stale by the time the write lands.
  */
-export const retireTenantFactorSet = withSafeQueryErrors(
-  "emission-queries.retireTenantFactorSet",
-  retireTenantFactorSetImpl,
-);
+export const retireTenantFactorSet = safe("retireTenantFactorSet", retireTenantFactorSetImpl);
 
 async function retireTenantFactorSetImpl(input: {
   organizationId: string;
@@ -1010,10 +990,7 @@ export type SupersedableRow = {
  * Distinct on `(source, source_row_id)`, because eight seeded mappings
  * routinely share four rows.
  */
-export const listSupersedableRows = withSafeQueryErrors(
-  "emission-queries.listSupersedableRows",
-  listSupersedableRowsImpl,
-);
+export const listSupersedableRows = safe("listSupersedableRows", listSupersedableRowsImpl);
 
 async function listSupersedableRowsImpl(
   organizationId: string,
@@ -1078,10 +1055,7 @@ export type FactorSibling = FactorCandidate & FactorRowIdentity;
  * engine takes. The engine never sees a database handle — that boundary is
  * AGENTS.md 6.2's, and this function is the seam.
  */
-export const listFactorMappings = withSafeQueryErrors(
-  "emission-queries.listFactorMappings",
-  listFactorMappingsImpl,
-);
+export const listFactorMappings = safe("listFactorMappings", listFactorMappingsImpl);
 
 async function listFactorMappingsImpl(
   organizationId: string,
@@ -1177,10 +1151,7 @@ async function listFactorMappingsImpl(
  * into a filed number, which is why the predicate is the shared helper rather
  * than a restatement of it.
  */
-export const listFactorSiblings = withSafeQueryErrors(
-  "emission-queries.listFactorSiblings",
-  listFactorSiblingsImpl,
-);
+export const listFactorSiblings = safe("listFactorSiblings", listFactorSiblingsImpl);
 
 async function listFactorSiblingsImpl(
   organizationId: string,
@@ -1382,10 +1353,7 @@ export function buildFactorResolver(
  * empty list, which is the same answer a nonexistent id gets. No existence
  * oracle on this path.
  */
-export const listRecordsForCalculation = withSafeQueryErrors(
-  "emission-queries.listRecordsForCalculation",
-  listRecordsForCalculationImpl,
-);
+export const listRecordsForCalculation = safe("listRecordsForCalculation", listRecordsForCalculationImpl);
 
 async function listRecordsForCalculationImpl(
   organizationId: string,
@@ -1442,10 +1410,7 @@ export type StoredEmission = {
  * The unique index on `activity_record_id` is the backstop: a double-run cannot
  * append a second figure for one record even if this transaction were wrong.
  */
-export const replaceEmissions = withSafeQueryErrors(
-  "emission-queries.replaceEmissions",
-  replaceEmissionsImpl,
-);
+export const replaceEmissions = safe("replaceEmissions", replaceEmissionsImpl);
 
 async function replaceEmissionsImpl(
   organizationId: string,
@@ -1534,10 +1499,7 @@ export type RecalculationOutcome = {
  * run to one import. It is an additional predicate, never a replacement for the
  * tenant one.
  */
-export const recalculateOrganization = withSafeQueryErrors(
-  "emission-queries.recalculateOrganization",
-  recalculateOrganizationImpl,
-);
+export const recalculateOrganization = safe("recalculateOrganization", recalculateOrganizationImpl);
 
 async function recalculateOrganizationImpl(
   organizationId: string,
@@ -1651,10 +1613,7 @@ export type PersistedEmission = {
  * version, against a named factor row, and re-deriving it on every page view
  * would make "what did we file" unanswerable.
  */
-export const listEmissions = withSafeQueryErrors(
-  "emission-queries.listEmissions",
-  listEmissionsImpl,
-);
+export const listEmissions = safe("listEmissions", listEmissionsImpl);
 
 async function listEmissionsImpl(
   organizationId: string,
@@ -1692,10 +1651,7 @@ async function listEmissionsImpl(
  * How many committed records currently have no computed figure — the number the
  * surface needs to say "this total is not complete" without recalculating.
  */
-export const countUncalculatedRecords = withSafeQueryErrors(
-  "emission-queries.countUncalculatedRecords",
-  countUncalculatedRecordsImpl,
-);
+export const countUncalculatedRecords = safe("countUncalculatedRecords", countUncalculatedRecordsImpl);
 
 async function countUncalculatedRecordsImpl(
   organizationId: string,
@@ -1740,10 +1696,7 @@ async function countUncalculatedRecordsImpl(
  * reason {@link listFactorCoverage} exists, applied to the same question. The
  * predicate is the shared one, so this and the pair list agree by construction.
  */
-export const countOutOfPeriodRecords = withSafeQueryErrors(
-  "emission-queries.countOutOfPeriodRecords",
-  countOutOfPeriodRecordsImpl,
-);
+export const countOutOfPeriodRecords = safe("countOutOfPeriodRecords", countOutOfPeriodRecordsImpl);
 
 async function countOutOfPeriodRecordsImpl(
   organizationId: string,
@@ -1805,10 +1758,7 @@ async function countOutOfPeriodRecordsImpl(
  * holds no coverage list — the nightly sweep would have to ask it to distinguish
  * an unseeded organisation from an idle one. It is not called today.
  */
-export const hasAnyFactorMapping = withSafeQueryErrors(
-  "emission-queries.hasAnyFactorMapping",
-  hasAnyFactorMappingImpl,
-);
+export const hasAnyFactorMapping = safe("hasAnyFactorMapping", hasAnyFactorMappingImpl);
 
 async function hasAnyFactorMappingImpl(
   organizationId: string,
@@ -1929,10 +1879,7 @@ export type FactorCoveragePair = {
  * {@link countOutOfPeriodRecords} uses, so the pair list and the coverage line
  * cannot disagree.
  */
-export const listFactorCoverage = withSafeQueryErrors(
-  "emission-queries.listFactorCoverage",
-  listFactorCoverageImpl,
-);
+export const listFactorCoverage = safe("listFactorCoverage", listFactorCoverageImpl);
 
 async function listFactorCoverageImpl(
   organizationId: string,
@@ -2079,10 +2026,7 @@ export type MarketBasedMapping = {
  * visibility predicate for the factor, so a lane can never pick up another
  * tenant's row.
  */
-export const listMarketBasedMappings = withSafeQueryErrors(
-  "emission-queries.listMarketBasedMappings",
-  listMarketBasedMappingsImpl,
-);
+export const listMarketBasedMappings = safe("listMarketBasedMappings", listMarketBasedMappingsImpl);
 
 async function listMarketBasedMappingsImpl(
   organizationId: string,
@@ -2221,10 +2165,7 @@ function marketLaneScope(
  * label columns keep their precedence, so the list a reporter reads does not
  * re-sequence.
  */
-export const searchFactorsForPair = withSafeQueryErrors(
-  "emission-queries.searchFactorsForPair",
-  searchFactorsForPairImpl,
-);
+export const searchFactorsForPair = safe("searchFactorsForPair", searchFactorsForPairImpl);
 
 async function searchFactorsForPairImpl(
   organizationId: string,
@@ -2327,10 +2268,7 @@ export type FuzzyFactorSearchRow = FactorSearchRow & {
  * thousands of published scope 2 rows the default lane searches, which is
  * precisely the haystack close-wording ranking exists for.
  */
-export const searchFactorsByWording = withSafeQueryErrors(
-  "emission-queries.searchFactorsByWording",
-  searchFactorsByWordingImpl,
-);
+export const searchFactorsByWording = safe("searchFactorsByWording", searchFactorsByWordingImpl);
 
 async function searchFactorsByWordingImpl(
   organizationId: string,
@@ -2417,10 +2355,7 @@ export type VisibleFactor = {
  * indistinguishable from one that does not exist — the same stance `getImport`
  * takes on a foreign `importId`. No existence oracle.
  */
-export const getVisibleFactor = withSafeQueryErrors(
-  "emission-queries.getVisibleFactor",
-  getVisibleFactorImpl,
-);
+export const getVisibleFactor = safe("getVisibleFactor", getVisibleFactorImpl);
 
 async function getVisibleFactorImpl(
   organizationId: string,
@@ -2483,10 +2418,7 @@ async function getVisibleFactorImpl(
  * a reporter's own choice, for the reason its docblock records; this *is* the
  * reporter's own choice, made deliberately, so it overwrites.
  */
-export const setFactorMapping = withSafeQueryErrors(
-  "emission-queries.setFactorMapping",
-  setFactorMappingImpl,
-);
+export const setFactorMapping = safe("setFactorMapping", setFactorMappingImpl);
 
 async function setFactorMappingImpl(input: {
   organizationId: string;
@@ -2571,10 +2503,7 @@ async function setFactorMappingImpl(input: {
  * date — so this is which provenance a reporter sees, not which figure is
  * filed.
  */
-export const seedDefaultMappings = withSafeQueryErrors(
-  "emission-queries.seedDefaultMappings",
-  seedDefaultMappingsImpl,
-);
+export const seedDefaultMappings = safe("seedDefaultMappings", seedDefaultMappingsImpl);
 
 async function seedDefaultMappingsImpl(
   organizationId: string,

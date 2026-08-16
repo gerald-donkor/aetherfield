@@ -5,7 +5,11 @@ import { and, asc, eq, gt, isNotNull, isNull, lte } from "drizzle-orm";
 import { invitation, member, organization, user } from "./auth-schema";
 import { getDb } from "./client";
 import { activityImport, organizationDeletion } from "./schema";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("organization-queries");
 
 /**
  * The tenant-scope primitive (AGENTS.md 9.2 rule 6).
@@ -85,10 +89,7 @@ function toMembership(row: {
  * reading anything scoped to `organizationId`, and no other condition — not a
  * staff role, not an admin role — substitutes for it (AGENTS.md 11).
  */
-export const getMembership = withSafeQueryErrors(
-  "organization-queries.getMembership",
-  getMembershipImpl,
-);
+export const getMembership = safe("getMembership", getMembershipImpl);
 
 async function getMembershipImpl(
   userId: string,
@@ -114,10 +115,7 @@ async function getMembershipImpl(
  * every render, and so the single-membership fallback in
  * `lib/auth/organization.ts` is deterministic.
  */
-export const listMembershipsForUser = withSafeQueryErrors(
-  "organization-queries.listMembershipsForUser",
-  listMembershipsForUserImpl,
-);
+export const listMembershipsForUser = safe("listMembershipsForUser", listMembershipsForUserImpl);
 
 async function listMembershipsForUserImpl(
   userId: string,
@@ -157,10 +155,7 @@ async function listMembershipsForUserImpl(
  * workspace they have asked to have removed. The exclusion is here rather than
  * in the sweep so it cannot be forgotten by a later caller.
  */
-export const listAllOrganizationIds = withSafeQueryErrors(
-  "organization-queries.listAllOrganizationIds",
-  listAllOrganizationIdsImpl,
-);
+export const listAllOrganizationIds = safe("listAllOrganizationIds", listAllOrganizationIdsImpl);
 
 async function listAllOrganizationIdsImpl(): Promise<string[]> {
   const rows = await getDb()
@@ -208,10 +203,7 @@ export type OrganizationMember = {
  *
  * Ordered stably so the roster does not reshuffle between renders.
  */
-export const listMembersForOrganization = withSafeQueryErrors(
-  "organization-queries.listMembersForOrganization",
-  listMembersForOrganizationImpl,
-);
+export const listMembersForOrganization = safe("listMembersForOrganization", listMembersForOrganizationImpl);
 
 async function listMembersForOrganizationImpl(
   organizationId: string,
@@ -250,10 +242,7 @@ export type PendingInvitation = {
  * Tenant-predicated on the resolved organisation id, as
  * `listMembersForOrganization` above is and for the same reason.
  */
-export const listPendingInvitations = withSafeQueryErrors(
-  "organization-queries.listPendingInvitations",
-  listPendingInvitationsImpl,
-);
+export const listPendingInvitations = safe("listPendingInvitations", listPendingInvitationsImpl);
 
 async function listPendingInvitationsImpl(
   organizationId: string,
@@ -318,10 +307,7 @@ export type InvitationForLink = {
  * which leaves a page with nothing true to say). Deciding what may be *shown*
  * from this row is the page's job, not this layer's.
  */
-export const getInvitationForLink = withSafeQueryErrors(
-  "organization-queries.getInvitationForLink",
-  getInvitationForLinkImpl,
-);
+export const getInvitationForLink = safe("getInvitationForLink", getInvitationForLinkImpl);
 
 async function getInvitationForLinkImpl(
   invitationId: string,
@@ -360,10 +346,7 @@ async function getInvitationForLinkImpl(
  * between the two still ends at the constraint, which is why the action also
  * handles the violation.
  */
-export const getOrganizationBySlug = withSafeQueryErrors(
-  "organization-queries.getOrganizationBySlug",
-  getOrganizationBySlugImpl,
-);
+export const getOrganizationBySlug = safe("getOrganizationBySlug", getOrganizationBySlugImpl);
 
 async function getOrganizationBySlugImpl(
   slug: string,
@@ -396,10 +379,7 @@ async function getOrganizationBySlugImpl(
  *
  * Tenant-predicated on the resolved organisation id, as every read here is.
  */
-export const listOwnerEmails = withSafeQueryErrors(
-  "organization-queries.listOwnerEmails",
-  listOwnerEmailsImpl,
-);
+export const listOwnerEmails = safe("listOwnerEmails", listOwnerEmailsImpl);
 
 async function listOwnerEmailsImpl(
   organizationId: string,
@@ -433,10 +413,7 @@ const pendingColumns = {
 } as const;
 
 /** One organisation's open deletion request, or `null`. Tenant-predicated. */
-export const getPendingDeletion = withSafeQueryErrors(
-  "organization-queries.getPendingDeletion",
-  getPendingDeletionImpl,
-);
+export const getPendingDeletion = safe("getPendingDeletion", getPendingDeletionImpl);
 
 async function getPendingDeletionImpl(
   organizationId: string,
@@ -467,10 +444,7 @@ async function getPendingDeletionImpl(
  * Every value written here was resolved server-side by the caller from a
  * membership row — nothing on this path comes from a request.
  */
-export const createDeletionRequest = withSafeQueryErrors(
-  "organization-queries.createDeletionRequest",
-  createDeletionRequestImpl,
-);
+export const createDeletionRequest = safe("createDeletionRequest", createDeletionRequestImpl);
 
 async function createDeletionRequestImpl(input: {
   organizationId: string;
@@ -502,10 +476,7 @@ async function createDeletionRequestImpl(input: {
  * row that is already cancelled, and a purged row can never be "restored" into
  * a workspace that no longer exists. Returns whether a row moved.
  */
-export const cancelDeletionRequest = withSafeQueryErrors(
-  "organization-queries.cancelDeletionRequest",
-  cancelDeletionRequestImpl,
-);
+export const cancelDeletionRequest = safe("cancelDeletionRequest", cancelDeletionRequestImpl);
 
 async function cancelDeletionRequestImpl(
   organizationId: string,
@@ -538,10 +509,7 @@ async function cancelDeletionRequestImpl(
  *
  * Ordered stably so an interrupted sweep resumes over the same sequence.
  */
-export const listDueDeletions = withSafeQueryErrors(
-  "organization-queries.listDueDeletions",
-  listDueDeletionsImpl,
-);
+export const listDueDeletions = safe("listDueDeletions", listDueDeletionsImpl);
 
 async function listDueDeletionsImpl(
   now: Date = new Date(),
@@ -564,10 +532,7 @@ async function listDueDeletionsImpl(
 /** The audit row's final state. It is not deleted: it is the only remaining
     evidence the organisation existed, which is the point of AGENTS.md 9.2
     rule 5's audit trail. */
-export const markDeletionPurged = withSafeQueryErrors(
-  "organization-queries.markDeletionPurged",
-  markDeletionPurgedImpl,
-);
+export const markDeletionPurged = safe("markDeletionPurged", markDeletionPurgedImpl);
 
 async function markDeletionPurgedImpl(
   deletionId: string,
@@ -587,10 +552,7 @@ async function markDeletionPurgedImpl(
  * message: a driver or provider error can quote a customer's data, and this
  * column is read by us (AGENTS.md 8.3 rule 2). The sweep passes a fixed string.
  */
-export const recordDeletionPurgeError = withSafeQueryErrors(
-  "organization-queries.recordDeletionPurgeError",
-  recordDeletionPurgeErrorImpl,
-);
+export const recordDeletionPurgeError = safe("recordDeletionPurgeError", recordDeletionPurgeErrorImpl);
 
 async function recordDeletionPurgeErrorImpl(
   deletionId: string,
@@ -615,10 +577,7 @@ async function recordDeletionPurgeErrorImpl(
  * Soft-deleted imports are **included**: a discarded import's blob is still a
  * customer's file in storage, and erasure means erasure.
  */
-export const listImportBlobPathnames = withSafeQueryErrors(
-  "organization-queries.listImportBlobPathnames",
-  listImportBlobPathnamesImpl,
-);
+export const listImportBlobPathnames = safe("listImportBlobPathnames", listImportBlobPathnamesImpl);
 
 async function listImportBlobPathnamesImpl(
   organizationId: string,
@@ -650,10 +609,7 @@ async function listImportBlobPathnamesImpl(
  * on the organisation as well as the import id, so the statement cannot reach
  * another tenant's row even if a caller passed the wrong id.
  */
-export const clearImportBlobPathname = withSafeQueryErrors(
-  "organization-queries.clearImportBlobPathname",
-  clearImportBlobPathnameImpl,
-);
+export const clearImportBlobPathname = safe("clearImportBlobPathname", clearImportBlobPathnameImpl);
 
 async function clearImportBlobPathnameImpl(
   organizationId: string,
@@ -683,10 +639,7 @@ async function clearImportBlobPathnameImpl(
  * **`organization_deletion` is not among them**, by construction: it carries no
  * foreign key, which is what lets the audit row outlive the row it describes.
  */
-export const deleteOrganizationRow = withSafeQueryErrors(
-  "organization-queries.deleteOrganizationRow",
-  deleteOrganizationRowImpl,
-);
+export const deleteOrganizationRow = safe("deleteOrganizationRow", deleteOrganizationRowImpl);
 
 async function deleteOrganizationRowImpl(
   organizationId: string,

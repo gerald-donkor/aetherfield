@@ -18,7 +18,11 @@ import {
 import { getDb } from "./client";
 import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
 import { subscriber } from "./schema";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("subscriber-queries");
 
 export type ListedSubscriber = {
   id: string;
@@ -107,10 +111,7 @@ export type SubscribeOutcome =
  * and rotating it would break the unsubscribe link in every message already
  * delivered to that person.
  */
-export const upsertSubscriber = withSafeQueryErrors(
-  "subscriber-queries.upsertSubscriber",
-  upsertSubscriberImpl,
-);
+export const upsertSubscriber = safe("upsertSubscriber", upsertSubscriberImpl);
 
 async function upsertSubscriberImpl(email: string): Promise<SubscribeOutcome> {
   const [row] = await getDb()
@@ -174,10 +175,7 @@ export type ConfirmOutcome =
  * why — and that read is not an oracle: it answers only to someone already
  * holding a 32-byte token, and it never sees an address.
  */
-export const confirmSubscriberByToken = withSafeQueryErrors(
-  "subscriber-queries.confirmSubscriberByToken",
-  confirmSubscriberByTokenImpl,
-);
+export const confirmSubscriberByToken = safe("confirmSubscriberByToken", confirmSubscriberByTokenImpl);
 
 async function confirmSubscriberByTokenImpl(
   token: string,
@@ -241,10 +239,7 @@ export type UnsubscribeOutcome =
  * are certainly not receiving mail, and telling them their token is unknown
  * would be both alarming and false.
  */
-export const unsubscribeByToken = withSafeQueryErrors(
-  "subscriber-queries.unsubscribeByToken",
-  unsubscribeByTokenImpl,
-);
+export const unsubscribeByToken = safe("unsubscribeByToken", unsubscribeByTokenImpl);
 
 async function unsubscribeByTokenImpl(
   token: string,
@@ -274,10 +269,7 @@ async function unsubscribeByTokenImpl(
   return existing ? { state: "already-unsubscribed" } : { state: "unknown" };
 }
 
-export const listSubscribers = withSafeQueryErrors(
-  "subscriber-queries.listSubscribers",
-  listSubscribersImpl,
-);
+export const listSubscribers = safe("listSubscribers", listSubscribersImpl);
 
 async function listSubscribersImpl(
   page: number,
@@ -299,10 +291,7 @@ async function listSubscribersImpl(
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export const countSubscribers = withSafeQueryErrors(
-  "subscriber-queries.countSubscribers",
-  countSubscribersImpl,
-);
+export const countSubscribers = safe("countSubscribers", countSubscribersImpl);
 
 async function countSubscribersImpl(): Promise<number> {
   const [row] = await getDb()
@@ -313,10 +302,7 @@ async function countSubscribersImpl(): Promise<number> {
 }
 
 /** Tokens never enter either the select above or this handled outcome. */
-export const softDeleteSubscriber = withSafeQueryErrors(
-  "subscriber-queries.softDeleteSubscriber",
-  softDeleteSubscriberImpl,
-);
+export const softDeleteSubscriber = safe("softDeleteSubscriber", softDeleteSubscriberImpl);
 
 async function softDeleteSubscriberImpl(id: string): Promise<boolean> {
   const [row] = await getDb()

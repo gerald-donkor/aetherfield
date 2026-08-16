@@ -228,3 +228,51 @@ export function withSafeQueryErrors<A extends unknown[], R>(
     }
   };
 }
+
+/**
+ * {@link withSafeQueryErrors} with the module half of the label bound once —
+ * prompt 101.
+ *
+ * ```ts
+ * const safe = queryErrorScope("report-queries");
+ * export const createReport = safe("createReport", createReportImpl);
+ * ```
+ *
+ * **The problem it solves is a silent desync.** The label is the only handle an
+ * operator has on which query failed, and it was hand-written at 98 call sites
+ * as a free string tied to nothing. A module rename, an export rename, or a
+ * query copy-pasted as the basis for a new one left the label pointing at the
+ * wrong function with nothing to catch it. Ninety-seven of the ninety-eight
+ * module-name repetitions are now written once per file, and the remaining
+ * function name sits on the same line as the `const` it labels — close enough
+ * that a rename missing it shows up in the same line of diff.
+ *
+ * ---
+ *
+ * **Why the function half is still written by hand, and it is not for want of
+ * trying.** Every one of the 98 call sites passes a named `<name>Impl`
+ * declaration, so `fn.name.replace(/Impl$/, "")` derives the label exactly — in
+ * development. It was rejected on evidence: after `npm run build`,
+ * `listReportsImpl`, `insertLeadImpl` and `readDashboardEvidenceImpl` appear in
+ * `.next/server/**` only inside `.map` files and **never in an emitted `.js`**,
+ * because the production build mangles local function names. Deriving from
+ * `fn.name` would therefore produce correct labels in dev and mangled ones in
+ * production — the same defect this change exists to remove, hidden in the one
+ * environment where it matters. The hand-written function name is an accepted,
+ * recorded limitation.
+ *
+ * **`operation` carries no personal data and cannot.** It is a compile-time
+ * constant built from a module name and a function name; no argument, row,
+ * address or id reaches it. It is not logged by anything in this repository —
+ * nothing reads `DatabaseQueryError.operation` — but it does travel on the error
+ * object, which a platform error printer may serialise. That is the point of it,
+ * and AGENTS.md 8.3 rule 2 is satisfied by construction rather than by care.
+ */
+export function queryErrorScope(moduleName: string) {
+  return function safe<A extends unknown[], R>(
+    name: string,
+    fn: (...args: A) => Promise<R>,
+  ): (...args: A) => Promise<R> {
+    return withSafeQueryErrors(`${moduleName}.${name}`, fn);
+  };
+}

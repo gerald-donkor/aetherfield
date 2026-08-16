@@ -7489,6 +7489,83 @@ recalled:
 (`require("drizzle-orm").DrizzleQueryError` is a `function`), so the check needs
 no deep import.
 
+### The label is assembled, not hand-written, prompt 101
+
+`operation` was a free string passed at **98 call sites** across thirteen modules
+in `lib/db/`, each written by hand as `"<module>.<function>"` and tied to
+neither half of the name it repeated. A module rename, an export rename, or a
+query copy-pasted as the basis for a new one desynced the label **silently** —
+and the label is the only handle an operator has on which query failed.
+
+Each module now binds its half once:
+
+```ts
+const safe = queryErrorScope("report-queries");
+export const createReport = safe("createReport", createReportImpl);
+```
+
+That removes 97 of the 98 module-name repetitions and puts the remaining
+function name on the same line as the `const` it labels.
+
+#### Deriving the function half from `fn.name` was tried and rejected on evidence
+
+The prompt asked for this to be investigated rather than assumed, and the
+investigation is the useful part of this record.
+
+**All 98 call sites pass a named `<name>Impl` function declaration** — checked,
+not sampled — so `fn.name.replace(/Impl$/, "")` derives the label exactly in
+development. It is still wrong, because **the production build mangles those
+names**: after `npm run build`, `listReportsImpl`, `insertLeadImpl` and
+`readDashboardEvidenceImpl` appear under `.next/server/` only inside `.map`
+files and in **no emitted `.js`** (`grep -rl … --include="*.js"` returns
+nothing). Deriving from `fn.name` would give correct labels locally and mangled
+ones in production — the same defect, hidden in the one environment where it
+matters.
+
+So the hand-written function name is an **accepted, recorded limitation**, not
+an oversight. `withSafeQueryErrors` itself is unchanged and still exported;
+`queryErrorScope` composes it.
+
+#### `operation` reaches no log of ours, and carries no personal data
+
+The prompt required this answered either way (§8.3 rule 2). **Nothing in this
+repository reads `DatabaseQueryError.operation`** — checked across `lib/` and
+`app/`. It travels on the error object, which a platform error printer may
+serialise, and that is what it is for. It cannot carry personal data by
+construction: it is a compile-time constant built from a module name and a
+function name, and no argument, row, address or id reaches it.
+
+#### All 98 labels verified byte-identical
+
+The acceptance condition was that no emitted string change, so it was measured.
+Labels were extracted before the change from the literal strings and after the
+change by reassembling the two halves; both sorted with the same sorter and
+diffed:
+
+```
+98 98
+IDENTICAL: all 98 labels byte-for-byte unchanged
+```
+
+The extraction commands are now in `docs/automation.md` — including the trap
+that shell `sort` and Python's `sorted` disagree on hyphenated module names
+under a non-C locale, which produced a one-line phantom diff on the first
+comparison.
+
+#### Verification, prompt 101
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **283 passed**, 694 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| the 98-label comparison | identical, above |
+
+The `try`/`catch`/`toSafeQueryError` body is untouched, no operation string
+changed value, no query module was split, and no lint rule was added — if one
+enforcing the convention would help, it is its own prompt.
+
 ### The sanitizer's contract
 
 `lib/db/query-error.ts` is `server-only`, like every other module under

@@ -12,7 +12,11 @@ import { activityRecord } from "./schema";
 import { listTargets } from "./target-queries";
 import { getDb } from "./client";
 import type { EnergyInput } from "../domain/dashboard";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("dashboard-queries");
 
 /**
  * The complete read-only evidence set for `/dashboard`.
@@ -22,10 +26,7 @@ import { withSafeQueryErrors } from "./query-error";
  * all-emissions read remains an in-memory scale judgement until real tenant
  * volume supplies a measured reason to replace it.
  */
-export const readDashboardEvidence = withSafeQueryErrors(
-  "dashboard-queries.readDashboardEvidence",
-  readDashboardEvidenceImpl,
-);
+export const readDashboardEvidence = safe("readDashboardEvidence", readDashboardEvidenceImpl);
 
 async function readDashboardEvidenceImpl(organizationId: string) {
   const [

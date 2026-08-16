@@ -20,7 +20,11 @@ import { selectDashboardTarget } from "../domain/dashboard";
 import type { RecordEmission } from "../domain/emissions";
 import type { ReportTargetInput } from "../domain/reports";
 import type { ReportEvidence, ReportPeriod } from "../validation/reports";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("report-evidence");
 
 /**
  * The report snapshot's **named evidence seam** — build step 13.
@@ -70,10 +74,7 @@ export type ReportEvidenceRead = {
  * report's own period. That remains the step-11 **judgement** about in-memory
  * scale, not a measured production limit.
  */
-export const readReportEvidence = withSafeQueryErrors(
-  "report-evidence.readReportEvidence",
-  readReportEvidenceImpl,
-);
+export const readReportEvidence = safe("readReportEvidence", readReportEvidenceImpl);
 
 async function readReportEvidenceImpl(
   organizationId: string,

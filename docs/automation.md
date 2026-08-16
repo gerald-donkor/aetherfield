@@ -1073,6 +1073,39 @@ for f in sys.argv[1:]:
 
 This cost time in two separate sessions.
 
+## Checking the 98 data-layer error labels are unchanged
+
+`withSafeQueryErrors`' `operation` string is the only handle an operator has on
+which query failed, so any refactor of `lib/db/` must prove it emitted the same
+labels. Since prompt 101 the label is assembled from two halves — a per-module
+`const safe = queryErrorScope("<module>")` and the function name at each call —
+so it cannot be grepped as a single literal. This reassembles all 98 and prints
+them sorted:
+
+```bash
+python3 - <<'EOF' > /tmp/labels.txt
+import re, pathlib
+out = []
+for p in sorted(pathlib.Path("lib").rglob("*.ts")):
+    if p.name == "query-error.ts": continue
+    s = p.read_text()
+    m = re.search(r'const safe = queryErrorScope\("([^"]+)"\);', s)
+    if not m: continue
+    out += [f"{m.group(1)}.{fn}" for fn in re.findall(r'\bsafe\(\s*"([^"]+)"', s)]
+print("\n".join(sorted(out)))
+EOF
+```
+
+Capture it before the change and after, then `diff` the two. **Sort both with
+the same sorter** — shell `sort` and Python's `sorted` disagree on hyphenated
+names under a non-C locale, and the resulting one-line diff looks like a renamed
+label when nothing moved. That false positive cost a few minutes at prompt 101.
+
+Before prompt 101 the equivalent capture was
+`grep -rn "withSafeQueryErrors(" -A1 lib | grep -oP '"\K[^"]+(?=")'`, which is
+what produced the "before" side of that comparison.
+
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

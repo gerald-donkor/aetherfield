@@ -5,7 +5,11 @@ import { and, count, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { user } from "./auth-schema";
 import { getDb } from "./client";
 import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("auth-queries");
 
 export type StaffRole = "staff" | "admin";
 
@@ -13,10 +17,7 @@ export type StaffRole = "staff" | "admin";
  * Roles are authorization data, so they are read from Postgres on every
  * protected request rather than trusted from Better Auth's session payload.
  */
-export const getStaffRole = withSafeQueryErrors(
-  "auth-queries.getStaffRole",
-  getStaffRoleImpl,
-);
+export const getStaffRole = safe("getStaffRole", getStaffRoleImpl);
 
 async function getStaffRoleImpl(
   userId: string,
@@ -41,10 +42,7 @@ export type ListedAccount = {
   createdAt: Date;
 };
 
-export const listVerifiedAccounts = withSafeQueryErrors(
-  "auth-queries.listVerifiedAccounts",
-  listVerifiedAccountsImpl,
-);
+export const listVerifiedAccounts = safe("listVerifiedAccounts", listVerifiedAccountsImpl);
 
 async function listVerifiedAccountsImpl(
   page: number,
@@ -65,10 +63,7 @@ async function listVerifiedAccountsImpl(
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export const countVerifiedAccounts = withSafeQueryErrors(
-  "auth-queries.countVerifiedAccounts",
-  countVerifiedAccountsImpl,
-);
+export const countVerifiedAccounts = safe("countVerifiedAccounts", countVerifiedAccountsImpl);
 
 async function countVerifiedAccountsImpl(): Promise<number> {
   const [row] = await getDb()
@@ -82,10 +77,7 @@ async function countVerifiedAccountsImpl(): Promise<number> {
  * Grants or revokes staff only. The WHERE is the authority for every guard:
  * no self-change, no admin/unknown-role target, and no unverified target.
  */
-export const setStaffRole = withSafeQueryErrors(
-  "auth-queries.setStaffRole",
-  setStaffRoleImpl,
-);
+export const setStaffRole = safe("setStaffRole", setStaffRoleImpl);
 
 async function setStaffRoleImpl({
   actorId,

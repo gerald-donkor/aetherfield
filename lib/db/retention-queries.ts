@@ -4,10 +4,14 @@ import { and, asc, eq, isNotNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { getDb } from "./client";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
 import { application, lead, retentionPurgeRun, subscriber } from "./schema";
 import { retentionCutoffs } from "../domain/retention";
 import type { RetentionPurgeError } from "../validation/retention";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("retention-queries");
 
 /**
  * The phase-one retention sweep's data layer — prompt 81.
@@ -28,8 +32,9 @@ import type { RetentionPurgeError } from "../validation/retention";
  * not the end of the record's life; stamping it again here would be the
  * permanent archive AGENTS.md 8.3 rule 5 forbids.
  *
- * Every export is wrapped in `withSafeQueryErrors` with a
- * `retention-queries.<name>` label (prompt 80's contract). An unwrapped export
+ * Every export is wrapped with a `retention-queries.<name>` label (prompt 80's
+ * contract), now through {@link queryErrorScope}'s `safe` — the module half is
+ * bound once at the top of this file (prompt 101). An unwrapped export
  * would let a `DrizzleQueryError` escape carrying the bound parameters — here,
  * cut-off timestamps and a row id, but the contract is the contract and a later
  * predicate may not be so harmless.
@@ -54,10 +59,7 @@ function softDeleteDue(
  *
  * Ordered stably, so a run interrupted partway resumes over the same sequence.
  */
-export const listDueApplications = withSafeQueryErrors(
-  "retention-queries.listDueApplications",
-  listDueApplicationsImpl,
-);
+export const listDueApplications = safe("listDueApplications", listDueApplicationsImpl);
 
 async function listDueApplicationsImpl(
   now: Date,
@@ -87,10 +89,7 @@ async function listDueApplicationsImpl(
  * `listDueApplications` in the same run, and re-deriving the predicate here
  * would be a second place for it to drift.
  */
-export const deleteApplicationRow = withSafeQueryErrors(
-  "retention-queries.deleteApplicationRow",
-  deleteApplicationRowImpl,
-);
+export const deleteApplicationRow = safe("deleteApplicationRow", deleteApplicationRowImpl);
 
 async function deleteApplicationRowImpl(id: string): Promise<number> {
   const rows = await getDb()
@@ -109,10 +108,7 @@ async function deleteApplicationRowImpl(id: string): Promise<number> {
  * drizzle-orm 0.45.2 (`pg-core/query-builders/delete.d.ts:98`) and it is what
  * `organization-queries.cancelDeletionRequest` already counts with.
  */
-export const deleteDueLeads = withSafeQueryErrors(
-  "retention-queries.deleteDueLeads",
-  deleteDueLeadsImpl,
-);
+export const deleteDueLeads = safe("deleteDueLeads", deleteDueLeadsImpl);
 
 async function deleteDueLeadsImpl(now: Date): Promise<number> {
   const cutoffs = retentionCutoffs(now);
@@ -140,10 +136,7 @@ async function deleteDueLeadsImpl(now: Date): Promise<number> {
  *   and the person holds a working one-click unsubscribe that starts the
  *   12-month clock above. Only the soft-delete arm can reach such a row.
  */
-export const deleteDueSubscribers = withSafeQueryErrors(
-  "retention-queries.deleteDueSubscribers",
-  deleteDueSubscribersImpl,
-);
+export const deleteDueSubscribers = safe("deleteDueSubscribers", deleteDueSubscribersImpl);
 
 async function deleteDueSubscribersImpl(now: Date): Promise<number> {
   const cutoffs = retentionCutoffs(now);
@@ -173,10 +166,7 @@ async function deleteDueSubscribersImpl(now: Date): Promise<number> {
  * Record what one run did. **Counts only** — see the table's docblock in
  * `schema.ts` for why an identifier may never appear here.
  */
-export const recordPurgeRun = withSafeQueryErrors(
-  "retention-queries.recordPurgeRun",
-  recordPurgeRunImpl,
-);
+export const recordPurgeRun = safe("recordPurgeRun", recordPurgeRunImpl);
 
 async function recordPurgeRunImpl(summary: {
   leads: number;

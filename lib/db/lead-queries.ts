@@ -4,7 +4,11 @@ import { and, count, desc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "./client";
 import { lead, type NewLead } from "./schema";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("lead-queries");
 
 export const SUBMISSIONS_PAGE_SIZE = 20;
 
@@ -31,10 +35,7 @@ export type ListedLead = {
  * the Resend idempotency key (`demo-request-confirmation/<id>`), so two
  * genuine requests key differently and a retry of one cannot double-send.
  */
-export const insertLead = withSafeQueryErrors(
-  "lead-queries.insertLead",
-  insertLeadImpl,
-);
+export const insertLead = safe("insertLead", insertLeadImpl);
 
 async function insertLeadImpl(values: NewLead): Promise<string> {
   const [row] = await getDb()
@@ -44,10 +45,7 @@ async function insertLeadImpl(values: NewLead): Promise<string> {
   return row.id;
 }
 
-export const listLeads = withSafeQueryErrors(
-  "lead-queries.listLeads",
-  listLeadsImpl,
-);
+export const listLeads = safe("listLeads", listLeadsImpl);
 
 async function listLeadsImpl(page: number): Promise<ListedLead[]> {
   return getDb()
@@ -67,10 +65,7 @@ async function listLeadsImpl(page: number): Promise<ListedLead[]> {
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export const countLeads = withSafeQueryErrors(
-  "lead-queries.countLeads",
-  countLeadsImpl,
-);
+export const countLeads = safe("countLeads", countLeadsImpl);
 
 async function countLeadsImpl(): Promise<number> {
   const [row] = await getDb()
@@ -81,10 +76,7 @@ async function countLeadsImpl(): Promise<number> {
 }
 
 /** Returns false for an unknown or already removed row. */
-export const softDeleteLead = withSafeQueryErrors(
-  "lead-queries.softDeleteLead",
-  softDeleteLeadImpl,
-);
+export const softDeleteLead = safe("softDeleteLead", softDeleteLeadImpl);
 
 async function softDeleteLeadImpl(id: string): Promise<boolean> {
   const [row] = await getDb()

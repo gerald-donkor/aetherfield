@@ -5,7 +5,11 @@ import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "./client";
 import { SUBMISSIONS_PAGE_SIZE } from "./lead-queries";
 import { application, type NewApplication } from "./schema";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("application-queries");
 
 export type ListedApplication = {
   id: string;
@@ -36,10 +40,7 @@ export type ListedApplication = {
  * `notNull`, so the blob `put()` precedes this call, and a failure here is what
  * `deleteCv()` compensates for (AGENTS.md 10 stage e).
  */
-export const insertApplication = withSafeQueryErrors(
-  "application-queries.insertApplication",
-  insertApplicationImpl,
-);
+export const insertApplication = safe("insertApplication", insertApplicationImpl);
 
 async function insertApplicationImpl(
   values: NewApplication,
@@ -51,10 +52,7 @@ async function insertApplicationImpl(
   return row.id;
 }
 
-export const listApplications = withSafeQueryErrors(
-  "application-queries.listApplications",
-  listApplicationsImpl,
-);
+export const listApplications = safe("listApplications", listApplicationsImpl);
 
 async function listApplicationsImpl(
   page: number,
@@ -76,10 +74,7 @@ async function listApplicationsImpl(
     .offset((page - 1) * SUBMISSIONS_PAGE_SIZE);
 }
 
-export const countApplications = withSafeQueryErrors(
-  "application-queries.countApplications",
-  countApplicationsImpl,
-);
+export const countApplications = safe("countApplications", countApplicationsImpl);
 
 async function countApplicationsImpl(): Promise<number> {
   const [row] = await getDb()
@@ -89,10 +84,7 @@ async function countApplicationsImpl(): Promise<number> {
   return row.count;
 }
 
-export const getLiveApplicationCv = withSafeQueryErrors(
-  "application-queries.getLiveApplicationCv",
-  getLiveApplicationCvImpl,
-);
+export const getLiveApplicationCv = safe("getLiveApplicationCv", getLiveApplicationCvImpl);
 
 async function getLiveApplicationCvImpl(id: string) {
   const [row] = await getDb()
@@ -111,10 +103,7 @@ export type RemovedApplication = {
   removedAt: Date;
 };
 
-export const softDeleteApplication = withSafeQueryErrors(
-  "application-queries.softDeleteApplication",
-  softDeleteApplicationImpl,
-);
+export const softDeleteApplication = safe("softDeleteApplication", softDeleteApplicationImpl);
 
 async function softDeleteApplicationImpl(
   id: string,
@@ -129,10 +118,7 @@ async function softDeleteApplicationImpl(
 }
 
 /** Restores only the exact removal this request made. */
-export const restoreApplicationRemoval = withSafeQueryErrors(
-  "application-queries.restoreApplicationRemoval",
-  restoreApplicationRemovalImpl,
-);
+export const restoreApplicationRemoval = safe("restoreApplicationRemoval", restoreApplicationRemovalImpl);
 
 async function restoreApplicationRemovalImpl(
   id: string,

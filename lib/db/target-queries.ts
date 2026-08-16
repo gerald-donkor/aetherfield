@@ -18,7 +18,11 @@ import type {
   TargetCoverage,
   TargetStatus,
 } from "../validation/targets";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("target-queries");
 
 /**
  * Every read and write of `emission_target` — build step 11.
@@ -111,10 +115,7 @@ function visible(organizationId: string) {
   return tenantVisible(emissionTarget, organizationId);
 }
 
-export const createTarget = withSafeQueryErrors(
-  "target-queries.createTarget",
-  createTargetImpl,
-);
+export const createTarget = safe("createTarget", createTargetImpl);
 
 async function createTargetImpl(target: NewTarget): Promise<{ id: string }> {
   const [row] = await getDb()
@@ -132,10 +133,7 @@ async function createTargetImpl(target: NewTarget): Promise<{ id: string }> {
  * said it would do, and hiding it from the workspace that produced it would be
  * a quieter kind of deletion than the one `deleted_at` is for.
  */
-export const listTargets = withSafeQueryErrors(
-  "target-queries.listTargets",
-  listTargetsImpl,
-);
+export const listTargets = safe("listTargets", listTargetsImpl);
 
 async function listTargetsImpl(
   organizationId: string,
@@ -148,10 +146,7 @@ async function listTargetsImpl(
 }
 
 /** One target, or `null` — which is also the answer for another tenant's id. */
-export const getTarget = withSafeQueryErrors(
-  "target-queries.getTarget",
-  getTargetImpl,
-);
+export const getTarget = safe("getTarget", getTargetImpl);
 
 async function getTargetImpl(
   id: string,
@@ -174,10 +169,7 @@ async function getTargetImpl(
  * what tells "already retired" apart from "not yours" without either answer
  * leaking the other.
  */
-export const retireTarget = withSafeQueryErrors(
-  "target-queries.retireTarget",
-  retireTargetImpl,
-);
+export const retireTarget = safe("retireTarget", retireTargetImpl);
 
 async function retireTargetImpl(
   id: string,
@@ -211,10 +203,7 @@ async function retireTargetImpl(
  * approval); revisiting that boundary against real tenant volume is a future
  * scale judgement, not something to pre-optimise here.
  */
-export const readTargetEvidence = withSafeQueryErrors(
-  "target-queries.readTargetEvidence",
-  readTargetEvidenceImpl,
-);
+export const readTargetEvidence = safe("readTargetEvidence", readTargetEvidenceImpl);
 
 async function readTargetEvidenceImpl(
   organizationId: string,

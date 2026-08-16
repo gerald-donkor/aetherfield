@@ -10,7 +10,11 @@ import { toDecimalString, toFixed } from "../domain/decimal";
 import type { RaisedAlert } from "../domain/alerts";
 import type { ProjectionBasis } from "../domain/targets";
 import type { TargetCoverage, TargetStatus } from "../validation/targets";
-import { withSafeQueryErrors } from "./query-error";
+import { queryErrorScope } from "./query-error";
+
+/** Every export below is wrapped with this module's half of the error
+    label bound once — see {@link queryErrorScope}. */
+const safe = queryErrorScope("alert-queries");
 
 /**
  * Every read and write of `target_alert` and `alert_preference` — build
@@ -74,10 +78,7 @@ export type AlertTargetRow = {
  * a `WHERE` clause. Reading them is also what lets the sweep see an open alert
  * whose target was retired since.
  */
-export const listTargetsForAlerts = withSafeQueryErrors(
-  "alert-queries.listTargetsForAlerts",
-  listTargetsForAlertsImpl,
-);
+export const listTargetsForAlerts = safe("listTargetsForAlerts", listTargetsForAlertsImpl);
 
 async function listTargetsForAlertsImpl(
   organizationId: string,
@@ -104,10 +105,7 @@ async function listTargetsForAlertsImpl(
 export type OpenAlertRow = { id: string; targetId: string };
 
 /** Every alert still open for this organisation. */
-export const listOpenAlerts = withSafeQueryErrors(
-  "alert-queries.listOpenAlerts",
-  listOpenAlertsImpl,
-);
+export const listOpenAlerts = safe("listOpenAlerts", listOpenAlertsImpl);
 
 async function listOpenAlertsImpl(
   organizationId: string,
@@ -150,10 +148,7 @@ export type WrittenAlert = {
  * `emission_target.computed_baseline_kg_co2e` records. The reading and the
  * projection are already at their declared scales when they arrive.
  */
-export const raiseAlerts = withSafeQueryErrors(
-  "alert-queries.raiseAlerts",
-  raiseAlertsImpl,
-);
+export const raiseAlerts = safe("raiseAlerts", raiseAlertsImpl);
 
 async function raiseAlertsImpl(
   organizationId: string,
@@ -199,10 +194,7 @@ async function raiseAlertsImpl(
  * both stamp `resolved_at`: the second matches no row. The same arrangement
  * `retireTarget` uses, for the same reason.
  */
-export const resolveAlerts = withSafeQueryErrors(
-  "alert-queries.resolveAlerts",
-  resolveAlertsImpl,
-);
+export const resolveAlerts = safe("resolveAlerts", resolveAlertsImpl);
 
 async function resolveAlertsImpl(
   organizationId: string,
@@ -228,10 +220,7 @@ async function resolveAlertsImpl(
  * sweep tries again — which is why the status is a state rather than a boolean
  * (§9.2 rule 2), and why a failed email cannot be mistaken for a delivered one.
  */
-export const markAlertNotified = withSafeQueryErrors(
-  "alert-queries.markAlertNotified",
-  markAlertNotifiedImpl,
-);
+export const markAlertNotified = safe("markAlertNotified", markAlertNotifiedImpl);
 
 async function markAlertNotifiedImpl(
   organizationId: string,
@@ -277,10 +266,7 @@ export type AlertRecipient = {
  * only thing that puts an address on this list is a `member` row with
  * `role = 'owner'`.
  */
-export const listAlertRecipients = withSafeQueryErrors(
-  "alert-queries.listAlertRecipients",
-  listAlertRecipientsImpl,
-);
+export const listAlertRecipients = safe("listAlertRecipients", listAlertRecipientsImpl);
 
 async function listAlertRecipientsImpl(
   organizationId: string,
@@ -315,10 +301,7 @@ async function listAlertRecipientsImpl(
 /** The organisation's name, for the email's subject line. Tenant-predicated
     like everything else, so a caller cannot read another organisation's name by
     holding its id. */
-export const getOrganizationName = withSafeQueryErrors(
-  "alert-queries.getOrganizationName",
-  getOrganizationNameImpl,
-);
+export const getOrganizationName = safe("getOrganizationName", getOrganizationNameImpl);
 
 async function getOrganizationNameImpl(
   organizationId: string,
@@ -338,10 +321,7 @@ async function getOrganizationNameImpl(
 /** Whether this account currently wants alert email for this organisation.
     **A missing row means opted in**, so the default is `true` here and nothing
     needs backfilling. */
-export const getAlertPreference = withSafeQueryErrors(
-  "alert-queries.getAlertPreference",
-  getAlertPreferenceImpl,
-);
+export const getAlertPreference = safe("getAlertPreference", getAlertPreferenceImpl);
 
 async function getAlertPreferenceImpl(
   organizationId: string,
@@ -367,10 +347,7 @@ async function getAlertPreferenceImpl(
  * toggling at once end at one row rather than a constraint violation the action
  * would have to translate.
  */
-export const setAlertPreference = withSafeQueryErrors(
-  "alert-queries.setAlertPreference",
-  setAlertPreferenceImpl,
-);
+export const setAlertPreference = safe("setAlertPreference", setAlertPreferenceImpl);
 
 async function setAlertPreferenceImpl(
   organizationId: string,
