@@ -346,6 +346,61 @@ Run on 7 Aug 2026 after all four streams were merged:
   static; `/article/[slug]` still emits six SSG paths and
   `/job-listing/[slug]` still emits three.
 
+## The two README skills, prompt 91
+
+Installed for prompt 91, which replaced the untouched `create-next-app`
+`README.md` with the project's own. Both come from **`github/awesome-copilot`**
+— GitHub's own repository, so the ownership test above is satisfied, though
+note that neither vendor here is a vendor of anything *in this stack*: these are
+authoring skills, not API references, and nothing in §12 rule 2 rests on them.
+
+| skill | source | serves |
+| --- | --- | --- |
+| `create-readme` | `github/awesome-copilot` | the governing README skill — structure, tone, GFM, GitHub admonition syntax, sparing emoji, and no LICENSE / CONTRIBUTING / CHANGELOG sections |
+| `readme-blueprint-generator` | `github/awesome-copilot` | a section checklist: name and description, technology stack, architecture, getting started, project structure, key features, workflow, standards, testing |
+
+**They disagree, and `create-readme` wins.** The blueprint's **License** and
+**Contributing** sections were dropped: the governing skill forbids them, and
+neither `LICENSE` nor `CONTRIBUTING.md` exists in this repository to link to
+(`ls -A1` at the root, prompt 91).
+
+### The `.github/copilot` substitution
+
+`readme-blueprint-generator` instructs a scan of `.github/copilot/*` and
+`.github/copilot-instructions.md` and treats those files as the source of every
+fact it emits. **Neither exists here** — `.github` is absent from the repository
+root entirely. The equivalent material is `AGENTS.md` and `docs/`, and those are
+what the section list was filled from.
+
+This is a deliberate deviation from that skill rather than a silent one
+(§12 rule 9). A later session running the same skill will hit the same absent
+directory; the answer is the same substitution, not an invented scan.
+
+### The logo: the fallback was taken
+
+`create-readme` asks for the project's logo in the header, and prompt 91
+budgeted for extracting the footer wordmark into `docs/assets/wordmark.svg`,
+copied verbatim.
+
+**It was not extracted, and the README ships with no logo.** The prompt assumed
+path data; there is none. The wordmark in `app/_components/chrome.tsx` is an
+SVG **`<text>`** element — `viewBox="0 0 1000 165"`, `fontSize="222"`,
+`textLength="1013"` from `x="-1.6"`, `fill="currentColor"`, and
+`fontFamily: var(--font-sans)`. Its shape therefore depends on Archivo, which
+arrives through `next/font/google` in `app/layout.tsx`; there is no font file in
+the repository, and no `.svg` file anywhere in `public/` or `app/` (verified
+with `find`). Copied into a standalone file, that markup renders in whatever
+fallback face the viewer's browser picks, and GitHub loads no webfont for it.
+
+Converting the text to outlines would mean fetching the font and running a
+tracer — that is redrawing, not copying, and prompt 91's own instruction is
+explicit: *"If the path data cannot be extracted cleanly, ship the README with
+no logo and say so — a wrong wordmark is worse than none."* That branch was
+taken. `docs/assets/` was not created.
+
+A real logo asset is a separate piece of work. So is the hero screenshot the
+README research recommends, which prompt 91 also placed out of scope.
+
 ## Before running `npx skills update`
 
 It updates every skill in `skills-lock.json`, including the eight GSAP skills
