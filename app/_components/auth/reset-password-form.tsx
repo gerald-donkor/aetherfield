@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button, ButtonLink, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 const authClient = createAuthClient();
 
@@ -16,7 +17,6 @@ export function ResetPasswordForm() {
     ? null
     : searchParams.get("token");
   const tokenRef = useRef<string | null>(initialToken);
-  const statusRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<ResetState>(
     initialToken ? "ready" : "invalid",
   );
@@ -31,10 +31,6 @@ export function ResetPasswordForm() {
       window.location.pathname,
     );
   }, []);
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -110,15 +106,7 @@ export function ResetPasswordForm() {
   if (state === "complete") {
     return (
       <div>
-        <div
-          ref={statusRef}
-          role="status"
-          aria-live="polite"
-          tabIndex={-1}
-          className="border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none"
-        >
-          {message}
-        </div>
+        <FormStatus message={message} as="div" pinned />
         <ButtonLink href="/sign-in" className="mt-8 w-full">
           Sign in
         </ButtonLink>
@@ -128,17 +116,7 @@ export function ResetPasswordForm() {
 
   return (
     <form onSubmit={onSubmit} noValidate>
-      <div
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" className="mb-6" />
       <Field
         id="reset-password"
         name="password"

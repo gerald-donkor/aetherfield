@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { createReport } from "../../reports/actions";
 import { Button, Field } from "../primitives";
@@ -10,6 +10,7 @@ import {
   REPORT_ERRORS,
   type ReportField,
 } from "../../../lib/validation/reports";
+import { FormStatus } from "../form-status";
 
 /**
  * The create-report leaf — build step 13.
@@ -32,17 +33,12 @@ const NETWORK_ERROR =
 
 export function CreateReportForm() {
   const router = useRouter();
-  const statusRef = useRef<HTMLParagraphElement>(null);
   const [title, setTitle] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<
     Partial<Record<ReportField, string>>
   >({});
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,17 +87,7 @@ export function CreateReportForm() {
       <Button type="submit" className="mt-8" disabled={pending}>
         {pending ? "Building..." : "Build report"}
       </Button>
-      <p
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mt-6 block" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus message={message} shown="mt-6 block" />
     </form>
   );
 }

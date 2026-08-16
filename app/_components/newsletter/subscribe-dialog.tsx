@@ -9,6 +9,7 @@ import {
   type NewsletterFieldErrors,
 } from "../../../lib/validation/newsletter";
 import { Button, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The newsletter's client leaf — build step 4, and a copy of
@@ -57,7 +58,6 @@ export function NewsletterSubscribeDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const statusRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   const [open, setOpen] = useState(false);
@@ -68,9 +68,6 @@ export function NewsletterSubscribeDialog({
 
   // The announcement takes focus whenever it changes, so a screen reader lands
   // on the outcome rather than being told about it from wherever it was.
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   /* The heading rather than the input: the person should hear what the dialog
      is before being dropped into a text box. It has to run in an effect — the
@@ -187,17 +184,7 @@ export function NewsletterSubscribeDialog({
               </button>
             </div>
 
-            <div
-              ref={statusRef}
-              role="status"
-              aria-live="polite"
-              tabIndex={-1}
-              className={`mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-                message ? "block" : "hidden"
-              }`}
-            >
-              {message}
-            </div>
+            <FormStatus message={message} as="div" className="mt-6" />
 
             {done ? (
               // Success swaps the body in place — no redirect, so the page keeps
@@ -229,8 +216,14 @@ export function NewsletterSubscribeDialog({
                   required
                   className="mt-6"
                 />
-                <Button type="submit" className="mt-8 w-full" disabled={pending}>
-                  {pending ? "Sending confirmation..." : "Sign up to newsletter"}
+                <Button
+                  type="submit"
+                  className="mt-8 w-full"
+                  disabled={pending}
+                >
+                  {pending
+                    ? "Sending confirmation..."
+                    : "Sign up to newsletter"}
                 </Button>
               </form>
             )}

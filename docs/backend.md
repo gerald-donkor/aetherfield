@@ -749,6 +749,157 @@ too because the close button is absent from the closed `open ? … : null` branc
 The route table, CSS chunk, and every prerendered route's count of chunks
 containing `gsap` are unchanged.
 
+### `FormStatus` — §8.2 rule 5 in one place, prompt 105
+
+The announced, focus-managed result line every write-path leaf ends in was
+**copy-pasted at 28 sites across 24 files**. That is AGENTS.md §8.2 rule 5 —
+"the result is announced, focus is managed, and the state is legible without
+colour alone" — implemented by duplication, so it was exactly as strong as the
+least careful copy. The copies had already diverged on `role`, which is what
+prompt 108 exists to reconcile.
+
+`app/_components/form-status.tsx` now holds it once, including the `useEffect`
+that moves focus when a message arrives — the part most easily dropped in a copy
+and the part the rule most depends on.
+
+#### It is deliberately **not** in `primitives.tsx`
+
+§7.5 would make that the default home, and it is the wrong one here.
+`primitives.tsx` has **no `"use client"` and every primitive in it is
+stateless** — `FileField`'s own docblock says so — and the marketing routes'
+server components import it. `FormStatus` needs `useRef` and `useEffect`, so
+hosting it there would put `"use client"` on the whole module and hand `/`,
+`/about`, `/careers`, `/journal` and `/design-system` client JavaScript they do
+not carry today. That is §8.1's line. Its own module was the fallback prompt 105
+named, and it was taken **as a visible judgement up front** rather than
+discovered in a bundle diff.
+
+#### The variance diff, taken before anything was collapsed
+
+All 28 blocks were parsed and compared. What varied:
+
+| dimension | values found |
+| --- | --- |
+| element | `p` at 14 sites, `div` at 14 |
+| `role` | `status` at 19, `alert` at 9, and one that switches on `searchInvalid` |
+| `aria-live` | `polite`/`assertive`, **always derivable from `role`** — every site already paired them, so no site needs the override prop |
+| leading utilities | none, `mt-3`, `mt-4`, `mt-6`, `mb-6`, `max-w-[34rem]`, `mt-4 max-w-[560px]`, `mt-6 max-w-[560px]`, `mt-3 max-w-[34rem]` |
+| shown class | `block`, `mt-5 block`, `mt-6 block`, `mb-8 block`, `mb-8 block max-w-[720px]`, `mt-4 block max-w-[34rem]` |
+| visibility | 26 class-toggled `hidden`/shown; **2 conditionally mounted** by the caller and so never hidden (`pinned`) |
+| body | `{message}` at 26; two append more (`factor-picker`'s field errors, `factor-import-form`'s row-error list) — handled with `children` |
+| focus trigger | `message` at 25, and three compound: `message \|\| complete`, `message \|\| done`, `message \|\| settled` |
+
+**Nothing was normalised.** Every dimension became a prop. `role` in particular
+is passed through untouched, so nine sites still say `alert` — reconciling them
+is prompt 108's decision to make on its own rather than buried in a
+twenty-four-file mechanical diff.
+
+#### The one behaviour change, and it is stated rather than absorbed
+
+Three files — `sign-up-form`, `create-organization-form`,
+`invitation-response` — used **one `statusRef` for two mutually exclusive
+regions**: a success panel (its own class, its own heading or body, **not** a
+`FormStatus`) and the form's result line. Their effect therefore watched
+`message || complete` / `|| done` / `|| settled`.
+
+After the split, the success panel keeps `statusRef` and watches its own flag
+alone, and the result line focuses itself on `message`. **The two regions never
+render together**, so the pair is behaviour-identical to the single compound
+effect — but it is two effects where there was one, and that is a structural
+change worth naming rather than absorbing silently. The `focusOn` prop exists
+for a site that genuinely needs a compound trigger on the status line itself;
+after the split, none does.
+
+#### The rendered markup is byte-identical, and that was measured
+
+The acceptance condition, checked rather than eyeballed. Every block's element,
+`role`, and **both** rendered class strings — the message-present one and the
+`hidden` one — were extracted from `git show HEAD:` for the before side and
+recomputed from the `FormStatus` props for the after side:
+
+```
+mismatches: 0
+```
+
+The composition that makes this hold is `[className, BASE, visibility]
+.filter(Boolean).join(" ")`, which reproduces a site with no leading utilities
+as `${BASE} ${shown}` exactly as its template literal did.
+
+#### The prerender diff
+
+Two clean git worktrees at `HEAD`, the change applied to one, both built with
+hard-linked `node_modules`. Worktrees sidestep `docs/automation.md`'s trap 1
+(gitignored doc snapshots contaminating the CSS chunk) because git does not
+check them out.
+
+**All 21 prerendered HTML files: rendered markup identical.** All 21 differ in
+the inline RSC flight payload only — the documented signature of a component
+boundary moving, since module ids and `self.__next_f.push` row segmentation
+shift. `docs/automation.md` already records that flight-row renumbering is not a
+real diff and that the markup is the thing to compare.
+
+Two practical notes for the next session, now also in `docs/automation.md`:
+**Turbopack refuses a symlinked `node_modules` that points outside the project
+root** ("Symlink [project]/node_modules is invalid"), so it must be `cp -al` —
+and `cp -al` cannot cross filesystems, so the scratch worktrees cannot live under
+`/tmp`. Also, `git diff HEAD` does not carry a **new untracked file**, so the
+first head build failed with 24 module-not-found errors before
+`form-status.tsx` was copied across.
+
+Per-page client JavaScript, measured from the chunks each page actually
+references:
+
+| page | base | head | delta | chunks |
+| --- | --- | --- | --- | --- |
+| `/` | 900,455 | 900,680 | **+225** | 10 → 10 |
+| `/about` | 889,370 | 889,595 | **+225** | 10 → 10 |
+| `/careers` | 895,778 | 896,003 | **+225** | 10 → 10 |
+| `/journal` | 890,433 | 890,658 | **+225** | 10 → 10 |
+| `/design-system` | 888,372 | 888,597 | **+225** | 9 → 9 |
+| `/sign-in` | 925,121 | 925,148 | **+27** | 11 → 11 |
+
+**No marketing route gained a chunk**, which was the §8.1 risk. The 225 bytes are
+the component folded into a chunk those pages already load — `/` and `/journal`
+already ship the demo and subscribe dialog leaves, so the code moved rather than
+appeared. Across *all* chunks the count went 41 → 42 and the total grew ~251 KB,
+which is one additional ~249 KB shared chunk **not referenced by any marketing
+page**; chunk names are content-hashed and all of them renamed, so a name-level
+comparison says nothing (`docs/automation.md` trap 2).
+
+#### Sites not adopted
+
+Every site carrying the shared class string was adopted — 28 of 28. Three
+regions that use `role="status"` with focus management but a **different** class
+string are left alone, because they are not this component: `sign-up-form`'s
+"check your inbox" panel, `create-organization-form`'s and
+`invitation-response`'s settled panels. Each has a heading or a multi-element
+body and its own styling. One further paragraph in
+`app/activity/[importId]/page.tsx` shares part of the class string but has no
+`aria-live`, no `outline-none` and no focus handling — it is a server-rendered
+error line, not a form status.
+
+#### Verification, prompt 105
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 735 ms — unchanged; the domain tests see none of this |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| markup equivalence | 0 mismatches across 28 sites; 21 of 21 prerendered pages markup-identical |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, 4.1 min — Chromium and Firefox |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine |
+
+**`npm run test:e2e` therefore did not complete as a matrix.** The two native
+projects passed and WebKit did not run; that is stated rather than reported as a
+pass. The suite is what exercises these leaves, and 24 of them changed at once.
+
+No message text changed, nothing was restyled, no `role` was normalised, no
+`NETWORK_ERROR` was extracted, no `SelectField` was added, no `router.refresh()`
+was removed, and neither `SiteFooter` nor `SiteNav` was touched.
+
+The 24 files lost 595 lines and gained 315.
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.

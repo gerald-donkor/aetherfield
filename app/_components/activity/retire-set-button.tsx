@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { retireFactorSet } from "../../activity/actions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * Retires one customer-supplied factor set — prompt 84.
@@ -33,14 +34,9 @@ export function RetireSetButton({
   label: string;
 }) {
   const router = useRouter();
-  const statusRef = useRef<HTMLParagraphElement>(null);
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function click() {
     if (!armed) {
@@ -110,17 +106,7 @@ export function RetireSetButton({
           Cancel
         </Button>
       ) : null}
-      <p
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mt-4 block max-w-[34rem]" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus message={message} shown="mt-4 block max-w-[34rem]" />
     </div>
   );
 }

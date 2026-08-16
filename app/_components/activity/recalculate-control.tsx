@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { recalculate } from "../../activity/actions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The recalculate control — build step 10.
@@ -35,11 +36,6 @@ export function RecalculateControl({
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-  const resultRef = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    if (message) resultRef.current?.focus();
-  }, [message]);
 
   async function run() {
     setPending(true);
@@ -69,17 +65,11 @@ export function RecalculateControl({
       <Button size="compact" bullet={false} onClick={run} disabled={pending}>
         {pending ? "Calculating..." : "Recalculate emissions"}
       </Button>
-      <p
-        ref={resultRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`max-w-[34rem] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mt-5 block" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus
+        message={message}
+        className="max-w-[34rem]"
+        shown="mt-5 block"
+      />
     </div>
   );
 }

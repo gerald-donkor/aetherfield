@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { respondToInvitation } from "../../invitation/[id]/actions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * Accept or decline an invitation — prompt 63's client leaf on
@@ -41,9 +42,14 @@ export function InvitationResponse({
   const [settled, setSettled] = useState<"accept" | "decline" | null>(null);
   const [message, setMessage] = useState("");
 
+  /* `statusRef` now serves only the settled panel below, which is not a
+     `FormStatus` — it has its own class and body. The result line moved to
+     `FormStatus` at prompt 105 and focuses itself on `message`, so this watches
+     `settled` alone. The two are mutually exclusive, so the pair is
+     behaviour-identical to the single effect it replaces. */
   useEffect(() => {
-    if (message || settled) statusRef.current?.focus();
-  }, [message, settled]);
+    if (settled) statusRef.current?.focus();
+  }, [settled]);
 
   async function respond(decision: "accept" | "decline") {
     setMessage("");
@@ -96,23 +102,10 @@ export function InvitationResponse({
   return (
     <div className={className}>
       {/* Kept mounted so the live region exists before the text arrives. */}
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" role="alert" className="mb-6" />
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button
-          onClick={() => respond("accept")}
-          disabled={pending !== null}
-        >
+        <Button onClick={() => respond("accept")} disabled={pending !== null}>
           {pending === "accept" ? "Accepting..." : "Accept invitation"}
         </Button>
         <Button

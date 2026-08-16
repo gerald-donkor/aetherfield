@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import { setFactorMapping } from "../../activity/actions";
 import {
@@ -13,6 +13,7 @@ import {
 } from "../../../lib/validation/activity";
 import type { Scope2MarketBasis } from "../../../lib/validation/emissions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 type SearchFactor = {
   id: string;
@@ -71,21 +72,11 @@ export function FactorPicker({
   children: ReactNode;
 }) {
   const router = useRouter();
-  const statusRef = useRef<HTMLDivElement>(null);
-  const searchStatusRef = useRef<HTMLDivElement>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<
     Partial<Record<FactorMappingField, string>>
   >({});
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
-
-  useEffect(() => {
-    if (searchMessage) searchStatusRef.current?.focus();
-  }, [searchMessage]);
 
   async function choose(factorId: string) {
     setMessage("");
@@ -140,7 +131,9 @@ export function FactorPicker({
       setMessage(result.error);
       setPendingId(null);
     } catch {
-      setMessage("We couldn't reach the server. Check your connection and try again.");
+      setMessage(
+        "We couldn't reach the server. Check your connection and try again.",
+      );
       setPendingId(null);
     }
   }
@@ -150,26 +143,16 @@ export function FactorPicker({
       {children}
 
       {searchMessage ? (
-        <div
-          ref={searchStatusRef}
+        <FormStatus
+          message={searchMessage}
+          as="div"
           role={searchInvalid ? "alert" : "status"}
-          aria-live={searchInvalid ? "assertive" : "polite"}
-          tabIndex={-1}
-          className="mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none"
-        >
-          {searchMessage}
-        </div>
+          className="mt-6"
+          pinned
+        />
       ) : null}
 
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
+      <FormStatus message={message} as="div" role="alert" className="mt-6">
         {message}
         {errors.factorId ? (
           <span className="mt-2 block">{errors.factorId}</span>
@@ -177,7 +160,7 @@ export function FactorPicker({
         {errors.scope2MarketBasis ? (
           <span className="mt-2 block">{errors.scope2MarketBasis}</span>
         ) : null}
-      </div>
+      </FormStatus>
 
       {factors.length === 0 ? (
         searchInvalid ? null : (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { stageImport } from "../../activity/actions";
 import {
@@ -12,6 +12,7 @@ import {
   CSV_MAX_ROWS,
 } from "../../../lib/validation/activity";
 import { Button, FileField } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The activity-file upload leaf — build step 9.
@@ -45,7 +46,6 @@ function formatSize(bytes: number): string {
 
 export function ActivityUploadForm({ className = "" }: { className?: string }) {
   const router = useRouter();
-  const statusRef = useRef<HTMLDivElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [pending, setPending] = useState(false);
@@ -55,9 +55,6 @@ export function ActivityUploadForm({ className = "" }: { className?: string }) {
   /* The outcome takes focus whenever it settles, so a screen reader lands on
      it rather than being told about it from wherever the caret was
      (AGENTS.md 8.2 rule 5). */
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,17 +103,7 @@ export function ActivityUploadForm({ className = "" }: { className?: string }) {
       {/* Kept mounted so the live region exists before the text arrives, and
           marked with the left rule the auth screens use — legible without
           colour (AGENTS.md 8.2 rule 5). */}
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" role="alert" className="mb-6" />
 
       <FileField
         id="activity-import-file"

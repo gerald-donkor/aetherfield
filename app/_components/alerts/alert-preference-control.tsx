@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { setAlertEmailPreference } from "../../account/actions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The alert-email off switch on `/account` — build step 14.
@@ -37,11 +38,6 @@ export function AlertPreferenceControl({
   const [enabled, setEnabled] = useState(emailAlerts);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-  const resultRef = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    if (message) resultRef.current?.focus();
-  }, [message]);
 
   async function toggle() {
     const next = !enabled;
@@ -87,17 +83,11 @@ export function AlertPreferenceControl({
             ? "Turn off alert email"
             : "Turn on alert email"}
       </Button>
-      <p
-        ref={resultRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`max-w-[34rem] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mt-5 block" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus
+        message={message}
+        className="max-w-[34rem]"
+        shown="mt-5 block"
+      />
     </div>
   );
 }

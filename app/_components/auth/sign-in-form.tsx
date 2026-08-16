@@ -3,10 +3,11 @@
 import { createAuthClient } from "better-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useState } from "react";
 
 import { Button, Field } from "../primitives";
 import { GoogleSignInButton } from "./google-sign-in-button";
+import { FormStatus } from "../form-status";
 
 const authClient = createAuthClient();
 
@@ -16,14 +17,9 @@ type PendingPath = "email" | "google" | null;
 
 export function SignInForm() {
   const router = useRouter();
-  const statusRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingPath>(null);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState({ email: "", password: "" });
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   const onGooglePendingChange = useCallback(
     (googlePending: boolean) => setPending(googlePending ? "google" : null),
@@ -35,7 +31,9 @@ export function SignInForm() {
     setMessage("");
 
     const data = new FormData(event.currentTarget);
-    const email = String(data.get("email") ?? "").trim().toLowerCase();
+    const email = String(data.get("email") ?? "")
+      .trim()
+      .toLowerCase();
     const password = String(data.get("password") ?? "");
     const nextErrors = {
       email: email && email.includes("@") ? "" : "Enter a valid email address.",
@@ -84,17 +82,7 @@ export function SignInForm() {
 
   return (
     <form onSubmit={onSubmit} noValidate>
-      <div
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" className="mb-6" />
       <GoogleSignInButton
         action="sign-in"
         errorPath="/sign-in"

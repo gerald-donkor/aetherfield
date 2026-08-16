@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { deleteReport, generateNarrative } from "../../reports/actions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The two report controls — build step 13.
@@ -36,13 +37,8 @@ function ReportAction({
   className?: string;
 }) {
   const router = useRouter();
-  const resultRef = useRef<HTMLParagraphElement>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    if (message) resultRef.current?.focus();
-  }, [message]);
 
   async function activate() {
     setPending(true);
@@ -71,17 +67,11 @@ function ReportAction({
       >
         {pending ? busy : idle}
       </Button>
-      <p
-        ref={resultRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`max-w-[34rem] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mt-5 block" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus
+        message={message}
+        className="max-w-[34rem]"
+        shown="mt-5 block"
+      />
     </div>
   );
 }

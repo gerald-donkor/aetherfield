@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { commitImport, discardImport } from "../../activity/actions";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * Commit and discard — build step 9.
@@ -23,24 +24,12 @@ import { Button } from "../primitives";
 const NETWORK_ERROR = "We couldn't reach the server. Please try again.";
 
 function ResultMessage({ message }: { message: string }) {
-  const ref = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    if (message) ref.current?.focus();
-  }, [message]);
-
   return (
-    <p
-      ref={ref}
-      role="status"
-      aria-live="polite"
-      tabIndex={-1}
-      className={`max-w-[34rem] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-        message ? "mt-5 block" : "hidden"
-      }`}
-    >
-      {message}
-    </p>
+    <FormStatus
+      message={message}
+      className="max-w-[34rem]"
+      shown="mt-5 block"
+    />
   );
 }
 

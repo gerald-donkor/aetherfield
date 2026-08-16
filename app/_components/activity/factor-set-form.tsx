@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { editFactorSet } from "../../activity/actions";
 import type { EditFactorSetField } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * Corrects one customer-supplied factor set's provenance — prompt 84.
@@ -59,7 +60,6 @@ const GAS_BASIS_LABEL = {
 
 export function FactorSetForm({ set }: { set: EditableFactorSet }) {
   const router = useRouter();
-  const statusRef = useRef<HTMLParagraphElement>(null);
 
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -70,9 +70,6 @@ export function FactorSetForm({ set }: { set: EditableFactorSet }) {
   /* The outcome takes focus whenever it settles, so a screen reader lands on it
      rather than being told about it from wherever the caret was
      (AGENTS.md 8.2 rule 5). */
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -121,17 +118,7 @@ export function FactorSetForm({ set }: { set: EditableFactorSet }) {
       {/* Kept mounted so the live region exists before the text arrives, and
           marked with the left rule the other workspace forms use — legible
           without colour (AGENTS.md 8.2 rule 5). */}
-      <p
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mb-8 block max-w-[720px]" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus message={message} shown="mb-8 block max-w-[720px]" />
 
       <p className="max-w-[720px] font-serif text-[15px] leading-6 text-muted">
         These fields are evidence: the licence and references are rendered

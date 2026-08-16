@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import * as z from "zod";
 
 import { createTarget } from "../../targets/actions";
@@ -15,6 +15,7 @@ import {
   type TargetFieldErrors,
 } from "../../../lib/validation/targets";
 import { Button, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 const NETWORK_ERROR =
   "We couldn't reach the server. Check your connection and try again.";
@@ -29,7 +30,6 @@ export function CreateTargetForm({
   suggestions: { year: number; coverage: TargetCoverage; tonnes: string }[];
   calculationsComplete: boolean;
 }) {
-  const statusRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [coverage, setCoverage] = useState<TargetCoverage>("scope_1_2");
   const [baseYear, setBaseYear] = useState("");
@@ -40,10 +40,6 @@ export function CreateTargetForm({
   const [errors, setErrors] = useState<TargetFieldErrors>({});
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   const suggestion = suggestions.find(
     (entry) => entry.year === Number(baseYear) && entry.coverage === coverage,
@@ -94,7 +90,9 @@ export function CreateTargetForm({
       setBaseYear("");
       setBaseline("");
       setBaselineSource("stated");
-      setMessage("Target saved. Its trajectory and projection are shown below.");
+      setMessage(
+        "Target saved. Its trajectory and projection are shown below.",
+      );
       setPending(false);
     } catch {
       setMessage(NETWORK_ERROR);
@@ -104,17 +102,7 @@ export function CreateTargetForm({
 
   return (
     <form ref={formRef} onSubmit={onSubmit} noValidate>
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" role="alert" className="mb-6" />
 
       <div className="grid max-w-[900px] gap-6 md:grid-cols-2">
         <Field

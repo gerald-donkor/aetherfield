@@ -10,6 +10,7 @@ import {
 } from "../../../lib/validation/lead";
 import { EASE, gsap, useGSAP } from "../motion/register";
 import { Button, Field, TextareaField } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The demo-request dialog — build step 2's client leaf, and the shape steps 4
@@ -124,7 +125,6 @@ export function DemoRequestDialog({
 }: DemoRequestDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const statusRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -145,14 +145,10 @@ export function DemoRequestDialog({
   const [done, setDone] = useState(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-  const [errors, setErrors] =
-    useState<DemoRequestFieldErrors>(NO_FIELD_ERRORS);
+  const [errors, setErrors] = useState<DemoRequestFieldErrors>(NO_FIELD_ERRORS);
 
   // The announcement takes focus whenever it changes, so a screen reader lands
   // on the outcome rather than being told about it from wherever it was.
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   /* The heading rather than the first input: the person should hear what the
      dialog is before being dropped into a text box. It has to run in an effect
@@ -328,10 +324,17 @@ export function DemoRequestDialog({
       // so the burst spins up instead of clicking in at full level.
       const envelope = ctx.createGain();
       envelope.gain.setValueAtTime(FAN_GAIN_FLOOR, now);
-      envelope.gain.exponentialRampToValueAtTime(FAN_PEAK_GAIN, now + FAN_ATTACK);
+      envelope.gain.exponentialRampToValueAtTime(
+        FAN_PEAK_GAIN,
+        now + FAN_ATTACK,
+      );
       envelope.gain.exponentialRampToValueAtTime(FAN_GAIN_FLOOR, end);
 
-      source.connect(band).connect(chop).connect(envelope).connect(ctx.destination);
+      source
+        .connect(band)
+        .connect(chop)
+        .connect(envelope)
+        .connect(ctx.destination);
       blade.connect(depth).connect(chop.gain);
 
       source.start(now);
@@ -502,17 +505,7 @@ export function DemoRequestDialog({
               </button>
             </div>
 
-            <div
-              ref={statusRef}
-              role="status"
-              aria-live="polite"
-              tabIndex={-1}
-              className={`mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-                message ? "block" : "hidden"
-              }`}
-            >
-              {message}
-            </div>
+            <FormStatus message={message} as="div" className="mt-6" />
 
             {done ? (
               // Success swaps the body in place — no redirect, so the page keeps
@@ -574,7 +567,11 @@ export function DemoRequestDialog({
                   disabled={pending}
                   className="mt-6"
                 />
-                <Button type="submit" className="mt-8 w-full" disabled={pending}>
+                <Button
+                  type="submit"
+                  className="mt-8 w-full"
+                  disabled={pending}
+                >
                   {pending ? "Sending request..." : "Request a demo"}
                 </Button>
               </form>

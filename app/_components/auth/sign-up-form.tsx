@@ -1,10 +1,17 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { Button, Field } from "../primitives";
 import { GoogleSignInButton } from "./google-sign-in-button";
+import { FormStatus } from "../form-status";
 
 const authClient = createAuthClient();
 
@@ -21,9 +28,15 @@ export function SignUpForm() {
     password: "",
   });
 
+  /* `statusRef` now serves only the "check your inbox" panel below, which is
+     not a `FormStatus` — it carries a heading and its own class. The form's
+     result line moved to `FormStatus` at prompt 105 and focuses itself on
+     `message`, so this watches `complete` alone. The two regions are mutually
+     exclusive, so the pair is behaviour-identical to the single `message ||
+     complete` effect it replaces. */
   useEffect(() => {
-    if (message || complete) statusRef.current?.focus();
-  }, [complete, message]);
+    if (complete) statusRef.current?.focus();
+  }, [complete]);
 
   const onGooglePendingChange = useCallback(
     (googlePending: boolean) => setPending(googlePending ? "google" : null),
@@ -36,7 +49,9 @@ export function SignUpForm() {
 
     const data = new FormData(event.currentTarget);
     const name = String(data.get("name") ?? "").trim();
-    const email = String(data.get("email") ?? "").trim().toLowerCase();
+    const email = String(data.get("email") ?? "")
+      .trim()
+      .toLowerCase();
     const password = String(data.get("password") ?? "");
     const nextErrors = {
       name: name ? "" : "Enter your name.",
@@ -89,7 +104,9 @@ export function SignUpForm() {
         tabIndex={-1}
         className="border-l-2 border-ink pl-4 outline-none"
       >
-        <h2 className="font-serif text-[28px] leading-tight">Check your inbox</h2>
+        <h2 className="font-serif text-[28px] leading-tight">
+          Check your inbox
+        </h2>
         <p className="mt-3 font-serif text-[16px] leading-6 text-muted">
           If an account can be created for that address, we sent a verification
           link. Open it to finish setting up your account.
@@ -100,17 +117,7 @@ export function SignUpForm() {
 
   return (
     <form onSubmit={onSubmit} noValidate>
-      <div
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" className="mb-6" />
       <GoogleSignInButton
         action="sign-up"
         errorPath="/sign-up"
@@ -162,11 +169,7 @@ export function SignUpForm() {
         required
         className="mt-6"
       />
-      <Button
-        type="submit"
-        className="mt-8 w-full"
-        disabled={pending !== null}
-      >
+      <Button type="submit" className="mt-8 w-full" disabled={pending !== null}>
         {pending === "email" ? "Creating account..." : "Create account"}
       </Button>
     </form>

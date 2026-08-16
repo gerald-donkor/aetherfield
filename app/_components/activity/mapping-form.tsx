@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { updateImportMapping } from "../../activity/actions";
 import {
@@ -12,6 +12,7 @@ import {
   REQUIRED_ACTIVITY_FIELDS,
 } from "../../../lib/validation/activity";
 import { Button } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The column-mapping override — build step 9, and **the review step AGENTS.md
@@ -52,7 +53,6 @@ export function ActivityMappingForm({
   className?: string;
 }) {
   const router = useRouter();
-  const statusRef = useRef<HTMLDivElement>(null);
 
   const [draft, setDraft] = useState<ActivityMapping>(mapping);
   const [pending, setPending] = useState(false);
@@ -60,10 +60,6 @@ export function ActivityMappingForm({
   const [errors, setErrors] = useState<Partial<Record<ActivityField, string>>>(
     {},
   );
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,17 +102,7 @@ export function ActivityMappingForm({
 
   return (
     <form onSubmit={onSubmit} noValidate className={className}>
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" role="alert" className="mb-6" />
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {ACTIVITY_FIELDS.map((field) => {
@@ -168,7 +154,10 @@ export function ActivityMappingForm({
                   id={`${id}-error`}
                   className="mt-2 flex items-start gap-2 font-mono text-[12px] leading-[18px] text-ink"
                 >
-                  <span aria-hidden className="mt-[7px] size-1 shrink-0 bg-ink" />
+                  <span
+                    aria-hidden
+                    className="mt-[7px] size-1 shrink-0 bg-ink"
+                  />
                   {error}
                 </p>
               ) : null}

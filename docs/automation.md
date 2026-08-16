@@ -1106,6 +1106,38 @@ Before prompt 101 the equivalent capture was
 what produced the "before" side of that comparison.
 
 
+## Two more prerender-diff traps, found at prompt 105
+
+Both bit while building a base and a head worktree to compare, and neither is
+covered by traps 1–6 above.
+
+7. **Turbopack refuses a symlinked `node_modules` pointing outside the project
+   root.** `ln -s /path/to/repo/node_modules scratch/node_modules` fails the
+   build with `Symlink [project]/node_modules is invalid, it points out of the
+   filesystem root`, wrapped in a `TurbopackInternalError` whose stack is fifteen
+   lines of `Execution of … failed` and says nothing useful until the last line.
+   It must be `cp -al` (a hard-link copy), which is what the note above already
+   says — this records *why* the obvious shortcut does not work.
+
+8. **`cp -al` cannot cross filesystems, so the scratch build cannot live in the
+   scratchpad.** `/tmp` is a separate filesystem here, and `cp -al` there
+   silently produces an empty directory tree (`du -sh` reports `0`) rather than
+   erroring usefully. Put the comparison worktrees somewhere on the repo's own
+   filesystem — `~/.cache/<project>-prerender/` works — and delete them
+   afterwards with `git worktree remove --force`.
+
+**And one that is not a trap so much as a foot-gun:** `git diff HEAD` does not
+carry a **new untracked file**. A worktree patched from it builds without the new
+module and fails with one module-not-found per importer — 24 of them at prompt
+105, which reads like a broken refactor and is not. `git diff HEAD` plus an
+explicit `cp` of anything `git status` shows as `??`.
+
+**Two clean worktrees is the better shape than stash-and-rebuild**, and it
+sidesteps trap 1 for free: git does not check gitignored doc snapshots into a
+worktree, so neither side has them and the CSS chunk is comparable without the
+stashing dance.
+
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

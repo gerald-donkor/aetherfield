@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import {
   requestOrganizationDeletion,
@@ -14,6 +14,7 @@ import {
   ORGANIZATION_DELETION_WINDOW_DAYS,
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The organisation's deletion surface — prompt 73.
@@ -45,11 +46,6 @@ const NETWORK_ERROR =
 function RestoreControl({ organizationName }: { organizationName: string }) {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-  const ref = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    if (message) ref.current?.focus();
-  }, [message]);
 
   async function restore() {
     setPending(true);
@@ -73,17 +69,7 @@ function RestoreControl({ organizationName }: { organizationName: string }) {
       <Button className="mt-8" onClick={restore} disabled={pending}>
         {pending ? "Restoring..." : "Restore organisation"}
       </Button>
-      <p
-        ref={ref}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`mt-4 max-w-[560px] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus message={message} className="mt-4 max-w-[560px]" />
     </>
   );
 }
@@ -95,18 +81,12 @@ function DeleteForm({
   organizationName: string;
   organizationSlug: string;
 }) {
-  const statusRef = useRef<HTMLDivElement>(null);
-
   const [confirmSlug, setConfirmSlug] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<DeleteOrganizationFieldErrors>(
     NO_DELETE_ORGANIZATION_FIELD_ERRORS,
   );
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,17 +145,12 @@ function DeleteForm({
         point before that date; after it, nothing can.
       </p>
 
-      <div
-        ref={statusRef}
+      <FormStatus
+        message={message}
+        as="div"
         role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mt-6 max-w-[560px] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+        className="mt-6 max-w-[560px]"
+      />
 
       <Field
         id="delete-organization-slug"

@@ -1,29 +1,27 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { Button, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 const authClient = createAuthClient();
 
 export function ForgotPasswordForm() {
-  const statusRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState(false);
   const [complete, setComplete] = useState(false);
   const [message, setMessage] = useState("");
   const [emailError, setEmailError] = useState("");
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
 
     const data = new FormData(event.currentTarget);
-    const email = String(data.get("email") ?? "").trim().toLowerCase();
+    const email = String(data.get("email") ?? "")
+      .trim()
+      .toLowerCase();
     const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
     setEmailError(validEmail ? "" : "Enter a valid email address.");
@@ -58,17 +56,7 @@ export function ForgotPasswordForm() {
 
   return (
     <form onSubmit={onSubmit} noValidate>
-      <div
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`mb-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" className="mb-6" />
       {complete ? null : (
         <>
           <Field

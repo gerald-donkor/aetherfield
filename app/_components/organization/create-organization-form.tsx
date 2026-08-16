@@ -10,6 +10,7 @@ import {
   slugifyOrganizationName,
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The create-organisation client leaf — build step 8, and a copy of
@@ -64,9 +65,14 @@ export function CreateOrganizationForm({
   /* The outcome takes focus whenever it settles, so a screen reader lands on it
      rather than being told about it from wherever the caret was
      (AGENTS.md 8.2 rule 5). */
+  /* `statusRef` now serves only the settled panel below, which is not a
+     `FormStatus` — it has its own class and body. The result line moved to
+     `FormStatus` at prompt 105 and focuses itself on `message`, so this watches
+     `done` alone. The two are mutually exclusive, so the pair is
+     behaviour-identical to the single effect it replaces. */
   useEffect(() => {
-    if (message || done) statusRef.current?.focus();
-  }, [done, message]);
+    if (done) statusRef.current?.focus();
+  }, [done]);
 
   function onNameChange(value: string) {
     setName(value);
@@ -145,17 +151,7 @@ export function CreateOrganizationForm({
       {/* The failure announcement. Kept mounted so its `aria-live` region
           exists before the text arrives, and marked with the same left rule the
           auth screens use — legible without colour (AGENTS.md 8.2 rule 5). */}
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" role="alert" className="mt-6" />
 
       <Field
         id="create-organization-name"

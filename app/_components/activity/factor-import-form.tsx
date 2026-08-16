@@ -1,13 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  type FormEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type FormEvent, type ReactNode, useRef, useState } from "react";
 
 import { importCustomFactors } from "../../activity/actions";
 import { FACTOR_IMPORT_HEADER } from "../../../lib/domain/factor-import";
@@ -24,6 +18,7 @@ import {
   type FactorImportRowError,
 } from "../../../lib/validation/emissions";
 import { Button, Field, FileField, TextareaField } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * Imports a CSV of customer-supplied factor rows — prompt 82.
@@ -83,7 +78,6 @@ function formatSize(bytes: number): string {
 export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const statusRef = useRef<HTMLDivElement>(null);
 
   const [setChoice, setSetChoice] = useState<string>(
     sets.length > 0 ? sets[0].id : "new",
@@ -104,9 +98,6 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
   /* The outcome takes focus whenever it settles, so a screen reader lands on
      it rather than being told about it from wherever the caret was
      (AGENTS.md 8.2 rule 5). */
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,15 +156,7 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
       {/* Kept mounted so the live region exists before the text arrives, and
           marked with the left rule the other workspace forms use — legible
           without colour (AGENTS.md 8.2 rule 5). */}
-      <div
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mb-8 block" : "hidden"
-        }`}
-      >
+      <FormStatus message={message} as="div" shown="mb-8 block">
         {message}
         {rowErrors.length > 0 ? (
           <ol className="mt-3 grid gap-1">
@@ -184,7 +167,7 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
             ))}
           </ol>
         ) : null}
-      </div>
+      </FormStatus>
 
       <form ref={formRef} onSubmit={submit} noValidate>
         <div className="grid max-w-[980px] gap-6 md:grid-cols-2">
@@ -383,7 +366,10 @@ function SelectField({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="block font-sans text-nav font-bold text-ink">
+      <label
+        htmlFor={id}
+        className="block font-sans text-nav font-bold text-ink"
+      >
         {label}
       </label>
       {children}

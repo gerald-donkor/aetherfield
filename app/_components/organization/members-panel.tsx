@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import {
   cancelInvitation,
@@ -15,6 +15,7 @@ import {
   ORGANIZATION_ROLES,
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * The organisation's members surface — prompt 63, closing what build step 8
@@ -65,25 +66,7 @@ type PanelInvitation = {
     wherever the caret was (AGENTS.md 8.2 rule 5), and marked with the same left
     rule the auth screens use — legible without colour. */
 function Announcement({ message }: { message: string }) {
-  const ref = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    if (message) ref.current?.focus();
-  }, [message]);
-
-  return (
-    <p
-      ref={ref}
-      role="status"
-      aria-live="polite"
-      tabIndex={-1}
-      className={`mt-3 max-w-[34rem] border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-        message ? "block" : "hidden"
-      }`}
-    >
-      {message}
-    </p>
-  );
+  return <FormStatus message={message} className="mt-3 max-w-[34rem]" />;
 }
 
 function RemoveMemberControl({
@@ -260,21 +243,14 @@ function LeaveControl({
 }
 
 function InviteForm() {
-  const statusRef = useRef<HTMLDivElement>(null);
-
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<(typeof ORGANIZATION_ROLES)[number]>(
-    "member",
-  );
+  const [role, setRole] =
+    useState<(typeof ORGANIZATION_ROLES)[number]>("member");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<InviteMemberFieldErrors>(
     NO_INVITE_FIELD_ERRORS,
   );
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -320,17 +296,7 @@ function InviteForm() {
         48 hours. Nothing is shared until it is accepted.
       </p>
 
-      <div
-        ref={statusRef}
-        role="alert"
-        aria-live="assertive"
-        tabIndex={-1}
-        className={`mt-6 border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "block" : "hidden"
-        }`}
-      >
-        {message}
-      </div>
+      <FormStatus message={message} as="div" role="alert" className="mt-6" />
 
       <Field
         id="invite-member-email"

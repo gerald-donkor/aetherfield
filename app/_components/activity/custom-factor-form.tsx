@@ -1,13 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  type FormEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type FormEvent, type ReactNode, useRef, useState } from "react";
 
 import { createCustomFactor } from "../../activity/actions";
 import {
@@ -28,6 +22,7 @@ import {
   type GhgGas,
 } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
+import { FormStatus } from "../form-status";
 
 /**
  * Adds one customer-supplied factor row — prompt 66, corrected by prompt 67.
@@ -120,7 +115,6 @@ export function CustomFactorForm({
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const statusRef = useRef<HTMLParagraphElement>(null);
   /* "new", or the id of a set this organisation already owns. */
   const [setChoice, setSetChoice] = useState<string>(
     sets.length > 0 ? sets[0].id : "new",
@@ -140,10 +134,6 @@ export function CustomFactorForm({
   const chosenSet = creatingSet
     ? undefined
     : sets.find((set) => set.id === setChoice);
-
-  useEffect(() => {
-    if (message) statusRef.current?.focus();
-  }, [message]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -219,7 +209,9 @@ export function CustomFactorForm({
         setGas("co2e");
         setBiogenic(false);
         setSupersedes("");
-        setMessage("Customer-supplied factor saved. It is available in factor mapping.");
+        setMessage(
+          "Customer-supplied factor saved. It is available in factor mapping.",
+        );
         router.refresh();
       } else {
         setErrors(result.fieldErrors ?? {});
@@ -234,17 +226,7 @@ export function CustomFactorForm({
 
   return (
     <>
-      <p
-        ref={statusRef}
-        role="status"
-        aria-live="polite"
-        tabIndex={-1}
-        className={`border-l-2 border-ink pl-4 font-mono text-[12px] leading-[18px] outline-none ${
-          message ? "mb-8 block" : "hidden"
-        }`}
-      >
-        {message}
-      </p>
+      <FormStatus message={message} shown="mb-8 block" />
 
       <form ref={formRef} onSubmit={submit} noValidate>
         <div className="grid max-w-[980px] gap-6 md:grid-cols-2">
@@ -289,105 +271,105 @@ export function CustomFactorForm({
         </div>
 
         {creatingSet ? (
-        <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-source"
-            name="source"
-            label="Source"
-            hint="For example, Supplier tariff."
-            error={errors["set.source"]}
-            disabled={pending}
-            required
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-version"
-            name="datasetVersion"
-            label="Dataset/version"
-            hint="For example, 2026 contract."
-            error={errors["set.datasetVersion"]}
-            disabled={pending}
-            required
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-year"
-            name="publicationYear"
-            type="number"
-            inputMode="numeric"
-            label="Publication year"
-            error={errors["set.publicationYear"]}
-            disabled={pending}
-            required
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-licence"
-            name="licence"
-            label="Licence or basis"
-            hint="Name the licence, contract or permission basis."
-            error={errors["set.licence"]}
-            disabled={pending}
-            required
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-effective-from"
-            name="effectiveFrom"
-            type="date"
-            label="Effective from"
-            error={errors["set.effectiveFrom"]}
-            disabled={pending}
-            required
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-effective-to"
-            name="effectiveTo"
-            type="date"
-            label="Effective to"
-            error={errors["set.effectiveTo"]}
-            disabled={pending}
-            required
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-licence-url"
-            name="licenceUrl"
-            label="Licence URL"
-            hint="Leave blank when the basis is private or contractual."
-            error={errors["set.licenceUrl"]}
-            disabled={pending}
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-source-url"
-            name="sourceUrl"
-            label="Source URL"
-            hint="Use a public source URL when one exists."
-            error={errors["set.sourceUrl"]}
-            disabled={pending}
-          />
-          <Field
-            className={FIELD_ALIGN}
-            id="custom-factor-source-reference"
-            name="sourceReference"
-            label="Internal source reference"
-            hint="Required when there is no public source URL."
-            error={errors["set.sourceReference"]}
-            disabled={pending}
-          />
-          <TextareaField
-            className={FIELD_ALIGN}
-            id="custom-factor-notes"
-            name="notes"
-            label="Notes"
-            error={errors["set.notes"]}
-            disabled={pending}
-            rows={3}
-          />
-        </div>
+          <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-source"
+              name="source"
+              label="Source"
+              hint="For example, Supplier tariff."
+              error={errors["set.source"]}
+              disabled={pending}
+              required
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-version"
+              name="datasetVersion"
+              label="Dataset/version"
+              hint="For example, 2026 contract."
+              error={errors["set.datasetVersion"]}
+              disabled={pending}
+              required
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-year"
+              name="publicationYear"
+              type="number"
+              inputMode="numeric"
+              label="Publication year"
+              error={errors["set.publicationYear"]}
+              disabled={pending}
+              required
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-licence"
+              name="licence"
+              label="Licence or basis"
+              hint="Name the licence, contract or permission basis."
+              error={errors["set.licence"]}
+              disabled={pending}
+              required
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-effective-from"
+              name="effectiveFrom"
+              type="date"
+              label="Effective from"
+              error={errors["set.effectiveFrom"]}
+              disabled={pending}
+              required
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-effective-to"
+              name="effectiveTo"
+              type="date"
+              label="Effective to"
+              error={errors["set.effectiveTo"]}
+              disabled={pending}
+              required
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-licence-url"
+              name="licenceUrl"
+              label="Licence URL"
+              hint="Leave blank when the basis is private or contractual."
+              error={errors["set.licenceUrl"]}
+              disabled={pending}
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-source-url"
+              name="sourceUrl"
+              label="Source URL"
+              hint="Use a public source URL when one exists."
+              error={errors["set.sourceUrl"]}
+              disabled={pending}
+            />
+            <Field
+              className={FIELD_ALIGN}
+              id="custom-factor-source-reference"
+              name="sourceReference"
+              label="Internal source reference"
+              hint="Required when there is no public source URL."
+              error={errors["set.sourceReference"]}
+              disabled={pending}
+            />
+            <TextareaField
+              className={FIELD_ALIGN}
+              id="custom-factor-notes"
+              name="notes"
+              label="Notes"
+              error={errors["set.notes"]}
+              disabled={pending}
+              rows={3}
+            />
+          </div>
         ) : null}
 
         <div className="mt-12 grid max-w-[980px] gap-6 md:grid-cols-2">
@@ -470,7 +452,9 @@ export function CustomFactorForm({
             <select
               id="custom-factor-scope"
               value={scope}
-              onChange={(event) => setScope(event.target.value as EmissionScope)}
+              onChange={(event) =>
+                setScope(event.target.value as EmissionScope)
+              }
               disabled={pending}
               className={SELECT_CLASS}
             >
@@ -547,7 +531,11 @@ export function CustomFactorForm({
             </select>
           </SelectField>
 
-          <SelectField id="custom-factor-gas" label="Gas" error={errors["factor.gas"]}>
+          <SelectField
+            id="custom-factor-gas"
+            label="Gas"
+            error={errors["factor.gas"]}
+          >
             <select
               id="custom-factor-gas"
               value={gas}
@@ -659,8 +647,8 @@ export function CustomFactorForm({
             <p className="font-serif text-[15px] leading-6 text-muted md:mt-[38px]">
               A restating row is used wherever that published row is mapped, for
               the dates this set covers. It takes effect at the next
-              recalculation without a mapping change — the rest of this form does
-              not.
+              recalculation without a mapping change — the rest of this form
+              does not.
             </p>
           </div>
         ) : null}
@@ -669,7 +657,6 @@ export function CustomFactorForm({
           {pending ? "Saving..." : "Save factor"}
         </Button>
       </form>
-
     </>
   );
 }
@@ -687,7 +674,10 @@ function SelectField({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="block font-sans text-nav font-bold text-ink">
+      <label
+        htmlFor={id}
+        className="block font-sans text-nav font-bold text-ink"
+      >
         {label}
       </label>
       {children}
