@@ -9193,7 +9193,9 @@ approved on 10 Aug 2026 before any code was written.
    every tenant, non-null is a set a customer supplied under its own licence,
    and **every read filters `organization_id IS NULL OR organization_id = $1`**,
    so no cross-tenant read is possible. AGENTS.md §9.2 rule 6 gained one clause
-   naming reference tables as its exception, in this same change.
+   naming reference tables as its exception, in this same change. Three joins
+   turned out to be inheriting that predicate rather than stating it — see
+   *The three joins that did not state the scope* at the end of this section.
 2. **`vitest` was added**, with `npm test` scoped to `lib/domain/`. An
    exact-decimal engine producing regulatory figures with no unit tests was the
    wrong call. AGENTS.md §2's "there is no test script" line is corrected in
@@ -9703,6 +9705,94 @@ comments were reworded. Added to `docs/automation.md`.
 | scheduled recalculation, threshold alerts | step 14 |
 | an xlsx parser in the application | the workbook is converted once by a committed script and the derived CSV is read with the existing pure `parseCsv` |
 | touching `SiteNav`, `SiteFooter`, or any marketing route's markup | §8.1 and the front matter's settled surfaces |
+
+### The three joins that did not state the scope, prompt 99
+
+`visibleFactorScope(organizationId)` — `organization_id IS NULL OR
+organization_id = $1` — is what makes decision 1 above safe, and the module
+docblock in `lib/db/emission-queries.ts` claims it is "written once … so no query
+below can be written that forgets half of it". **Three joins onto
+`emission_factor` did not name it**, which made that claim untrue:
+
+| site | join |
+| --- | --- |
+| `emission-queries.ts`, `countOutOfPeriodRecordsImpl` | `.innerJoin(emissionFactor, and(eq(id, mapping.factorId), isNull(deletedAt)))` |
+| `emission-queries.ts`, `listFactorCoverage`'s grouped read | the same, as a `.leftJoin` |
+| `report-evidence.ts`, `listPeriodFactorSets` | `.innerJoin(emissionFactor, eq(id, activityEmission.factorId))` |
+
+Twelve other reads in `emission-queries.ts` did name it.
+
+**No data was exposed, and this record must not imply otherwise.** All three
+join from `activity_factor_mapping` or `activity_emission`, both strictly
+tenant-scoped with a `not null` organisation reference, and both already
+filtered on `organizationId` in the same query's `where`. The scope arrived
+transitively. This was **defence in depth and legibility**, not a live
+vulnerability.
+
+It is worth stating anyway because the transitive guarantee is a property of
+*today's* join graph. An edit to either table's filter would remove it with
+nothing at the join to notice — and the alternative fix was to weaken the
+docblock's claim instead (§12 rule 8), which is the worse of the two.
+
+**`visibleFactorScope` is now exported** rather than moved: `report-evidence.ts`
+imports it, and the docblock that explains the predicate stays beside it.
+
+**The `or()` composition was verified, not assumed.** The prompt flagged the
+trap — the scope must not widen the surrounding `AND`. Read from
+`node_modules/drizzle-orm/sql/expressions/conditions.cjs`: `or()` emits
+`StringChunk("(")`, the joined operands, `StringChunk(")")` for any arity above
+one, so `and(x, visibleFactorScope(id))` composes as `x and (… is null or … =
+$1)`. On the middle site — an **outer** join — a scope miss would null the
+factor columns rather than drop the row, which is the coverage surface's
+"unmapped" state; no reachable row can miss it today.
+
+#### Row-count equivalence is a **judgement**, not a measurement
+
+The prompt asked for this distinction explicitly (§12 rule 4), and the honest
+answer is that the live check came back **vacuous**.
+
+A counting query was run against the development database over the pooled URL
+(**cold** — 3,024 ms for the round trip, which is scale-to-zero's first-query
+cost, §7.3, not a query cost). Counts only; no organisation id, row body or name
+was selected or printed (§8.3 rule 2):
+
+| column | count |
+| --- | --- |
+| `emission_factor` rows | 14,064 |
+| of those, tenant-supplied (`organization_id is not null`) | **0** |
+| `activity_factor_mapping` rows | **0** |
+| `activity_emission` rows | **0** |
+| mappings joining a factor of another organisation | 0 |
+| emissions joining a factor of another organisation | 0 |
+
+The two zero "escape" counts are therefore vacuous: with no mappings and no
+tenant-supplied factors, no row exists that the predicate could have excluded.
+**The equivalence is argued, not measured.** The argument is the one above — the
+`not null` organisation reference on both driving tables, plus the existing
+`where` filter — and it is a judgement on the schema and the join graph.
+
+What did exercise the changed SQL against seeded tenant data is
+`npm run test:e2e:local`, which builds and runs the production app: **109 passed,
+12 skipped, one failure** — `submissions.spec.ts:382` on Firefox, "grants and
+revokes staff on its own project's target". Re-run in isolation it **passes on
+both browsers** (4 passed, 1.9 min), and `submissions.spec.ts` contains no join
+onto `emission_factor`. Recorded as an order-dependent flake in a file this
+change does not touch, not as a pass.
+
+### Verification, prompt 99
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **283 passed**, 727 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| `npm run test:e2e:local` | 109 passed, 12 skipped, 1 flake — see above |
+
+No migration, no schema change, no change to `visibleFactorScope`'s definition,
+and `emission-queries.ts` was not split.
+
+---
 
 ## Finite retention for phase-one personal data, prompt 81
 

@@ -3,7 +3,11 @@ import "server-only";
 import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "./client";
-import { countUncalculatedRecords, listEmissions } from "./emission-queries";
+import {
+  countUncalculatedRecords,
+  listEmissions,
+  visibleFactorScope,
+} from "./emission-queries";
 import { listTargets } from "./target-queries";
 import {
   activityEmission,
@@ -173,8 +177,15 @@ async function countPeriodRecords(
  * figure computed against it was computed against it.
  *
  * The join runs from a strictly tenant-scoped table, so the reference tables'
- * nullable-organisation predicate is not needed to keep this read inside the
+ * nullable-organisation predicate is not *needed* to keep this read inside the
  * tenant — `activity_emission.organization_id` already has.
+ *
+ * **It states the predicate anyway, from prompt 99.** The sentence above is
+ * still true and the rows are unchanged; what it describes is a property of
+ * today's join graph, and an edit to `activity_emission`'s filter would remove
+ * the guarantee with nothing here to notice. `emission-queries.ts`'s module
+ * docblock claims the scope is written once so no query can filter on half of
+ * it, and this was one of three joins that made the claim untrue.
  */
 async function listPeriodFactorSets(
   organizationId: string,
@@ -195,7 +206,13 @@ async function listPeriodFactorSets(
       activityRecord,
       eq(activityRecord.id, activityEmission.activityRecordId),
     )
-    .innerJoin(emissionFactor, eq(emissionFactor.id, activityEmission.factorId))
+    .innerJoin(
+      emissionFactor,
+      and(
+        eq(emissionFactor.id, activityEmission.factorId),
+        visibleFactorScope(organizationId),
+      ),
+    )
     .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
     .where(
       and(

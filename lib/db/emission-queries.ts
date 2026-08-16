@@ -108,9 +108,23 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return out;
 }
 
-/** Published reference data, or this organisation's own. Written once so no
-    query can filter on half of it — see the module docblock. */
-function visibleFactorScope(organizationId: string) {
+/**
+ * Published reference data, or this organisation's own. Written once so no
+ * query can filter on half of it — see the module docblock.
+ *
+ * **Exported for `report-evidence.ts` at prompt 99**, which joins
+ * `emission_factor` too and had been stating no scope at all. It is exported
+ * from here rather than moved because the module docblock above is what explains
+ * it, and the predicate belongs beside the explanation.
+ *
+ * **Safe inside a join condition as well as a `where`.** `or()` emits its
+ * operands wrapped in literal parentheses for any arity above one — read from
+ * `node_modules/drizzle-orm/sql/expressions/conditions.cjs` at prompt 99, not
+ * assumed — so `and(x, visibleFactorScope(id))` composes as
+ * `x and (… is null or … = $1)` and cannot widen the surrounding `AND`. That is
+ * the same trap {@link listFactorCoverage}'s `where` warns about.
+ */
+export function visibleFactorScope(organizationId: string) {
   return or(
     isNull(emissionFactor.organizationId),
     eq(emissionFactor.organizationId, organizationId),
@@ -1755,6 +1769,12 @@ async function countOutOfPeriodRecordsImpl(
       and(
         eq(emissionFactor.id, activityFactorMapping.factorId),
         isNull(emissionFactor.deletedAt),
+        /* Redundant today and stated anyway — prompt 99. The scope arrives
+           transitively from `activityFactorMapping`, which is strictly
+           tenant-scoped and already filtered above; but that is a property of
+           this join graph, and a future edit to the mapping's filter would
+           remove the guarantee silently. */
+        visibleFactorScope(organizationId),
       ),
     )
     .innerJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
@@ -1960,6 +1980,12 @@ async function listFactorCoverageImpl(
       and(
         eq(emissionFactor.id, activityFactorMapping.factorId),
         isNull(emissionFactor.deletedAt),
+        /* Stated here too — prompt 99, and see the same note on
+           {@link countOutOfPeriodRecords}. On this **outer** join a scope miss
+           would null the factor columns rather than drop the row, which is the
+           coverage surface's "unmapped" state; no reachable row can miss it
+           today, and the predicate is what keeps that locally checkable. */
+        visibleFactorScope(organizationId),
       ),
     )
     .leftJoin(emissionFactorSet, eq(emissionFactorSet.id, emissionFactor.setId))
