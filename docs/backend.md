@@ -12270,3 +12270,146 @@ all under `lib/domain/` — `alerts`, `dashboard`, `decimal`, `defra`, `emission
 `factor-import`, `factor-match`, `factor-selection`, `gwp`, `reports`,
 `retention`, `targets`. `npm test`: **12 test files, 283 tests, all passing.**
 No script, alias or scope was changed.
+
+---
+
+## One stage **b** for seven authenticated writes, prompt 98 (build steps 9 and 10)
+
+**The finding: security-relevant code in seven copies.** `app/activity/actions.ts`
+carried the same ~35-line stage **b** preamble at six of its eleven exported
+actions, and `app/account/actions.ts` had a seventh copy inline. A hardening
+applied to one silently left six behind — which is the defect, not the line
+count.
+
+### The preambles were diffed before they were collapsed
+
+The prompt required this explicitly (§12 rule 9 — a verification asked for is a
+verification reported, even when it comes back clean). Read at
+`setFactorMapping`, `createCustomFactor`, `importCustomFactors`,
+`retireCustomFactor`, `editFactorSet` and `retireFactorSet`. **All six were
+structurally identical**: `getCurrentMembership()` in a `try`, the signed-out /
+no-organisation split via `getCurrentAccount().catch(() => null)`, the
+`pendingDeletion` lock **before** the limit, then the limiter failing closed.
+
+Exactly three things varied, and all three are now parameters:
+
+| varies | value |
+| --- | --- |
+| the limiter | `checkFactorImportLimit` in `importCustomFactors`; `checkFactorMappingLimit` in the other five |
+| the error constants | `FACTOR_MAPPING_*` in `setFactorMapping`; `CUSTOM_FACTOR_*` in the other five |
+| the throttle noun | "too many **imports**" in `importCustomFactors`; "too many **changes**" elsewhere |
+
+**No defect was found** — no missing lock check, no reordering, no swallowed
+error, no site where the limit was spent before the lock. Nothing was normalised
+away, because there was nothing to normalise.
+
+### The helper
+
+`resolveMembershipForWrite(limiter, messages)` in **`lib/auth/tenant.ts`**, beside
+`resolveTenant`, which it is the sibling of: `resolveTenant` returns two ids and
+cannot serve these callers, because each reads `membership.role` at stage **d**.
+
+It went into the existing module rather than a new one because that file already
+carries `import "server-only"`, already owns this exact primitive, and already
+has the `TenantMessages` type — four of the five sentences the new helper needs.
+Its only importers are `"use server"` action modules (`app/activity`,
+`app/targets`, `app/reports`, now `app/account`), so nothing pulls it toward a
+client bundle. It is **not** in either action file for the reason the previous
+extraction gives: a `"use server"` module's runtime exports must all be async
+functions, so a helper cannot be exported from one.
+
+```ts
+export type MembershipResolution =
+  | { ok: true; membership: CurrentMembership }
+  | { ok: false; error: string };
+
+export type MembershipWriteMessages = TenantMessages & {
+  throttled: (retry: string) => string;
+};
+```
+
+- **The limiter is passed as a function**, not selected from a registry or an
+  enum. The call site names the limiter it has always spent, and the set of
+  limiters stays in `lib/rate-limit/`.
+- **`formatRetry` is applied inside the helper**, so seconds-to-prose lives in
+  one place and no call site can format it differently. `throttled` receives the
+  finished phrase and decides only the sentence around it.
+- **The messages stay at the call sites**, for `resolveTenant`'s reason: the copy
+  is flow-specific. "Sign in again to change emission factors" is right on
+  `/activity/factors` and wrong everywhere else.
+
+### The call sites
+
+Six in `app/activity/actions.ts`, through three message objects declared once —
+`FACTOR_MAPPING_MESSAGES`, `CUSTOM_FACTOR_MESSAGES`, and
+`CUSTOM_FACTOR_IMPORT_MESSAGES` (the second, spread, with the "imports" noun).
+Each preamble is now a call plus a guard:
+
+```ts
+const resolved = await resolveMembershipForWrite(
+  checkFactorMappingLimit,
+  FACTOR_MAPPING_MESSAGES,
+);
+if (!resolved.ok) return { ok: false, error: resolved.error };
+const { membership } = resolved;
+```
+
+`const userId` survives only in `setFactorMapping`, which is the one of the six
+that uses the id after the limiter (it records the actor on the mapping row).
+The other five take `organizationId` alone.
+
+### `app/account/actions.ts` — two collapses and one deliberate refusal
+
+- **`resolveMembershipForWrite()` (the private copy) collapsed**, as the prompt
+  allowed. It is a clean specialisation: same shape, `checkInvitationWriteLimit`,
+  `MEMBERSHIP_ERRORS`, the "changes" noun. Its lock commentary was about *why*
+  the marker is checked on this path, not a behavioural difference, and it is
+  kept at the call site. The four membership actions call it unchanged.
+- **`setAlertEmailPreference` collapsed too — a seventh copy the prompt did not
+  name.** It shares the shape exactly (`checkAlertPreferenceLimit`,
+  `ALERT_PREFERENCE_ERRORS`, `MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED` for the
+  lock, "changes"). Folding it in is beyond the brief's literal six-plus-one and
+  is recorded here as such; leaving a known identical copy of the code the
+  prompt exists to de-duplicate would have reproduced the finding.
+- **`resolveOwnerForDeletion` left alone, and it must be.** It has **no lock
+  check** by design — `restoreOrganization` is the one thing a locked
+  organisation may still do, and sharing a helper that refuses a locked
+  organisation would make the reversal unreachable the moment the lock is set. It
+  also carries an owner check the others do not. Its docblock already says
+  "deliberately not `resolveMembershipForWrite`"; that sentence is now true of the
+  shared helper as well.
+
+### What did not change
+
+No limit, no window, no key, no prefix, no error string, no stage ordering, no
+result type. The lock still runs before the limit at every site; the limiter
+still fails closed at every site. **The helper logs nothing** — not the user id,
+not the organisation id, not the input, and not in either catch (§8.3 rule 2),
+matching the preambles it replaces. No new environment variable; `KV_REST_API_*`
+is read transitively exactly as before.
+
+`app/activity/actions.ts` fell 1,610 → **1,510** lines and
+`app/account/actions.ts` 810 → **761**; `lib/auth/tenant.ts` grew 104 → **205**.
+149 lines left the two action files and 101 arrived in `tenant.ts`, a net of 48 —
+far less than the raw deletion, because the seven copies were largely
+undocumented and the one helper is not. Reducing the line count was never the
+point; having one place to harden was. `activity/actions.ts`
+was **not** split into several files — that is a separate finding, deliberately
+deferred.
+
+### Verification
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **283 passed**, 746 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, 4.0 min — Chromium and Firefox |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine, as at prompts 89 and 92 |
+
+**`npm run test:e2e` therefore did not complete as a matrix**, and this prompt
+required it. The two native projects passed and WebKit did not run; that is
+stated rather than reported as a pass. The E2E suite is what exercises these
+seven authenticated write paths end to end — the 283 domain tests cannot see any
+of them.

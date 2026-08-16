@@ -1,6 +1,7 @@
 import "server-only";
 
-import { getCurrentMembership } from "./organization";
+import { formatRetry, type RateLimitOutcome } from "../rate-limit";
+import { getCurrentMembership, type CurrentMembership } from "./organization";
 import { getCurrentAccount } from "./server";
 
 /**
@@ -101,4 +102,104 @@ export async function resolveTenant(
     userId: membership.account.user.id,
     organizationId: membership.organization.id,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The same stage b, for the actions that need the role as well as the ids    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `resolveTenant`'s sibling, for a write whose stage **d** reads the tenant
+ * role: it resolves the same session and the same tenant, enforces the same
+ * deletion lock, then **spends a rate limit** and hands back the whole
+ * membership rather than two ids.
+ *
+ * **Extracted at prompt 98 from seven copies**, behaviour-identical — six in
+ * `app/activity/actions.ts` (`setFactorMapping`, `createCustomFactor`,
+ * `importCustomFactors`, `retireCustomFactor`, `editFactorSet`,
+ * `retireFactorSet`) and one private copy in `app/account/actions.ts`. The
+ * preambles were diffed against each other before they were collapsed and
+ * varied in exactly two things, both now parameters: which limiter is spent,
+ * and which sentences are returned. That was the finding — security-relevant
+ * code in seven copies is code where a hardening applied to one silently leaves
+ * six behind.
+ *
+ * **Why the limiter comes after the session and not before it.** The limit is
+ * keyed by the user id, and there is no key without the session. That is the
+ * one ordering difference from AGENTS.md 10's public-form stage order, and it
+ * is the same one every authenticated action in this repository already makes.
+ *
+ * **It fails closed.** A limiter that throws returns `failure`, not a pass: an
+ * unlimited write path is worse than a control that is briefly unavailable, and
+ * AGENTS.md 8.2 rule 4 wants the failure visible rather than a silent success.
+ *
+ * **Nothing is logged** — not the user id, not the organisation id, not the
+ * input, and not in either catch (AGENTS.md 8.3 rule 2).
+ */
+export type MembershipResolution =
+  | { ok: true; membership: CurrentMembership }
+  | { ok: false; error: string };
+
+/**
+ * `TenantMessages` plus the one sentence this path can produce and
+ * `resolveTenant` cannot.
+ *
+ * `throttled` is a builder rather than a string because the retry window is
+ * only known here. **`formatRetry` is applied inside the helper**, so the
+ * seconds-to-prose rule lives in one place and a call site can never format it
+ * differently; the builder receives the finished phrase and decides only the
+ * sentence around it ("too many changes" on a factor edit, "too many imports"
+ * on a bulk upload).
+ */
+export type MembershipWriteMessages = TenantMessages & {
+  throttled: (retry: string) => string;
+};
+
+export async function resolveMembershipForWrite(
+  /** Passed as a function, not selected from a registry: the call site names
+      the limiter it has always spent, and the set of limiters stays in
+      `lib/rate-limit/`. */
+  limiter: (identifier: string) => Promise<RateLimitOutcome>,
+  messages: MembershipWriteMessages,
+): Promise<MembershipResolution> {
+  let membership: CurrentMembership | null;
+  try {
+    membership = await getCurrentMembership();
+  } catch {
+    return { ok: false, error: messages.failure };
+  }
+
+  if (!membership) {
+    /* Two ordinary states, told apart so the message is honest: signed out, or
+       signed in with no organisation. Neither says anything about another
+       tenant. */
+    const account = await getCurrentAccount().catch(() => null);
+    return {
+      ok: false,
+      error: account ? messages.noOrganization : messages.signedOut,
+    };
+  }
+
+  /* The lock — prompt 73. These callers resolve their membership directly
+     because stage d needs the role, so they do not pass through
+     `resolveTenant`'s check and the marker is enforced here instead. It runs
+     **before** the limit: a locked organisation is refused without spending a
+     token. */
+  if (membership.pendingDeletion) {
+    return { ok: false, error: messages.organizationLocked };
+  }
+
+  try {
+    const limit = await limiter(membership.account.user.id);
+    if (!limit.allowed) {
+      return {
+        ok: false,
+        error: messages.throttled(formatRetry(limit.retryAfterSeconds)),
+      };
+    }
+  } catch {
+    return { ok: false, error: messages.failure };
+  }
+
+  return { ok: true, membership };
 }

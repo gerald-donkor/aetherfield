@@ -10,6 +10,7 @@ import {
   getCurrentMembership,
 } from "../../lib/auth/organization";
 import { getAuth, getCurrentAccount } from "../../lib/auth/server";
+import { resolveMembershipForWrite as resolveMembershipForWriteFor } from "../../lib/auth/tenant";
 import { setAlertPreference } from "../../lib/db/alert-queries";
 import {
   cancelDeletionRequest,
@@ -196,60 +197,32 @@ export async function createOrganization(
 /**
  * Stage **b** for all four membership actions below, in one place.
  *
- * It resolves the session and the tenant, then spends the rate limit — in that
- * order, because the limit is keyed by the user id and there is no key without
- * the session (the reason `createOrganization` gives above). It **fails closed**
- * on a limiter error, as every authenticated path here does: an unlimited write
- * path is worse than a control that is briefly unavailable, and AGENTS.md 8.2
- * rule 4 wants the failure visible rather than a silent success.
+ * **The body moved to `lib/auth/tenant.ts` at prompt 98**, behaviour-identical,
+ * when the same preamble was found in six more actions in
+ * `app/activity/actions.ts`. What is left here is the part that was ever
+ * local: the limiter this flow spends, and the sentences it owes its own user.
+ *
+ * The shared helper resolves the session and the tenant, enforces the deletion
+ * lock, then spends the limit — in that order, because the limit is keyed by
+ * the user id and there is no key without the session (the reason
+ * `createOrganization` gives above). It **fails closed** on a limiter error, as
+ * every authenticated path here does.
+ *
+ * The lock is why these four cannot share `restoreOrganization`'s helper: a
+ * locked organisation may do exactly one thing, and it is `restoreOrganization`
+ * below; membership is not it. See `resolveOwnerForDeletion`.
  *
  * Not exported. A `"use server"` module's runtime exports must all be async
  * functions, and this is a helper rather than an entry point.
  */
-async function resolveMembershipForWrite(): Promise<
-  { ok: true; membership: CurrentMembership } | { ok: false; error: string }
-> {
-  let membership: CurrentMembership | null;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: MEMBERSHIP_ERRORS.GENERIC };
-  }
-  if (!membership) {
-    /* Two ordinary states, told apart so the message is honest: signed out, or
-       signed in with no organisation to manage. */
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account
-        ? MEMBERSHIP_ERRORS.NO_ORGANIZATION
-        : MEMBERSHIP_ERRORS.SIGNED_OUT,
-    };
-  }
-
-  /* The lock — prompt 73. These four resolve their membership directly (stage d
-     needs the role) rather than through `lib/auth/tenant.ts`, so the marker is
-     checked here. A locked organisation may do exactly one thing, and it is
-     `restoreOrganization` below; membership is not it. */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED };
-  }
-
-  try {
-    const limit = await checkInvitationWriteLimit(membership.account.user.id);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    return { ok: false, error: MEMBERSHIP_ERRORS.GENERIC };
-  }
-
-  return { ok: true, membership };
+async function resolveMembershipForWrite() {
+  return resolveMembershipForWriteFor(checkInvitationWriteLimit, {
+    signedOut: MEMBERSHIP_ERRORS.SIGNED_OUT,
+    noOrganization: MEMBERSHIP_ERRORS.NO_ORGANIZATION,
+    organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
+    failure: MEMBERSHIP_ERRORS.GENERIC,
+    throttled: (retry) => `That's a few too many changes. Try again in ${retry}.`,
+  });
 }
 
 /**
@@ -526,45 +499,23 @@ export async function setAlertEmailPreference(
   // -- a. BotID: absent on an authenticated path. See `createOrganization`. --
 
   // -- b. Session and tenant, then the rate limit ---------------------------
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: ALERT_PREFERENCE_ERRORS.GENERIC };
-  }
-  if (!membership) {
-    /* Two ordinary states, told apart so the message is honest: signed out, or
-       signed in with no organisation to receive alerts about. */
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account
-        ? ALERT_PREFERENCE_ERRORS.NO_ORGANIZATION
-        : ALERT_PREFERENCE_ERRORS.SIGNED_OUT,
-    };
-  }
-
-  /* The lock — prompt 73. A workspace being erased raises no alerts (the sweep
-     skips it, `listAllOrganizationIds`), so there is no preference to express
-     about it until it is restored. */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED };
-  }
-
-  try {
-    const limit = await checkAlertPreferenceLimit(membership.account.user.id);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    // Fails closed, as every authenticated path beside it does.
-    return { ok: false, error: ALERT_PREFERENCE_ERRORS.GENERIC };
-  }
+  /* The lock is the shared helper's — prompt 73's reasoning holds here too: a
+     workspace being erased raises no alerts (the sweep skips it,
+     `listAllOrganizationIds`), so there is no preference to express about it
+     until it is restored. */
+  const resolved = await resolveMembershipForWriteFor(
+    checkAlertPreferenceLimit,
+    {
+      signedOut: ALERT_PREFERENCE_ERRORS.SIGNED_OUT,
+      noOrganization: ALERT_PREFERENCE_ERRORS.NO_ORGANIZATION,
+      organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
+      failure: ALERT_PREFERENCE_ERRORS.GENERIC,
+      throttled: (retry) =>
+        `That's a few too many changes. Try again in ${retry}.`,
+    },
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
   // -- c. Parse, with the same schema the leaf ran --------------------------
   const parsed = alertPreferenceSchema.safeParse(input);

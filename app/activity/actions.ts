@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import * as z from "zod";
 
-import { getCurrentMembership } from "../../lib/auth/organization";
-import { getCurrentAccount } from "../../lib/auth/server";
-import { resolveTenant as resolveTenantFor } from "../../lib/auth/tenant";
+import {
+  resolveMembershipForWrite,
+  resolveTenant as resolveTenantFor,
+  type MembershipWriteMessages,
+} from "../../lib/auth/tenant";
 import {
   commitImport as commitImportRows,
   createStagedImport,
@@ -212,6 +214,50 @@ function resolveTenant() {
     failure: GENERIC_FAILURE,
   });
 }
+
+/**
+ * Stage **b** for the six actions below that need the role as well as the ids.
+ *
+ * `resolveTenant` above returns two ids and cannot serve them: each one reads
+ * `membership.role` at stage **d**, so each resolved its membership directly —
+ * and each carried its own ~35-line copy of the identical preamble until
+ * prompt 98. The copies differed in exactly two things, and those two things
+ * are the parameters below: the limiter, and these sentences.
+ *
+ * The strings are unchanged from the copies they replace. They stay here rather
+ * than moving into `lib/auth/` for `resolveTenant`'s reason — the copy is
+ * flow-specific, and "sign in again to change emission factors" is the right
+ * sentence on this surface and the wrong one everywhere else.
+ */
+const tooManyChanges = (retry: string) =>
+  `That's a few too many changes. Try again in ${retry}.`;
+
+/** The bulk upload's own noun. `importCustomFactors` is the only one of the six
+    that says "imports", and it is the only one that spends
+    `checkFactorImportLimit`. */
+const tooManyImports = (retry: string) =>
+  `That's a few too many imports. Try again in ${retry}.`;
+
+const FACTOR_MAPPING_MESSAGES: MembershipWriteMessages = {
+  signedOut: FACTOR_MAPPING_SIGNED_OUT,
+  noOrganization: FACTOR_MAPPING_NO_ORGANIZATION,
+  organizationLocked: FACTOR_MAPPING_ORGANIZATION_LOCKED,
+  failure: FACTOR_MAPPING_FAILURE,
+  throttled: tooManyChanges,
+};
+
+const CUSTOM_FACTOR_MESSAGES: MembershipWriteMessages = {
+  signedOut: CUSTOM_FACTOR_SIGNED_OUT,
+  noOrganization: CUSTOM_FACTOR_NO_ORGANIZATION,
+  organizationLocked: CUSTOM_FACTOR_ORGANIZATION_LOCKED,
+  failure: CUSTOM_FACTOR_FAILURE,
+  throttled: tooManyChanges,
+};
+
+const CUSTOM_FACTOR_IMPORT_MESSAGES: MembershipWriteMessages = {
+  ...CUSTOM_FACTOR_MESSAGES,
+  throttled: tooManyImports,
+};
 
 /* -------------------------------------------------------------------------- */
 /*  stageImport                                                                */
@@ -656,49 +702,21 @@ export async function setFactorMapping(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* `getCurrentMembership()` rather than `resolveTenant()`, which returns ids
-     only: stage d needs the role, and the role is re-read from Postgres on
+  /* `resolveMembershipForWrite` rather than `resolveTenant()`, which returns
+     ids only: stage d needs the role, and the role is re-read from Postgres on
      every call rather than trusted from the session payload (AGENTS.md 11.2
-     rule 5). No argument is taken, so no organisation id can be supplied. */
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: FACTOR_MAPPING_FAILURE };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account
-        ? FACTOR_MAPPING_NO_ORGANIZATION
-        : FACTOR_MAPPING_SIGNED_OUT,
-    };
-  }
-  /* The lock, checked here rather than inherited: this path resolves its
-     membership directly because stage d needs the role, so it does not pass
-     through `resolveTenant`'s check (prompt 73). */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: FACTOR_MAPPING_ORGANIZATION_LOCKED };
-  }
+     rule 5). No argument is taken from the request, so no organisation id can
+     be supplied. The deletion lock and the fail-closed limiter are the
+     helper's, unchanged. */
+  const resolved = await resolveMembershipForWrite(
+    checkFactorMappingLimit,
+    FACTOR_MAPPING_MESSAGES,
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
   const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
-
-  try {
-    const limit = await checkFactorMappingLimit(userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    // Fails closed, as every path beside it does.
-    return { ok: false, error: FACTOR_MAPPING_FAILURE };
-  }
 
   // -- c. Parse, with the same schema the leaf ran -------------------------
   const parsed = factorMappingSchema.safeParse(input);
@@ -866,40 +884,16 @@ export async function createCustomFactor(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
-    };
-  }
-  /* The lock — see `setFactorMapping` for why it is checked here (prompt 73). */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
-  }
+  /* See `setFactorMapping` for why the role is resolved here rather than
+     through `resolveTenant` (prompt 73, prompt 98). */
+  const resolved = await resolveMembershipForWrite(
+    checkFactorMappingLimit,
+    CUSTOM_FACTOR_MESSAGES,
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
-  const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
-
-  try {
-    const limit = await checkFactorMappingLimit(userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
 
   // -- c. Parse, with the shared schema -----------------------------------
   const parsed = createCustomFactorSchema.safeParse(input);
@@ -986,40 +980,17 @@ export async function importCustomFactors(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
-    };
-  }
-  if (membership.pendingDeletion) {
-    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
-  }
+  /* The one of the six that spends `checkFactorImportLimit` and says "imports"
+     rather than "changes" — the two things prompt 98's extraction is
+     parameterised by. */
+  const resolved = await resolveMembershipForWrite(
+    checkFactorImportLimit,
+    CUSTOM_FACTOR_IMPORT_MESSAGES,
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
-  const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
-
-  try {
-    const limit = await checkFactorImportLimit(userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many imports. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    /* Fails closed, as every path beside it does. */
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
 
   // -- c. The set choice, then the file, then the rows ---------------------
   const choice = importCustomFactorsSchema.safeParse({
@@ -1233,40 +1204,16 @@ export async function retireCustomFactor(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
-    };
-  }
-  /* The lock — see `setFactorMapping` for why it is checked here (prompt 73). */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
-  }
+  /* See `setFactorMapping` for why the role is resolved here rather than
+     through `resolveTenant` (prompt 73, prompt 98). */
+  const resolved = await resolveMembershipForWrite(
+    checkFactorMappingLimit,
+    CUSTOM_FACTOR_MESSAGES,
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
-  const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
-
-  try {
-    const limit = await checkFactorMappingLimit(userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
 
   // -- c. Parse, with the shared schema -----------------------------------
   const parsed = retireCustomFactorSchema.safeParse(input);
@@ -1333,40 +1280,16 @@ export async function editFactorSet(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
-    };
-  }
-  /* The lock — see `setFactorMapping` for why it is checked here (prompt 73). */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
-  }
+  /* See `setFactorMapping` for why the role is resolved here rather than
+     through `resolveTenant` (prompt 73, prompt 98). */
+  const resolved = await resolveMembershipForWrite(
+    checkFactorMappingLimit,
+    CUSTOM_FACTOR_MESSAGES,
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
-  const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
-
-  try {
-    const limit = await checkFactorMappingLimit(userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
 
   // -- c. Parse, with the shared schema -----------------------------------
   const parsed = editFactorSetSchema.safeParse(input);
@@ -1442,39 +1365,16 @@ export async function retireFactorSet(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account ? CUSTOM_FACTOR_NO_ORGANIZATION : CUSTOM_FACTOR_SIGNED_OUT,
-    };
-  }
-  if (membership.pendingDeletion) {
-    return { ok: false, error: CUSTOM_FACTOR_ORGANIZATION_LOCKED };
-  }
+  /* See `setFactorMapping` for why the role is resolved here rather than
+     through `resolveTenant` (prompt 73, prompt 98). */
+  const resolved = await resolveMembershipForWrite(
+    checkFactorMappingLimit,
+    CUSTOM_FACTOR_MESSAGES,
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { membership } = resolved;
 
-  const userId = membership.account.user.id;
   const organizationId = membership.organization.id;
-
-  try {
-    const limit = await checkFactorMappingLimit(userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
 
   // -- c. Parse, with the shared schema -----------------------------------
   const parsed = retireFactorSetSchema.safeParse(input);
