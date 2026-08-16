@@ -233,6 +233,14 @@ route handlers, no forms, no auth tables, no phase-two entities, no seed data,
 and no Neon branching setup for preview deployments — worth raising when preview
 deploys start writing.
 
+> **Branching was closed at prompt 89, on the half step 1 never named.** Step 1
+> framed branching as a *preview deployment* concern; the live problem turned
+> out to be local — one `DATABASE_URL` spanning Production, Preview and
+> Development meant every `npm run dev` and every E2E run wrote to the
+> production database. See "A development database branch, prompt 89" at the
+> end of this file. Preview's own `DATABASE_URL` is still unsplit and still
+> open.
+
 ---
 
 ## Step 6 — Better Auth, sign-in and sign-up
@@ -10201,9 +10209,17 @@ the largest write one form submission can cause in this codebase.
 
 **Every timing below is warm** (AGENTS.md 7.3's scale-to-zero note): the script
 resolved an organisation and ran a throwaway query before anything was timed.
-Taken against the development Neon branch on the free plan, over the pooled
+Taken against the Neon `main` branch on the free plan, over the pooled
 connection, from a residential connection — so the round-trip component is
 real and is not a server-side cost.
+
+> **This line used to read "the development Neon branch", and that branch did
+> not exist.** Corrected at prompt 89 (AGENTS.md 12 rule 8), which read the
+> project's branch list back from the Neon API and found exactly one branch:
+> `[default] main`, created 2026-08-07T15:14:44Z. Every measurement in this
+> file taken before 16 Aug 2026 was therefore taken against `main` — the same
+> database production uses. The `development` branch prompt 89 created is not
+> the one this sentence claimed.
 
 | file | parse + per-row validate | write (one transaction) | total |
 | --- | --- | --- | --- |
@@ -11516,6 +11532,12 @@ workflow file**; the GitHub integration already deploys `main` and a second path
 is the thing to avoid. **Neon branching for preview deployments** remains open
 from step 1.
 
+> **Half-closed at prompt 89.** Branching itself is done — a `development`
+> branch now backs local development and the E2E matrix, so neither writes to
+> production any more. **Preview's `DATABASE_URL` is still `main`'s** and that
+> half stays open; no preview deployment has ever existed, so nothing is writing
+> through it today. See "A development database branch, prompt 89" below.
+
 ### One standing constraint, discovered here
 
 **The GitHub repository is public** (`gh api repos/gerald-donkor/aetherfield` →
@@ -11523,3 +11545,225 @@ from step 1.
 this push was safe as it stood — but a public repository is a standing
 constraint on every future commit, and it is recorded here because prompt 87 is
 where it was discovered.
+
+---
+
+## A development database branch, prompt 89
+
+Built 16 Aug 2026. **Before this, one `DATABASE_URL` served Production, Preview
+and Development, so every `npm run dev` session and every E2E run read and wrote
+the production database.** `e2e/auth.setup.ts` signs up five identities, creates
+organisations, verifies addresses by direct write and grants staff and admin
+roles; the teardown deletes them again. That full create/delete cycle ran
+against the same rows a real demo request lands in.
+
+**No application source file changed.** The repointing lives in untracked
+`.env.local` and in Neon. The tracked change is `.env.example`'s step-1 comments
+and this record.
+
+### The topology, read back rather than assumed
+
+`neonctl` is not installed; `npx -y neonctl@latest` (3.2.2) works, and it
+authenticates from `NEON_API_KEY`. The resource was provisioned `--no-claim`, so
+it sits in the Vercel-managed Neon org and a personal Neon OAuth login does not
+address it — the key is minted from the console reached by
+`vercel integration open neon neon-purple-candle` (Vercel SSO).
+
+Before the change, `neonctl branches list` returned **exactly one branch**:
+
+| name | id | state | created |
+| --- | --- | --- | --- |
+| `[default] main` | `br-nameless-salad-auq3ag2h` | ready | 2026-08-07T15:14:44Z |
+
+**That is why line ~10204 of this file was wrong.** It said prompt 82's import
+measurements were "taken against the development Neon branch"; no such branch
+existed on that date. Corrected in the same change (AGENTS.md 12 rule 8) — every
+measurement in this file predating 16 Aug 2026 was taken against `main`.
+
+### The plan allowance, quoted from the API
+
+From `neonctl projects get`, 16 Aug 2026 — read, not recalled (12 rule 7):
+
+| field | value |
+| --- | --- |
+| `owner.subscription_type` | `free_v3` |
+| `owner.branches_limit` | 10 |
+| branches in use before | 1 |
+| `branch_logical_size_limit_bytes` | 536870912 (512 MiB) |
+| `synthetic_storage_size` | 53778480 |
+| `pg_version` | 17 |
+| `region_id` | `aws-us-east-1` |
+| `history_retention_seconds` | 21600 |
+| `default_endpoint_settings` | 0.25–0.25 CU, `suspend_timeout_seconds: 0` (global 5-minute default) |
+
+A second branch is well inside the allowance. **No plan change, and none needed.**
+
+### The branch, and why it is schema-only
+
+`development`, `br-dark-scene-auzqda1h`, off `main`, created with
+`neonctl branches create --schema-only`. It has its own read-write compute
+endpoint at 0.25–0.25 CU, with `pooler_enabled: false` on the endpoint record
+(the pooled `-pooler` hostname is still served). **The endpoint id is not
+written here**: it is the database hostname's prefix, this repository is public,
+and Neon accepts connections from any address. Read it back from
+`neonctl branches get development` when it is needed.
+
+**Schema-only, not a full clone, and that is a personal-data decision.** A Neon
+branch is a copy-on-write clone and arrives carrying the parent's rows — here
+that would have meant a second copy of a real job `application` and its private
+CV blob reference. AGENTS.md 8.3 rule 1 says collect only what the flow needs,
+and nothing local needs those rows: the E2E fixture provisions every identity it
+uses, and the published factor sets are re-seedable from the committed CSV.
+Confirmed by measurement, not by assumption — immediately after creation the
+branch held all 25 tables and **0 rows in every one of them**.
+
+### `db:migrate` fails on a fresh schema-only branch — and why
+
+**A schema-only branch copies `drizzle.__drizzle_migrations` as an empty table.**
+So Drizzle believes nothing has been applied while the tables already exist, and
+`npm run db:migrate` re-applies migration 1 onto a live schema. It exits **1**,
+and — the part that costs time — it prints **no error at all**: output ends on
+the `applying migrations...` spinner. The first run of this prompt read that as
+success because the exit code had not been checked.
+
+The fix is to make the branch genuinely empty and migrate from zero:
+
+```
+drop schema if exists public cascade;
+drop schema if exists drizzle cascade;
+create schema public;
+```
+
+run behind a guard that counts every row in `public` and `drizzle` first and
+refuses at anything but zero — the script cannot run against a database with
+data in it. Then:
+
+| command | exit | result |
+| --- | --- | --- |
+| `npm run db:migrate` | 0 | whole chain applied from zero |
+| `npm run db:migrate` again | 0 | no-op, as required |
+| `npm run db:seed:factors` | 0 | DESNZ 2025 v1: 7,029 factors · DESNZ 2026 v1.2: 7,035 · 41.1 s |
+
+**The alternative — backfilling the migrations journal to "baseline" the
+branch — was rejected**: it hand-writes Drizzle's own bookkeeping, which AGENTS.md
+9 keeps exclusively Drizzle's, and it never proves the chain applies.
+
+**Anyone creating a schema-only Neon branch for this repo must do the drop
+first.** It is not optional and the failure gives no message.
+
+### The isolation, measured — production did not move
+
+Counts only, over the direct connection, no row contents (8.3 rule 2).
+Production counts were taken immediately before the E2E run and again after.
+
+| table | prod before | prod after | dev before | dev after |
+| --- | --- | --- | --- | --- |
+| `user` | 1 | 1 | 0 | 0 |
+| `session` | 7 | 7 | 0 | 0 |
+| `account` | 1 | 1 | 0 | 0 |
+| `organization` | 2 | 2 | 0 | 0 |
+| `member` | 1 | 1 | 0 | 0 |
+| `invitation` | 0 | 0 | 0 | 0 |
+| `verification` | 1 | 1 | 0 | 0 |
+| `lead` | 0 | 0 | 0 | 0 |
+| `subscriber` | 0 | 0 | 0 | 0 |
+| `application` | 1 | 1 | 0 | 0 |
+| `activity_record` | 2 | 2 | 0 | 0 |
+| `activity_import` | 1 | 1 | 0 | 0 |
+| `activity_import_row` | 2 | 2 | 0 | 0 |
+| `activity_factor_mapping` | 11 | 11 | 0 | 0 |
+| `activity_emission` | 0 | 0 | 0 | 0 |
+| `emission_factor` | 14084 | 14084 | 14064 | 14064 |
+| `emission_factor_set` | 4 | 4 | 2 | 2 |
+| `emission_target` | 1 | 1 | 0 | 0 |
+| `site` | 2 | 2 | 0 | 0 |
+| `organization_deletion` | 1 | 1 | 0 | 0 |
+| `retention_purge_run` | 5 | 5 | 0 | 0 |
+| `report` / `target_alert` / `alert_preference` | 0 | 0 | 0 | 0 |
+| **`rate_limit`** | **6** | **6** | **0** | **3** |
+
+**Every production count is unchanged — `diff` of the two full 25-table listings
+is empty.** The fixture's own identities were created and torn down on
+`development`, which is why its user/session/organisation counts return to zero.
+
+**`rate_limit` is the positive half of the proof, and it matters.** A table of
+all-zeros on both sides would be equally consistent with the E2E run never having
+touched a database at all. `rate_limit` is the one table the fixture does not
+restore — the run prints
+`[e2e] rate_limit rows: 0 before, 3 after (not restored — keyed by ip and path,
+self-pruning)` — so development moving 0 → 3 while production held at 6 shows the
+writes landed, and shows where.
+
+**The two branches differ by 20 factors and 2 sets, deliberately.** Production
+carries 14,084 factors across 4 sets; `development` carries the 14,064 published
+DESNZ rows across the 2 published sets that the committed CSV seeds. The
+difference is customer-supplied and test-created sets on production, which the
+seed does not and should not reproduce.
+
+### Timings against the new endpoint — nothing refitted
+
+A branch gets its own compute endpoint, so prompt 83's constants were
+re-measured against it. **All warm** (7.3's scale-to-zero note): a throwaway
+connect-and-query ran before anything was timed.
+
+| measurement | prompt 83, `main`'s pooled host | prompt 89, `development`'s pooled host |
+| --- | --- | --- |
+| TCP connect | 319–410 ms | **232 / 232 / 264 ms** |
+| 3 concurrent fresh connection + `select 1`, slowest | 2145 ms | **2197 ms** |
+| 6 concurrent, slowest | 2188 ms | **2299 ms** |
+| 10 concurrent, slowest | 3743 ms | **2452 ms** |
+
+**Every number is inside the existing budgets, so no constant changed** — which
+is what the prompt required, and a refit would govern production's connection
+behaviour and belongs to its own prompt. `CONNECT_ATTEMPT_TIMEOUT_MS` (2500) and
+`CONNECTION_TIMEOUT_MS` (7000) both stand.
+
+One observation worth recording: the pooled host resolves to **6 addresses (3 A,
+3 AAAA)** as before, but **none of the three AAAA addresses connected from this
+machine** — no IPv6 route here. That is exactly the case
+`CONNECT_ATTEMPT_TIMEOUT_MS` exists for, and it is a property of this machine,
+not of the branch.
+
+### `NEON_API_KEY` — a local tooling credential, not an application variable
+
+`neonctl` reads it; nothing in `app/` or `lib/` does, and the application runs
+without it. It lives in `.env.local` only and is **never** set on Vercel, so it
+is recorded in `.env.example` as a comment with no `=` line — a name in that
+file with a value slot implies the app needs it, and it does not.
+
+### What this did not do
+
+- **Preview's `DATABASE_URL` is still `main`'s.** `vercel ls` shows every
+  deployment this project has ever had is Production, so no preview deployment
+  has ever written anything. The variables are also owned by the Neon
+  Marketplace integration, and splitting one integration-managed row into
+  per-environment values risks the integration overwriting it. Still open.
+- No `vercel env` write of any kind, on any environment. No `vercel env pull`
+  either — it replaces `.env.local` wholesale and `RESEND_API_KEY` exists there
+  for Development and nowhere else.
+- No schema change, no new migration, no seed change, no plan change.
+
+### Verification
+
+| check | result |
+| --- | --- |
+| `npm run typecheck` | exit 0, no output |
+| `npm run lint` | exit 0, no output |
+| `npm test` | 12 files, **283 passed**, 1.44 s |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, exit 0, 3.6 min, against `development` |
+| `npm run test:e2e:webkit` | **not run — blocked** |
+
+**No prerender diff was run, deliberately.** No source file changed, so the diff
+would be a build against itself; the route table is the evidence, as the prompt
+specified.
+
+**The WebKit third of the matrix did not run: Podman is not installed on this
+machine.** `scripts/playwright-webkit.sh` reports `Podman is required for WebKit
+on Arch Linux` and exits; `which podman` finds nothing. So `npm run test:e2e` —
+the full matrix AGENTS.md 2 defines — has **not** been run in full for this
+change, and the isolation measurement rests on the Chromium and Firefox projects
+only. Both browsers exercise the same fixture, the same sign-ups and the same
+teardown, so the write path under test is the same one; the gap is browser
+coverage, not database coverage. Reported rather than routed around
+(12 rule 9). Installing Podman would close it.
