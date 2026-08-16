@@ -149,7 +149,7 @@ export function CreateOrganizationForm({
       {/* The failure announcement. Kept mounted so its `aria-live` region
           exists before the text arrives, and marked with the same left rule the
           auth screens use — legible without colour (AGENTS.md 8.2 rule 5). */}
-      <FormStatus message={message} as="div" role="alert" className="mt-6" />
+      <FormStatus message={message} as="div" className="mt-6" />
 
       <Field
         id="create-organization-name"

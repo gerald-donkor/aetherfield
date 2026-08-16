@@ -101,7 +101,7 @@ export function ActivityUploadForm({ className = "" }: { className?: string }) {
       {/* Kept mounted so the live region exists before the text arrives, and
           marked with the left rule the auth screens use — legible without
           colour (AGENTS.md 8.2 rule 5). */}
-      <FormStatus message={message} as="div" role="alert" className="mb-6" />
+      <FormStatus message={message} as="div" className="mb-6" />
 
       <FileField
         id="activity-import-file"

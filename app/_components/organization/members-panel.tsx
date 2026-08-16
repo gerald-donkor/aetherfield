@@ -294,7 +294,7 @@ function InviteForm() {
         48 hours. Nothing is shared until it is accepted.
       </p>
 
-      <FormStatus message={message} as="div" role="alert" className="mt-6" />
+      <FormStatus message={message} as="div" className="mt-6" />
 
       <Field
         id="invite-member-email"

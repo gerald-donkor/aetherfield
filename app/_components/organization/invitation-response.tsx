@@ -100,7 +100,7 @@ export function InvitationResponse({
   return (
     <div className={className}>
       {/* Kept mounted so the live region exists before the text arrives. */}
-      <FormStatus message={message} as="div" role="alert" className="mb-6" />
+      <FormStatus message={message} as="div" className="mb-6" />
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={() => respond("accept")} disabled={pending !== null}>

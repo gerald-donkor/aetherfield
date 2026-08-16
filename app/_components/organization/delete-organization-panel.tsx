@@ -146,7 +146,7 @@ function DeleteForm({
       <FormStatus
         message={message}
         as="div"
-        role="alert"
+
         className="mt-6 max-w-[560px]"
       />
 

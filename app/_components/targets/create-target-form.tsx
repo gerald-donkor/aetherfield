@@ -18,7 +18,6 @@ import { Button, Field, SelectField } from "../primitives";
 import { FormStatus } from "../form-status";
 import { NETWORK_ERROR } from "../../../lib/validation/result";
 
-
 export function CreateTargetForm({
   suggestions,
   calculationsComplete,
@@ -98,7 +97,7 @@ export function CreateTargetForm({
 
   return (
     <form ref={formRef} onSubmit={onSubmit} noValidate>
-      <FormStatus message={message} as="div" role="alert" className="mb-6" />
+      <FormStatus message={message} as="div" className="mb-6" />
 
       <div className="grid max-w-[900px] gap-6 md:grid-cols-2">
         <Field

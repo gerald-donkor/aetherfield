@@ -151,7 +151,7 @@ export function FactorPicker({
         />
       ) : null}
 
-      <FormStatus message={message} as="div" role="alert" className="mt-6">
+      <FormStatus message={message} as="div" className="mt-6">
         {message}
         {errors.factorId ? (
           <span className="mt-2 block">{errors.factorId}</span>

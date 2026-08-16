@@ -29,11 +29,49 @@ import { useEffect, useRef, type ReactNode } from "react";
  *
  * ---
  *
- * **Every prop exists because a real site varies on it**, and nothing was
- * normalised: the rendered markup is byte-identical at all 28 adopted sites.
- * `role` in particular is passed through untouched — nine sites are `alert` and
- * nineteen are `status`, and reconciling them is prompt 108's decision to make
- * on its own rather than buried in a twenty-four-file mechanical diff.
+ * **Every prop exists because a real site varies on it.** Nothing was normalised
+ * when this component was extracted at prompt 105; the rendered markup was
+ * byte-identical at all 28 adopted sites, `role` included.
+ *
+ * ---
+ *
+ * ## The `role` rule — settled at prompt 108
+ *
+ * **A result region that takes focus is `status`. `alert` is for a message that
+ * appears without focus moving to it.** That is the rule; this is where it is
+ * written, so the next component inherits it instead of guessing.
+ *
+ * Before prompt 108 there was no rule: nine regions were `alert` and thirty were
+ * `status` for the same success-or-error result, **and not one of the nine
+ * carried a comment or docblock giving a reason.**
+ *
+ * The reason for the rule is that `alert` and this component's focus effect
+ * work against each other. Read from the sources, not recalled (§12 rule 2), on
+ * 16 Aug 2026:
+ *
+ * - W3C ARIA Authoring Practices, *Alert Pattern* — "Because alerts are intended
+ *   to provide important and potentially time-sensitive information without
+ *   interfering with the user's ability to continue working, **it is crucial
+ *   they do not affect keyboard focus.**"
+ * - MDN, *alert role* — `role="alert"` is `aria-live="assertive"` plus
+ *   `aria-atomic="true"`; "As they don't receive focus, focus does not need to
+ *   be managed and no user interaction should be required."
+ *
+ * Every region here **does** move focus, deliberately, because that is what
+ * AGENTS.md §8.2 rule 5 asks for. So the assertive interruption buys nothing —
+ * focus is what guarantees the user reaches the message — while the element is
+ * announced on insertion *and* again when focus lands on it.
+ *
+ * `sign-out-button.tsx` keeps `role="alert"` and is right to: it is conditionally
+ * mounted and moves no focus, which is exactly the case the rule reserves
+ * `alert` for. The deliverable was a stated rule, not uniformity.
+ *
+ * **One implication, stated because it is a real change and not an addition.**
+ * `role="alert"` implies `aria-atomic="true"`; `status` does not. Dropping to
+ * `status` therefore drops that implicit atomicity, so a partial update to the
+ * region announces only the changed part. These regions replace their whole text
+ * at once, so there is no partial update to mis-announce. No `aria-atomic` was
+ * added — that would be its own judgement.
  *
  * **Nothing here logs.** Several of these messages are formatted from user input
  * (AGENTS.md 8.3 rule 2).

@@ -1086,6 +1086,109 @@ No select was restyled, no other primitive changed (`describedBy` dedupe is
 prompt 110, the `secondary`/`compact` collapse is prompt 111), no other missing
 primitive was added, and neither `SiteFooter` nor `SiteNav` was touched.
 
+### The `role` rule for a result region, prompt 108
+
+Prompt 105 put every result region behind `FormStatus` and deliberately passed
+each site's `role` through untouched. This is the accessibility decision it kept
+out of that diff.
+
+Nine regions were `role="alert"` and thirty were `role="status"`, for the same
+success-or-error result after a Server Action returns. **Not one of the nine
+carried a comment or docblock giving a reason** — each was read individually
+looking for one, and that absence is the useful finding: the split was accident,
+not policy.
+
+#### The rule
+
+> **A result region that takes focus is `status`. `alert` is for a message that
+> appears without focus moving to it.**
+
+It is written in `FormStatus`'s docblock rather than here, so the next component
+inherits it instead of guessing; this section records why it says what it says.
+
+#### Why, from the sources rather than from memory
+
+Read on **16 Aug 2026** (§12 rule 2):
+
+- **W3C ARIA Authoring Practices, Alert Pattern**
+  (`https://www.w3.org/WAI/ARIA/apg/patterns/alert/`) — "Because alerts are
+  intended to provide important and potentially time-sensitive information
+  without interfering with the user's ability to continue working, **it is
+  crucial they do not affect keyboard focus.**"
+- **MDN, `alert` role** — `role="alert"` is equivalent to `aria-live="assertive"`
+  plus `aria-atomic="true"`, and "As they don't receive focus, focus does not
+  need to be managed and no user interaction should be required."
+
+Every one of these regions **does** move focus into itself, deliberately, because
+that is what AGENTS.md §8.2 rule 5 asks for. So `alert` and the focus effect
+work against each other: the assertive interruption buys nothing, since focus is
+what guarantees the user reaches the message, while the element is announced on
+insertion *and* again when focus lands on it.
+
+#### The double announcement is a **judgement**, not a measurement
+
+This is the part the prompt insisted must not be asserted from theory dressed up
+as observation. **No screen reader was run.** There is none available in this
+environment, and none of the automated checks can observe an announcement. The
+claim that the nine announced twice is **reasoned from the two sources above**,
+and it is recorded as a judgement (§12 rules 3 and 4). What *is* established by
+reading the code is the precondition: all nine combined an assertive live region
+with a focus move, which both sources say not to do.
+
+#### Disposition — eight changed, one kept
+
+| site | disposition |
+| --- | --- |
+| `activity/factor-picker.tsx` | → `status` |
+| `activity/mapping-form.tsx` | → `status` |
+| `activity/upload-form.tsx` | → `status` |
+| `organization/create-organization-form.tsx` | → `status` |
+| `organization/delete-organization-panel.tsx` | → `status` |
+| `organization/invitation-response.tsx` | → `status` |
+| `organization/members-panel.tsx` | → `status` |
+| `targets/create-target-form.tsx` | → `status` |
+| **`auth/sign-out-button.tsx`** | **keeps `alert`** |
+
+`sign-out-button` is conditionally mounted and **moves no focus**, which is
+exactly the case the rule reserves `alert` for. It stays, and it is the evidence
+the deliverable was a stated rule rather than uniformity for its own sake.
+
+All eight changed sites are `FormStatus` calls, so each is a one-prop deletion.
+
+#### One implication, stated because it is a change rather than an addition
+
+`role="alert"` implies `aria-atomic="true"`; `status` does not. Dropping to
+`status` therefore drops that implicit atomicity, so a partial update to the
+region would announce only the changed part. **These regions replace their whole
+text at once**, so there is no partial update to mis-announce. No `aria-atomic`
+was added — the prompt's non-goals forbid it, and it would be its own judgement.
+
+#### Prerender
+
+`none — no route changes`, and confirmed rather than assumed: every consumer of
+the eight changed components is a `ƒ` dynamic authenticated route
+(`/targets`, `/activity`, `/activity/[importId]`, `/activity/mappings`,
+`/account`, `/invitation/[id]`). No prerendered page renders one, so no HTML
+diff was needed.
+
+#### Verification, prompt 108
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 802 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, 3.6 min — Chromium and Firefox |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine |
+
+**`npm run test:e2e` did not complete as a matrix**, and that is stated rather
+than reported as a pass.
+
+No message text, timing or focus effect changed; no live-region attribute was
+added; the class string and the component's shape are as prompt 105 left them;
+and no `role` outside a form-result region was touched.
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.

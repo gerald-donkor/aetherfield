@@ -100,7 +100,7 @@ export function ActivityMappingForm({
 
   return (
     <form onSubmit={onSubmit} noValidate className={className}>
-      <FormStatus message={message} as="div" role="alert" className="mb-6" />
+      <FormStatus message={message} as="div" className="mb-6" />
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {ACTIVITY_FIELDS.map((field) => {
