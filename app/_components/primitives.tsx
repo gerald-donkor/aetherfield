@@ -314,6 +314,95 @@ export function Field({
 }
 
 /**
+ * The select's control classes.
+ *
+ * **Not composed from {@link CONTROL_BASE}, and the difference is deliberate**
+ * — prompt 107. The two strings differ in exactly two ways: `CONTROL_BASE`
+ * carries `placeholder:text-muted/70`, which a `<select>` has no placeholder to
+ * apply it to, and it emits `border-border` *after* the focus and disabled
+ * utilities where the four hand-written select constants put it immediately
+ * after `border`. Composing would therefore change the rendered `class`
+ * attribute at all fourteen selects, and reproducing what ships was the
+ * acceptance condition. Folding the two together is a real follow-up, but it is
+ * a restyle and belongs in its own prompt.
+ */
+const SELECT_CONTROL =
+  "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
+
+/**
+ * `Field` for a fixed set of choices — the primitive this module was missing.
+ *
+ * **It had already been invented twice** before prompt 107 added it here:
+ * byte-identical local `SelectField` components in
+ * `activity/factor-import-form.tsx` and `activity/custom-factor-form.tsx`, plus
+ * the same class string declared as a `SELECT_CLASS` constant in four files and
+ * applied to fourteen `<select>` elements. That is the shape §7.5's "no second
+ * design system" rule exists to prevent, and a primitive missing from this
+ * module is how it starts.
+ *
+ * **Both local copies rendered the label and the error but wired no
+ * `aria-describedby`**, which is the erosion the missing primitive caused: a
+ * hand-rolled control gets whatever its author remembered. This one shares
+ * {@link FieldFrame} with `Field` and `TextareaField` and does the same
+ * `describedBy` composition they do, so the hint and the error are announced
+ * with the control rather than sitting near it.
+ *
+ * The `<option>`s are `children`; everything else matches `Field` prop for prop.
+ *
+ * **One deliberate difference from `Field`, and it is a preservation rather
+ * than a choice about what is best.** `Field` swaps `border-border` for
+ * `border-ink` when it has an error; this does **not**, because none of the
+ * fourteen selects it replaced did, and prompt 107 made reproducing their
+ * rendered `class` attribute exactly the acceptance condition. Adding the
+ * border would have been a restyle of fourteen controls smuggled into a
+ * refactor. Bringing the two into line is worth doing and is its own prompt —
+ * it is a visual change and should be reviewed as one.
+ */
+export function SelectField({
+  label,
+  hint,
+  error,
+  className = "",
+  id,
+  children,
+  ...props
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  id: string;
+  children: ReactNode;
+} & Omit<ComponentProps<"select">, "id" | "children">) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [props["aria-describedby"], hintId, errorId]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <FieldFrame
+      label={label}
+      hint={hint}
+      error={error}
+      className={className}
+      id={id}
+      hintId={hintId}
+      errorId={errorId}
+    >
+      <select
+        {...props}
+        id={id}
+        className={SELECT_CONTROL}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+      >
+        {children}
+      </select>
+    </FieldFrame>
+  );
+}
+
+/**
  * `Field` for prose. Same label / hint / error chrome and the same control
  * classes — the element is the only difference, which is why it shares
  * `FieldFrame` and `CONTROL_BASE` rather than restating either. Added by build

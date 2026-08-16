@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import { importCustomFactors } from "../../activity/actions";
 import { FACTOR_IMPORT_HEADER } from "../../../lib/domain/factor-import";
@@ -17,7 +17,13 @@ import {
   type FactorImportField,
   type FactorImportRowError,
 } from "../../../lib/validation/emissions";
-import { Button, Field, FileField, TextareaField } from "../primitives";
+import {
+  Button,
+  Field,
+  FileField,
+  SelectField,
+  TextareaField,
+} from "../primitives";
 import { FormStatus } from "../form-status";
 import { NETWORK_ERROR } from "../../../lib/validation/result";
 
@@ -63,8 +69,6 @@ const GAS_BASIS_LABEL = {
    factor surfaces are the only dynamic ones. */
 const FIELD_ALIGN = "md:flex md:flex-col md:justify-end";
 
-const SELECT_CLASS =
-  "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;
@@ -173,21 +177,16 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
             id="factor-import-set"
             label="Factor set"
             error={errors["set.setId"]}
+            value={setChoice}
+            onChange={(event) => setSetChoice(event.target.value)}
+            disabled={pending}
           >
-            <select
-              id="factor-import-set"
-              value={setChoice}
-              onChange={(event) => setSetChoice(event.target.value)}
-              disabled={pending}
-              className={SELECT_CLASS}
-            >
-              {sets.map((set) => (
-                <option key={set.id} value={set.id}>
-                  {set.source} — {set.datasetVersion}
-                </option>
-              ))}
-              <option value="new">Create a new set</option>
-            </select>
+            {sets.map((set) => (
+              <option key={set.id} value={set.id}>
+                {set.source} — {set.datasetVersion}
+              </option>
+            ))}
+            <option value="new">Create a new set</option>
           </SelectField>
 
           {chosenSet ? (
@@ -348,35 +347,5 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
         </Button>
       </form>
     </>
-  );
-}
-
-function SelectField({
-  id,
-  label,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <label
-        htmlFor={id}
-        className="block font-sans text-nav font-bold text-ink"
-      >
-        {label}
-      </label>
-      {children}
-      {error ? (
-        <p className="mt-2 flex items-start gap-2 font-mono text-[12px] leading-[18px] text-ink">
-          <span aria-hidden className="mt-[7px] size-1 shrink-0 bg-ink" />
-          {error}
-        </p>
-      ) : null}
-    </div>
   );
 }

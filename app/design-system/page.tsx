@@ -15,6 +15,7 @@ import {
   Meta,
   MetaPair,
   Placeholder,
+  SelectField,
 } from "../_components/primitives";
 
 const SWATCHES = [
@@ -245,6 +246,31 @@ export default function Page() {
             defaultValue="not-an-email"
             error="Enter a valid email address."
           />
+          {/* `SelectField` sits in this grid rather than in a section of its
+              own, because the pairing is the lesson: the same label, hint and
+              error chrome around a different control. Added by prompt 107,
+              which found the primitive missing and fourteen selects hand-rolled
+              in its absence — a primitive that is not in this exhibit is one the
+              next session concludes does not exist. */}
+          <SelectField
+            id="select-example"
+            label="Target coverage"
+            hint="Biogenic and outside-of-scopes figures are always separate."
+            defaultValue="scope_1_2"
+          >
+            <option value="scope_1_2">Scope 1 and 2</option>
+            <option value="scope_1_2_3">Scope 1, 2 and 3</option>
+          </SelectField>
+          <SelectField
+            id="select-error-example"
+            label="Target coverage"
+            defaultValue=""
+            error="Choose the scopes this target covers."
+          >
+            <option value="">Select coverage</option>
+            <option value="scope_1_2">Scope 1 and 2</option>
+            <option value="scope_1_2_3">Scope 1, 2 and 3</option>
+          </SelectField>
         </div>
       </Section>
 

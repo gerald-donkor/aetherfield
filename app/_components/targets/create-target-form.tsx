@@ -14,12 +14,10 @@ import {
   type TargetCoverage,
   type TargetFieldErrors,
 } from "../../../lib/validation/targets";
-import { Button, Field } from "../primitives";
+import { Button, Field, SelectField } from "../primitives";
 import { FormStatus } from "../form-status";
 import { NETWORK_ERROR } from "../../../lib/validation/result";
 
-const SELECT_CLASS =
-  "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
 
 export function CreateTargetForm({
   suggestions,
@@ -113,34 +111,24 @@ export function CreateTargetForm({
           required
         />
 
-        <div>
-          <label
-            htmlFor="target-coverage"
-            className="block font-sans text-nav font-bold text-ink"
-          >
-            Coverage
-          </label>
-          <p className="mt-1.5 font-serif text-[16px] text-muted">
-            Biogenic and outside-of-scopes figures are always separate.
-          </p>
-          <select
-            id="target-coverage"
-            name="coverage"
-            value={coverage}
-            onChange={(event) => {
-              setCoverage(event.target.value as TargetCoverage);
-              setBaselineSource("stated");
-            }}
-            disabled={pending}
-            className={SELECT_CLASS}
-          >
-            {TARGET_COVERAGES.map((value) => (
-              <option key={value} value={value}>
-                {TARGET_COVERAGE_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="target-coverage"
+          label="Coverage"
+          hint="Biogenic and outside-of-scopes figures are always separate."
+          name="coverage"
+          value={coverage}
+          onChange={(event) => {
+            setCoverage(event.target.value as TargetCoverage);
+            setBaselineSource("stated");
+          }}
+          disabled={pending}
+        >
+          {TARGET_COVERAGES.map((value) => (
+            <option key={value} value={value}>
+              {TARGET_COVERAGE_LABELS[value]}
+            </option>
+          ))}
+        </SelectField>
 
         <Field
           id="target-base-year"

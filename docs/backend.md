@@ -974,6 +974,118 @@ No other user-facing string changed, the per-path action constants
 that reads a secret or imports `lib/db/` was added to `lib/validation/`, and the
 `catch` blocks still log nothing (§8.3 rule 2).
 
+### `SelectField` — the primitive that was missing, prompt 107
+
+`primitives.tsx` exported `Field`, `TextareaField` and `FileField` but **no
+`SelectField`**, so every `<select>` in the app was hand-styled. The survey
+found more than the review had:
+
+- **14 `<select>` elements** across four files;
+- **4 `SELECT_CLASS` constants**, one per file, and **all four byte-identical**
+  — checked, no drift, so nothing was flattened that someone had decided;
+- **2 local `SelectField` components**, in `activity/factor-import-form.tsx` and
+  `activity/custom-factor-form.tsx`, themselves **byte-identical to each other**.
+
+That last one is the finding worth keeping: the primitive had already been
+invented twice locally. That is the shape §7.5's "no second design system" rule
+exists to prevent, and a primitive missing from this module is how it starts.
+
+**And both local copies wired no `aria-describedby`.** They rendered the label
+and the error and left them unconnected to the control — exactly the erosion a
+missing primitive causes, since a hand-rolled control gets whatever its author
+remembered. The shared one shares `FieldFrame` with `Field` and `TextareaField`
+and does the same `describedBy` composition, so a hint and an error are now
+announced *with* the select. Confirmed in the built HTML:
+`aria-describedby="select-example-hint"` on the resting exhibit and
+`aria-invalid="true" aria-describedby="select-error-example-error"` on the error
+one.
+
+#### Two deliberate differences from `Field`, both preservations
+
+The prompt asked for a primitive with "no gratuitous difference" from `Field`
+**and** for byte-identical rendering at every adopted site. Those pull apart in
+two places, and the acceptance condition won both times — a restyle of fourteen
+controls smuggled into a refactor is the worse outcome. Both are recorded as
+their own follow-up, because each is a visual change that should be reviewed as
+one:
+
+1. **`SELECT_CONTROL` is not composed from `CONTROL_BASE`.** The two differ by
+   `placeholder:text-muted/70` — which a `<select>` has no placeholder to apply
+   it to — and by where `border-border` falls in the string. Composing would
+   change the rendered `class` attribute at all fourteen selects.
+2. **An errored select does not gain `border-ink`,** where `Field` swaps its
+   border. None of the fourteen did, so neither does this.
+
+#### Adopted, and not
+
+**Twelve of fourteen adopted**: one in `targets/create-target-form.tsx`, one in
+`activity/factor-import-form.tsx`, ten in `activity/custom-factor-form.tsx`. The
+four `SELECT_CLASS` constants and both local `SelectField` definitions are gone.
+
+**Two left alone, in `activity/mapping-form.tsx`.** Their labels are not
+strings — each carries a JSX "Optional" badge inside the `<label>`:
+
+```tsx
+{ACTIVITY_FIELD_LABELS[field]}
+{optional ? <span className="…">Optional</span> : null}
+```
+
+`FieldFrame` types `label` as `string`, and widening it would change a primitive
+`Field` and `TextareaField` also use, which this prompt's non-goals forbid. They
+are also the only two selects that append `border-ink` on error, and the only
+ones whose class string carries a **stray trailing space** when there is no
+error (`${SELECT_CLASS} ${error ? "border-ink" : ""}`). Left exactly as they
+are; a `ReactNode` label on `FieldFrame` is the follow-up that would let them in.
+
+#### `/design-system` gains the exhibit, as approved up front
+
+The prompt put this in scope and approved it explicitly, because **a primitive
+absent from the exhibit is how the next session concludes there isn't one and
+hand-rolls a fifteenth select**.
+
+It sits in the existing `Components · Fields` grid rather than in a section of
+its own — the pairing beside `Field` is the lesson: the same label, hint and
+error chrome around a different control. Two cells, resting and error, using the
+product's own vocabulary (target coverage) rather than lorem options. No new
+section device, no restyle, nothing else on the page touched.
+
+#### Prerender diff
+
+Two clean worktrees, the recipe from prompt 105. **`design-system.html` is the
+only page whose markup changes — +1,590 bytes, the two new cells.** The other
+twenty prerendered files, including all eight other marketing routes and every
+`article/` and `job-listing/` page, are **markup-identical**, differing only in
+the inline RSC flight payload. Every route keeps its mode.
+
+The rendered class attribute was read back out of the built HTML and is
+byte-identical to the four constants it replaced:
+
+```
+class="mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans
+text-[16px] text-ink outline-none transition-[border-color,box-shadow]
+focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)]
+disabled:cursor-not-allowed disabled:bg-surface"
+```
+
+#### Verification, prompt 107
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 779 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| prerender diff | only `/design-system` differs, by the approved exhibit; 20 of 21 markup-identical |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, 3.8 min — Chromium and Firefox |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine |
+
+**`npm run test:e2e` therefore did not complete as a matrix**, and that is stated
+rather than reported as a pass.
+
+No select was restyled, no other primitive changed (`describedBy` dedupe is
+prompt 110, the `secondary`/`compact` collapse is prompt 111), no other missing
+primitive was added, and neither `SiteFooter` nor `SiteNav` was touched.
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.

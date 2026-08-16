@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import { createCustomFactor } from "../../activity/actions";
 import {
@@ -21,7 +21,7 @@ import {
   type EmissionScope,
   type GhgGas,
 } from "../../../lib/validation/emissions";
-import { Button, Field, TextareaField } from "../primitives";
+import { Button, Field, SelectField, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
 import { NETWORK_ERROR } from "../../../lib/validation/result";
 
@@ -83,8 +83,6 @@ const GAS_BASIS_LABEL = {
    routes (AGENTS.md 8.1) and `/activity/factors` is the only dynamic one. */
 const FIELD_ALIGN = "md:flex md:flex-col md:justify-end";
 
-const SELECT_CLASS =
-  "mt-2 h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
 
 function fieldErrorsFromIssues(error: {
   issues: { path: PropertyKey[]; message: string }[];
@@ -232,21 +230,16 @@ export function CustomFactorForm({
             id="custom-factor-set"
             label="Factor set"
             error={errors["set.setId"]}
+            value={setChoice}
+            onChange={(event) => setSetChoice(event.target.value)}
+            disabled={pending}
           >
-            <select
-              id="custom-factor-set"
-              value={setChoice}
-              onChange={(event) => setSetChoice(event.target.value)}
-              disabled={pending}
-              className={SELECT_CLASS}
-            >
-              {sets.map((set) => (
-                <option key={set.id} value={set.id}>
-                  {set.source} — {set.datasetVersion}
-                </option>
-              ))}
-              <option value="new">Create a new set</option>
-            </select>
+            {sets.map((set) => (
+              <option key={set.id} value={set.id}>
+                {set.source} — {set.datasetVersion}
+              </option>
+            ))}
+            <option value="new">Create a new set</option>
           </SelectField>
 
           {/* 38px = the control's own top (16px label + 8px gap) plus half the
@@ -446,22 +439,17 @@ export function CustomFactorForm({
             id="custom-factor-scope"
             label="Scope"
             error={errors["factor.scope"]}
+            value={scope}
+            onChange={(event) =>
+            setScope(event.target.value as EmissionScope)
+            }
+            disabled={pending}
           >
-            <select
-              id="custom-factor-scope"
-              value={scope}
-              onChange={(event) =>
-                setScope(event.target.value as EmissionScope)
-              }
-              disabled={pending}
-              className={SELECT_CLASS}
-            >
-              {EMISSION_SCOPES.map((value) => (
-                <option key={value} value={value}>
-                  {EMISSION_SCOPE_LABELS[value]}
-                </option>
-              ))}
-            </select>
+            {EMISSION_SCOPES.map((value) => (
+              <option key={value} value={value}>
+                {EMISSION_SCOPE_LABELS[value]}
+              </option>
+            ))}
           </SelectField>
 
           {scope === "scope_3" ? (
@@ -469,20 +457,15 @@ export function CustomFactorForm({
               id="custom-factor-scope-3"
               label="Scope 3 category"
               error={errors["factor.scope3Category"]}
+              name="scope3Category"
+              disabled={pending}
             >
-              <select
-                id="custom-factor-scope-3"
-                name="scope3Category"
-                disabled={pending}
-                className={SELECT_CLASS}
-              >
-                <option value="">Choose category</option>
-                {SCOPE3_CATEGORIES.map((value) => (
-                  <option key={value} value={value}>
-                    {SCOPE3_CATEGORY_LABELS[value]}
-                  </option>
-                ))}
-              </select>
+              <option value="">Choose category</option>
+              {SCOPE3_CATEGORIES.map((value) => (
+                <option key={value} value={value}>
+                  {SCOPE3_CATEGORY_LABELS[value]}
+                </option>
+              ))}
             </SelectField>
           ) : null}
 
@@ -491,20 +474,15 @@ export function CustomFactorForm({
               id="custom-factor-scope-2"
               label="Scope 2 method"
               error={errors["factor.scope2Method"]}
+              name="scope2Method"
+              disabled={pending}
             >
-              <select
-                id="custom-factor-scope-2"
-                name="scope2Method"
-                disabled={pending}
-                className={SELECT_CLASS}
-              >
-                <option value="">Choose method</option>
-                {SCOPE2_METHODS.map((value) => (
-                  <option key={value} value={value}>
-                    {SCOPE2_METHOD_LABELS[value]}
-                  </option>
-                ))}
-              </select>
+              <option value="">Choose method</option>
+              {SCOPE2_METHODS.map((value) => (
+                <option key={value} value={value}>
+                  {SCOPE2_METHOD_LABELS[value]}
+                </option>
+              ))}
             </SelectField>
           ) : null}
 
@@ -512,41 +490,31 @@ export function CustomFactorForm({
             id="custom-factor-activity-unit"
             label="Activity unit"
             error={errors["factor.activityUnit"]}
+            name="activityUnit"
+            disabled={pending}
+            defaultValue=""
           >
-            <select
-              id="custom-factor-activity-unit"
-              name="activityUnit"
-              disabled={pending}
-              className={SELECT_CLASS}
-              defaultValue=""
-            >
-              <option value="">Choose unit</option>
-              {FACTOR_ACTIVITY_UNITS.map((value) => (
-                <option key={value} value={value}>
-                  {optionLabel(value)}
-                </option>
-              ))}
-            </select>
+            <option value="">Choose unit</option>
+            {FACTOR_ACTIVITY_UNITS.map((value) => (
+              <option key={value} value={value}>
+                {optionLabel(value)}
+              </option>
+            ))}
           </SelectField>
 
           <SelectField
             id="custom-factor-gas"
             label="Gas"
             error={errors["factor.gas"]}
+            value={gas}
+            onChange={(event) => setGas(event.target.value as GhgGas)}
+            disabled={pending}
           >
-            <select
-              id="custom-factor-gas"
-              value={gas}
-              onChange={(event) => setGas(event.target.value as GhgGas)}
-              disabled={pending}
-              className={SELECT_CLASS}
-            >
-              {GHG_GASES.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+            {GHG_GASES.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
           </SelectField>
 
           {gas === "ch4" ? (
@@ -554,20 +522,15 @@ export function CustomFactorForm({
               id="custom-factor-ch4"
               label="Methane variant"
               error={errors["factor.ch4Variant"]}
+              name="ch4Variant"
+              disabled={pending}
             >
-              <select
-                id="custom-factor-ch4"
-                name="ch4Variant"
-                disabled={pending}
-                className={SELECT_CLASS}
-              >
-                <option value="">Choose variant</option>
-                {CH4_VARIANTS.map((value) => (
-                  <option key={value} value={value}>
-                    {optionLabel(value)}
-                  </option>
-                ))}
-              </select>
+              <option value="">Choose variant</option>
+              {CH4_VARIANTS.map((value) => (
+                <option key={value} value={value}>
+                  {optionLabel(value)}
+                </option>
+              ))}
             </SelectField>
           ) : null}
 
@@ -575,21 +538,16 @@ export function CustomFactorForm({
             id="custom-factor-gwp"
             label="GWP set"
             error={errors["factor.gwpSet"]}
+            name="gwpSet"
+            disabled={pending}
+            defaultValue=""
           >
-            <select
-              id="custom-factor-gwp"
-              name="gwpSet"
-              disabled={pending}
-              className={SELECT_CLASS}
-              defaultValue=""
-            >
-              <option value="">Choose set</option>
-              {GWP_SETS.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+            <option value="">Choose set</option>
+            {GWP_SETS.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
           </SelectField>
 
           <Field
@@ -623,24 +581,19 @@ export function CustomFactorForm({
               id="custom-factor-supersedes"
               label="Restates a published row"
               error={errors["factor.supersedes"]}
+              value={supersedes}
+              onChange={(event) => setSupersedes(event.target.value)}
+              disabled={pending}
             >
-              <select
-                id="custom-factor-supersedes"
-                value={supersedes}
-                onChange={(event) => setSupersedes(event.target.value)}
-                disabled={pending}
-                className={SELECT_CLASS}
-              >
-                <option value="">Restates nothing</option>
-                {supersedableRows.map((row) => (
-                  <option
-                    key={`${row.source}${PAIR_SEPARATOR}${row.sourceRowId}`}
-                    value={`${row.source}${PAIR_SEPARATOR}${row.sourceRowId}`}
-                  >
-                    {row.source} {row.datasetVersion} — {row.label}
-                  </option>
-                ))}
-              </select>
+              <option value="">Restates nothing</option>
+              {supersedableRows.map((row) => (
+                <option
+                  key={`${row.source}${PAIR_SEPARATOR}${row.sourceRowId}`}
+                  value={`${row.source}${PAIR_SEPARATOR}${row.sourceRowId}`}
+                >
+                  {row.source} {row.datasetVersion} — {row.label}
+                </option>
+              ))}
             </SelectField>
             <p className="font-serif text-[15px] leading-6 text-muted md:mt-[38px]">
               A restating row is used wherever that published row is mapped, for
@@ -656,35 +609,5 @@ export function CustomFactorForm({
         </Button>
       </form>
     </>
-  );
-}
-
-function SelectField({
-  id,
-  label,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <label
-        htmlFor={id}
-        className="block font-sans text-nav font-bold text-ink"
-      >
-        {label}
-      </label>
-      {children}
-      {error ? (
-        <p className="mt-2 flex items-start gap-2 font-mono text-[12px] leading-[18px] text-ink">
-          <span aria-hidden className="mt-[7px] size-1 shrink-0 bg-ink" />
-          {error}
-        </p>
-      ) : null}
-    </div>
   );
 }
