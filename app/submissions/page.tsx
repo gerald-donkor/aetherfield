@@ -195,7 +195,7 @@ function ApplicationList({
               <Detail label="Message">{row.message ?? "No message supplied."}</Detail>
               <Detail label="Received">{DATE_FORMAT.format(row.createdAt)} UTC</Detail>
             </dl>
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col items-start gap-5">
               <ButtonLink
                 href={`/submissions/applications/${row.id}/cv`}
                 size="compact"

@@ -2901,6 +2901,71 @@ not to use it as evidence until committed. Keyboard focus/announcement behavior
 is implemented from the existing focused-status pattern but is therefore not
 claimed as browser-driven verification in this prompt.
 
+### The application row's two controls — fault and fix, prompt 88
+
+Reported from production with a screenshot on 15 Aug 2026, fixed on 16 Aug 2026.
+
+**The fault.** In the applications view only, the CV download link and the
+Remove control rendered flush against each other on desktop — two black blocks
+of different widths touching at the edge, reading as one mis-shapen object
+rather than two controls.
+
+**The cause.** `app/submissions/page.tsx`'s `ApplicationList` is the one list
+that does not place `RemoveSubmissionControl` directly in the row grid; it nests
+the control and the CV link inside a wrapper that occupies a single grid cell.
+That wrapper was a bare `<div className="min-w-0">` — no direction, no gap, no
+alignment — so the two were block-level siblings.
+`RemoveSubmissionControl` supplies its own separation and **only as a grid
+child**: `app/submissions/action-controls.tsx` opens with
+`mt-4 border-t border-border pt-4 lg:mt-0 lg:border-0 lg:pt-0`, which separates
+it from content above on mobile and, on desktop, deliberately drops that margin
+because it is expected to occupy its own grid column. Nested one level down it
+kept `lg:mt-0` and lost the column, so desktop had no separation at all. That is
+why the fault was desktop-only and appeared in this list alone. `LeadList` and
+`SubscriberList` place the control directly in the grid, which is the
+arrangement its classes were written for, and are untouched.
+
+**The fix** is one wrapper, in `ApplicationList` only:
+
+```
+- <div className="min-w-0">
++ <div className="flex min-w-0 flex-col items-start gap-5">
+```
+
+`items-start` stops either control stretching to the other's width — they have
+different jobs and equal width would imply equal weight. `min-w-0` is kept: it
+is what lets the CV link's `max-w-full wrap-anywhere` wrap a long filename
+instead of forcing the grid column wider. `RemoveSubmissionControl`'s own
+classes are unchanged, because they remain correct for its two other call sites.
+
+**`gap-5` is a judgement, not a measurement.** There is no comp for this route.
+The value is not new: it is the row grid's own `gap-5`, the other of the two
+candidates on this row being the control's `mt-4`. `gap-5` was chosen because it
+makes the wrapper's children stack at exactly the rhythm the surrounding grid
+cells stack at, so on mobile the applications row now spaces identically to
+`LeadList` and `SubscriberList` — grid `gap-5`, then the control's own
+`mt-4`/border/`pt-4` — while on desktop it supplies the separation the control
+contributes none of.
+
+**Verification, prompt 88.** `npm run lint` and `npm run typecheck` exited 0
+with no diagnostics; `npm test` reported **283 passed (283)** across 12 files.
+`npm run build` exited 0, compiled in **14.0 seconds**, generated **32** static
+pages and emitted the route table unchanged — `/`, `/about`, `/careers`,
+`/journal`, `/design-system` `○ Static`, `/article/[slug]` (6) and
+`/job-listing/[slug]` (3) `● SSG`, `/submissions` still `ƒ Dynamic`. Prerender
+impact is therefore **none**, verified rather than assumed.
+
+**The browser confirmation was not obtained, and no geometry is claimed as
+measured.** A throwaway Playwright spec against the committed admin fixture was
+written and run; `auth.setup.ts` could not reach Neon from that process
+(`ENETUNREACH` on the IPv6 address, `ETIMEDOUT` on `…:5432`), so the fixture
+never provisioned and no screenshot was taken. The spec was deleted rather than
+committed. The layout claims above are read from the Tailwind v4 utilities —
+`flex-col` is `flex-direction: column`, `items-start` is `align-items:
+flex-start`, `gap-5` is `calc(var(--spacing) * 5)` — and are **reasoned, not
+observed in a browser**. Note also that a screenshot of this row shows a real
+applicant's name, address and CV filename and must never be committed (§8.3).
+
 ## Step 8 — organisations and multi-tenancy
 
 Implemented by prompt 56 on 9 Aug 2026. This opens phase two with Better Auth's
