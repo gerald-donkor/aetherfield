@@ -189,7 +189,9 @@ Scripts that currently exist in `package.json`:
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
 - `npm run typecheck` — `tsc --noEmit`
-- `npm test` — Vitest, **scoped to `lib/domain/`** and nothing else. Added by
+- `npm test` — Vitest, **scoped to `lib/domain/`** and nothing else (the script
+  is a bare `vitest run`; the scope is `include: ["lib/domain/**/*.test.ts"]` in
+  `vitest.config.mts`, not in `package.json`). Added by
   build step 10, because AGENTS.md §6.2 requires the pure domain layer to be
   independently testable and that step put an exact-decimal engine there whose
   output lands in disclosures. A test that needs a database, a browser or a mock

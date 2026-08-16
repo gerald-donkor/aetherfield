@@ -12191,3 +12191,30 @@ are server-only.
 `npm run build` reproduced the expected route table (`/`, `/about`, `/careers`,
 `/design-system`, `/journal` `○ Static`; `/article/[slug]` and
 `/job-listing/[slug]` `● SSG`). No source file was touched.
+
+---
+
+## §2's `npm test` bullet now says where the scope lives, prompt 96
+
+The bullet's effect was right and its location was unstated: `package.json`'s
+script is a bare `"test": "vitest run"`, so a reader looking there for "scoped to
+`lib/domain/`" finds nothing. The scope is one line of `vitest.config.mts`:
+
+```ts
+include: ["lib/domain/**/*.test.ts"]
+```
+
+§2 now says so in a parenthetical, and every other clause of the bullet is
+untouched — why the domain layer is independently testable (§6.2), and that a
+test needing a database, a browser or a mock belongs in `npm run test:e2e`.
+
+**The file is `vitest.config.mts`, not `.ts`.** The review that raised this
+finding cited the wrong extension, and repeating it would have relocated the
+same defect (§12 rule 1).
+
+**The "and nothing else" clause is still true, checked rather than assumed:**
+`find . -name "*.test.ts" -not -path "./node_modules/*"` returns twelve files,
+all under `lib/domain/` — `alerts`, `dashboard`, `decimal`, `defra`, `emissions`,
+`factor-import`, `factor-match`, `factor-selection`, `gwp`, `reports`,
+`retention`, `targets`. `npm test`: **12 test files, 283 tests, all passing.**
+No script, alias or scope was changed.
