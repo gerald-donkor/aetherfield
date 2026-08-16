@@ -11992,7 +11992,7 @@ Neon cleanup, which is the documented manual path and the one to use — waiting
 on retention is the slow path. The project is back to 2 branches of 10, and the
 throwaway git branch was deleted locally and on `origin`.
 
-### An open item this created — a protection bypass token
+### A protection bypass token this created — removed
 
 **`vercel curl` silently generated one.** Before the run the project's
 `protectionBypass` was `null`; afterwards it held one token,
@@ -12000,18 +12000,23 @@ throwaway git branch was deleted locally and on `origin`.
 credential that bypasses deployment protection on **every** deployment, and it
 was created as a side effect of measurement, not by intent.
 
-**It has not been removed.** `vercel api -X PATCH /v9/projects/aetherfield` was
-blocked by this environment's permission classifier, and it is recorded here
-rather than quietly left (§12 rule 9). Remove it at **Project → Settings →
-Deployment Protection → Protection Bypass for Automation**. Anyone using
-`vercel curl` against a protected deployment should expect to clean this up
-afterwards.
+**Removed by the user in the dashboard, and read back:**
+`vercel api /v9/projects/aetherfield` now reports `protectionBypass` as null,
+with `ssoProtection` still `all_except_custom_domains` — so protection itself is
+intact and only the bypass is gone. Clearing it from the CLI was not possible
+here: `vercel api -X PATCH` was blocked by this environment's permission
+classifier, so it went through **Project → Settings → Deployment Protection →
+Protection Bypass for Automation**.
 
-### `NEON_API_KEY` was NOT revoked, and it cannot be revoked with itself
+**The standing lesson:** `vercel curl` against a protected deployment mints one
+of these without asking. Expect to clean it up afterwards, and check
+`protectionBypass` rather than assuming.
 
-Prompt 90 was the work waiting on the key prompt 89 minted, so the plan was to
-revoke it here as the last step. **That did not happen, and the reason is a
-property of the key rather than an oversight:**
+### `NEON_API_KEY` is revoked — and it could not be revoked with itself
+
+Prompt 90 was the work waiting on the key prompt 89 minted, so it was revoked
+here as the last step. **The CLI path the plan assumed does not exist**, and
+that is a property of the key rather than an oversight:
 
 ```
 $ neonctl api-keys list
@@ -12021,19 +12026,18 @@ ERROR: not allowed for organization API keys
 The resource was provisioned `--no-claim`, so it lives in the Vercel-managed
 `Vercel: <team>` Neon organization and the key is an **organization** key.
 `neonctl` permits neither `api-keys list` nor `api-keys revoke` for that kind,
-so the key cannot revoke itself and no CLI path exists.
+so the key cannot revoke itself and there is no CLI path at all.
 
-**It is still live in `.env.local`.** To revoke it, open the Neon Console
-through `vercel integration open neon neon-purple-candle` (Vercel SSO) and
-delete it under the organization's API-key settings, then drop the line from
-`.env.local`. Until then it is a working credential for the whole Neon
-organization sitting in an untracked local file — which is where prompt 89 put
-it, and `.env.example` already records that it is local-tooling-only and never
-set on Vercel.
+It was revoked instead in the Neon Console, reached through
+`vercel integration open neon neon-purple-candle` (Vercel SSO), and the line was
+dropped from `.env.local` — confirmed by `grep`: zero `NEON_API_KEY` lines
+remain, and `RESEND_API_KEY` is still present, which is the one that matters
+because `.env.local` holds its only Development copy.
 
-**Recorded as open rather than reported as done** (§12 rules 3 and 9). Anything
-predicting a revocation at this step is corrected by this paragraph (§12
-rule 8).
+**Minting a replacement is therefore a console operation, not a CLI one.** Any
+later session needing `neonctl` — branch work, a preview-branch prune — starts
+by creating a new key there, and should revoke it again when finished rather
+than leaving an organization-wide credential in an untracked file.
 
 ### Verification
 
