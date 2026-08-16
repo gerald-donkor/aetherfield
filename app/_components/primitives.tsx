@@ -218,6 +218,32 @@ export function ButtonLink({
 const CONTROL_BASE =
   "w-full border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-muted/70 focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)] disabled:cursor-not-allowed disabled:bg-surface";
 
+/**
+ * The `aria-describedby` id list, composed once — prompt 110.
+ *
+ * All four field primitives wire the same accessibility contract, and all four
+ * had their own copy of this expression. `SelectField` became the fourth the
+ * moment prompt 107 landed, which is exactly how a copied expression spreads.
+ *
+ * **Order is preserved, never sorted or deduped, and that is not fussiness.**
+ * `aria-describedby` is an ID reference list, and the accessible description is
+ * the referenced elements' text concatenated **in the order the IDREFs appear**
+ * — W3C *Accessible Name and Description Computation 1.2*, §4.3.2, read
+ * 16 Aug 2026 (§12 rule 2). So the argument order at each call site is the order
+ * a screen reader reads the descriptions in. `FileField` passing
+ * `hint, status, error` is a decision: the status describes the file the user
+ * just chose and belongs before the error.
+ *
+ * **It returns `undefined` rather than an empty string**, and the call sites no
+ * longer need `|| undefined`. That choice is made here and applied uniformly:
+ * `aria-describedby=""` is not the same as omitting the attribute, and putting
+ * the guard in the helper is what stops a fifth primitive forgetting it.
+ * Absent ids are dropped by the same `filter(Boolean)` the four copies used.
+ */
+function describedBy(...ids: (string | undefined)[]): string | undefined {
+  return ids.filter(Boolean).join(" ") || undefined;
+}
+
 /** Label, optional guidance and the explicit error state — the chrome both
     field variants wrap their control in. Not exported: it is an implementation
     detail of the two below, not a third thing to reach for. */
@@ -286,9 +312,6 @@ export function Field({
 } & Omit<ComponentProps<"input">, "id">) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
-  const describedBy = [props["aria-describedby"], hintId, errorId]
-    .filter(Boolean)
-    .join(" ");
 
   return (
     <FieldFrame
@@ -307,7 +330,7 @@ export function Field({
           error ? "border-ink" : "border-border"
         }`}
         aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy || undefined}
+        aria-describedby={describedBy(props["aria-describedby"], hintId, errorId)}
       />
     </FieldFrame>
   );
@@ -375,9 +398,6 @@ export function SelectField({
 } & Omit<ComponentProps<"select">, "id" | "children">) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
-  const describedBy = [props["aria-describedby"], hintId, errorId]
-    .filter(Boolean)
-    .join(" ");
 
   return (
     <FieldFrame
@@ -394,7 +414,7 @@ export function SelectField({
         id={id}
         className={SELECT_CONTROL}
         aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy || undefined}
+        aria-describedby={describedBy(props["aria-describedby"], hintId, errorId)}
       >
         {children}
       </select>
@@ -424,9 +444,6 @@ export function TextareaField({
 } & Omit<ComponentProps<"textarea">, "id">) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
-  const describedBy = [props["aria-describedby"], hintId, errorId]
-    .filter(Boolean)
-    .join(" ");
 
   return (
     <FieldFrame
@@ -446,7 +463,7 @@ export function TextareaField({
           error ? "border-ink" : "border-border"
         }`}
         aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy || undefined}
+        aria-describedby={describedBy(props["aria-describedby"], hintId, errorId)}
       />
     </FieldFrame>
   );
@@ -511,9 +528,6 @@ export function FileField({
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const statusId = `${id}-status`;
-  const describedBy = [props["aria-describedby"], hintId, statusId, errorId]
-    .filter(Boolean)
-    .join(" ");
 
   return (
     <FieldFrame
@@ -533,7 +547,15 @@ export function FileField({
           error ? "border-ink" : "border-border"
         } file:mr-4 file:h-[38px] file:cursor-pointer file:border-0 file:bg-ink file:px-3 file:font-mono file:text-button file:font-medium file:text-white file:transition-colors hover:file:text-muted disabled:file:cursor-not-allowed`}
         aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy || undefined}
+        /* `statusId` before `errorId`, deliberately: the status names the file
+           just chosen and is read before any complaint about it. Argument order
+           is read order — see {@link describedBy}. */
+        aria-describedby={describedBy(
+          props["aria-describedby"],
+          hintId,
+          statusId,
+          errorId,
+        )}
       />
       <div id={statusId} role="status" aria-live="polite" className="sr-only">
         {fileName

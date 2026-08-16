@@ -1280,6 +1280,107 @@ No `revalidatePath` call was added or removed in any action, no redirect on
 success was introduced (§10 rule 5), and no leaf was restructured beyond
 deleting the call and its now-unused `useRouter`.
 
+### `describedBy`, composed once, prompt 110
+
+`primitives.tsx` composed the `aria-describedby` id list **four** times — in
+`Field`, `TextareaField`, `FileField` and, from prompt 107, `SelectField`. Three
+were byte-identical; `FileField`'s inserts `statusId` before `errorId`.
+
+`SelectField` becoming the fourth copy the moment it landed is the point: a
+copied expression spreads at exactly the rate new components are added, and this
+is the accessibility wiring that makes the field primitives correct.
+
+One helper now, called four times:
+
+```ts
+function describedBy(...ids: (string | undefined)[]): string | undefined {
+  return ids.filter(Boolean).join(" ") || undefined;
+}
+```
+
+#### Order is semantic, and that was checked rather than assumed
+
+**W3C, *Accessible Name and Description Computation 1.2*, §4.3.2**, read
+**16 Aug 2026** (§12 rule 2): the description is computed from "all nodes
+referenced by `aria-describedby` on the element, concatenated, and separated by
+a space character", following "the sequence in which the IDREFs are listed".
+
+So argument order is read order. The helper is variadic and **never sorts,
+dedupes or reorders**. `FileField` passing `hint, status, error` is a decision
+worth preserving: the status names the file just chosen and belongs before any
+complaint about it, and the call site now carries a comment saying so.
+
+#### `undefined`, decided once
+
+The helper returns `undefined` rather than an empty string, and the four call
+sites dropped their `|| undefined`. `aria-describedby=""` is not the same as
+omitting the attribute; putting the guard inside the helper is what stops a
+fifth primitive forgetting it. That was a free choice between two placements and
+it is applied uniformly.
+
+#### The combination check
+
+The acceptance condition was byte-identical output for **every** combination, not
+a spot check. All sixteen were enumerated — caller-supplied id present/absent ×
+hint present/absent × error present/absent, for the three-id primitives, and the
+same again with `status` always present for `FileField`:
+
+```
+16 combinations checked, 0 differences
+```
+
+with, for example, `caller f-hint f-status f-error` and `f-hint f-status` coming
+out in exactly that order.
+
+#### The prerender diff — 21 of 21 byte-identical
+
+Not "markup identical" this time but **fully byte-identical**, which is the
+specific evidence this prompt wanted for `/design-system`.
+
+Getting there needed one more normalisation than the earlier prompts used, now
+recorded as `docs/automation.md`'s trap 9: **the build id appears inside the
+inline flight payload** as a bare `"b":"<buildId>"` field, not only in
+`/_next/static/<buildId>/` paths. Before normalising it, all 21 pages reported
+as differing at identical byte length — trap 2's signature — and the whole
+difference was those twenty-one characters. With the id read from each side's
+`.next/BUILD_ID` and replaced out:
+
+```
+21 of 21 byte-identical after normalising build id + chunk names
+```
+
+The rendered attributes on `/design-system` read back as
+`aria-describedby="field-example-hint"`,
+`aria-describedby="field-error-example-error"`,
+`aria-describedby="select-example-hint"` and
+`aria-describedby="select-error-example-error"`.
+
+#### Where this is recorded, and why here
+
+The prompt asked for the `docs/` file that owns `primitives.tsx`, named from
+AGENTS.md's index rather than assumed. **The index has no row for
+`primitives.tsx`** — `docs/site-affordances.md` owns the pointer cursor and
+`docs/chrome.md` owns `SiteFooter`/`SiteNav`, neither of which is this file. The
+module's previous additions (`TextareaField`, `FileField`, `SelectField`) are all
+recorded in this file, so it stays the owner and no index row was added for a
+file that does not need creating.
+
+#### Verification, prompt 110
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 731 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| combination enumeration | 16 of 16 identical |
+| prerender diff | **21 of 21 byte-identical** |
+
+No id value or generation changed, no ids were reordered, the hint and error
+rendering and every label wiring are untouched, no fifth primitive was added,
+`secondary`/`compact` was left for prompt 111, and neither `SiteFooter` nor
+`SiteNav` was touched.
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.

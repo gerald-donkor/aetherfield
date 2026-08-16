@@ -1138,6 +1138,36 @@ worktree, so neither side has them and the CSS chunk is comparable without the
 stashing dance.
 
 
+## The build id appears in the flight payload too, not just in asset paths
+
+Trap 9, found at prompt 110. The recipe above normalises the build id where it
+appears in `/_next/static/<buildId>/…`. It also appears **inside the inline RSC
+flight payload**, as a bare `\"b\":\"<buildId>\"` field:
+
+```
+…\"d\":\"$undefined\",\"b\":\"dUu4Jt6GE-SZwj3s1W10l\"…
+```
+
+Miss it and every page reports as differing — at **identical byte length**,
+which is trap 2's signature again. At prompt 110 this made a change with
+provably no rendered effect look like it had changed all 21 pages, and the
+markup-only comparison reported "flight-payload-only" for pages where the
+*whole* difference was those twenty-one characters.
+
+Read the id from each side's `.next/BUILD_ID` and `str.replace` it out of the
+HTML before comparing, rather than pattern-matching it — it is an arbitrary
+base64-ish string and a regex for it will also eat chunk names:
+
+```python
+bid = {s: (WD/s/".next/BUILD_ID").read_text().strip() for s in ("base","head")}
+html = html.replace(bid[side], "BUILDID")
+```
+
+With that in place, a genuinely output-neutral change comes back as **21 of 21
+byte-identical**, which is a much stronger result than "markup identical" and is
+worth the two extra lines.
+
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.
