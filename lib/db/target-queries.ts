@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "./client";
+import { tenantVisible } from "./tenant-scope";
 import { countUncalculatedRecords, listEmissions } from "./emission-queries";
 import { emissionTarget } from "./schema";
 import { parseDecimal } from "../domain/decimal";
@@ -103,12 +104,11 @@ const COLUMNS = {
 } as const;
 
 /** The tenant predicate every read below shares, written once so no query can
-    be added that filters on half of it. */
+    be added that filters on half of it. The predicate itself is
+    {@link tenantVisible} from prompt 100 — **not** `visibleFactorScope`, which
+    is the published-reference-data exception and admits a null organisation. */
 function visible(organizationId: string) {
-  return and(
-    eq(emissionTarget.organizationId, organizationId),
-    isNull(emissionTarget.deletedAt),
-  );
+  return tenantVisible(emissionTarget, organizationId);
 }
 
 export const createTarget = withSafeQueryErrors(

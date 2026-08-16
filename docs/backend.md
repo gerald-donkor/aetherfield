@@ -9792,6 +9792,105 @@ change does not touch, not as a pass.
 No migration, no schema change, no change to `visibleFactorScope`'s definition,
 and `emission-queries.ts` was not split.
 
+### One strict tenant predicate, and the fourth helper that is not one, prompt 100
+
+Three query modules each declared their own private `visible()`, identical but
+for the table:
+
+| module | predicate |
+| --- | --- |
+| `report-queries.ts` | `and(eq(report.organizationId, id), isNull(report.deletedAt))` |
+| `target-queries.ts` | the same over `emissionTarget` |
+| `alert-queries.ts` | the same over `targetAlert` |
+
+`lib/db/tenant-scope.ts` now holds it once as `tenantVisible(table, id)`, and
+each module keeps a one-line `visible()` naming its own table — which keeps every
+call site below it unchanged.
+
+#### The correction that matters more than the dedupe
+
+**The review that raised this counted four copies, including
+`visibleFactorScope` in `emission-queries.ts`. It is not a fourth copy — it is a
+different predicate**, and merging it is the failure this record exists to
+prevent:
+
+|  | `tenantVisible` | `visibleFactorScope` |
+| --- | --- | --- |
+| operator | `and` | `or` |
+| organisation reference | `not null` | **nullable** — `null` is published data |
+| soft delete | `isNull(deletedAt)` | none |
+| rule | §9.2 rule 6, the default | §9.2 rule 6's sanctioned exception |
+
+Folding the factor predicate into the strict one would **admit `NULL`
+organisation ids into three tenant-scoped reads — a cross-tenant read**. Folding
+the strict one into the factor predicate would make published factors invisible
+to every tenant. A later session "finishing the job" is the risk; both helpers'
+docblocks now cross-reference each other and say so.
+
+#### The generic keeps them apart mechanically, not just by docblock
+
+`tenantVisible` is constrained to a table whose `organizationId` is typed
+`notNull: true` and which carries a `deletedAt`:
+
+```ts
+export type TenantScopedTable = {
+  organizationId: PgColumn<ColumnBaseConfig<"string", string> & { notNull: true }>;
+  deletedAt: PgColumn;
+};
+```
+
+**That `notNull` is expressible was verified, not assumed** (§12 rule 2): it is a
+member of `ColumnBaseConfig` in `node_modules/drizzle-orm/column.d.ts`. Passing
+`emissionFactor` — whose organisation reference is deliberately nullable — is a
+**compile error**. Confirmed with a throwaway type test carrying
+`@ts-expect-error` on the `emissionFactor` call: `tsc --noEmit` was clean, which
+means the three tables were accepted *and* the fourth was rejected (an
+unsatisfied `@ts-expect-error` is itself an error).
+
+**The residual risk, stated rather than pretended away:** the constraint checks
+the two columns' *shape*, not that they mean what their names say. Any future
+table with a `notNull` `organizationId` and a `deletedAt` is accepted — which is
+the intent, and is why the docblock carries the boundary in prose as well.
+
+#### The SQL is unchanged, and that was checked
+
+The acceptance condition was identical emitted SQL, so it was measured rather
+than argued. Each table's predicate was built both ways and rendered through
+`PgDialect.sqlToQuery`:
+
+```
+report          IDENTICAL
+emissionTarget  IDENTICAL
+targetAlert     IDENTICAL
+("report"."organization_id" = $1 and "report"."deleted_at" is null)
+```
+
+(The check script ran under `tsx --conditions=react-server`, because
+`tenant-scope.ts` carries `import "server-only"` and that package throws outside
+a server condition. It was deleted afterwards; nothing was added to the repo.)
+
+#### One inline copy deliberately left
+
+`alert-queries.ts`'s `listTargetsForAlertsImpl` inlines the same two predicates
+over `emissionTarget` rather than calling a helper. It is a fourth *site* on a
+table the prompt's three deletions do not cover, and the prompt's non-goal —
+"do not extend the helper to any fourth table in this change" — is explicit.
+Noted here so it is a known remainder rather than something missed.
+
+### Verification, prompt 100
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **283 passed**, 860 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| emitted SQL | identical at all three sites, above |
+
+No migration, no schema change, `visibleFactorScope` untouched, no query module
+split, and `withSafeQueryErrors` usage unchanged (prompt 101's ground).
+
+
 ---
 
 ## Finite retention for phase-one personal data, prompt 81

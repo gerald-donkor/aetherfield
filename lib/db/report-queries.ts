@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "./client";
+import { tenantVisible } from "./tenant-scope";
 import { report } from "./schema";
 import type { ReportNarrativeStatus } from "../validation/reports";
 import { withSafeQueryErrors } from "./query-error";
@@ -87,12 +88,11 @@ const FULL_COLUMNS = {
 } as const;
 
 /** The tenant predicate every statement below shares, written once so no query
-    can be added that filters on half of it. */
+    can be added that filters on half of it. The predicate itself moved to
+    {@link tenantVisible} at prompt 100, where three identical copies met; this
+    line names the table and nothing else. */
 function visible(organizationId: string) {
-  return and(
-    eq(report.organizationId, organizationId),
-    isNull(report.deletedAt),
-  );
+  return tenantVisible(report, organizationId);
 }
 
 export const createReport = withSafeQueryErrors(

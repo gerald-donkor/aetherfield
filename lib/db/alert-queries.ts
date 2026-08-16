@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
 
 import { member, organization, user } from "./auth-schema";
 import { getDb } from "./client";
+import { tenantVisible } from "./tenant-scope";
 import { alertPreference, emissionTarget, targetAlert } from "./schema";
 import { toDecimalString, toFixed } from "../domain/decimal";
 import type { RaisedAlert } from "../domain/alerts";
@@ -37,12 +38,10 @@ import { withSafeQueryErrors } from "./query-error";
  * customer's commercial data by 5.3).
  */
 
-/** The tenant predicate every alert read below shares. */
+/** The tenant predicate every alert read below shares — {@link tenantVisible}
+    from prompt 100, which is where the three identical copies of it now live. */
 function visible(organizationId: string) {
-  return and(
-    eq(targetAlert.organizationId, organizationId),
-    isNull(targetAlert.deletedAt),
-  );
+  return tenantVisible(targetAlert, organizationId);
 }
 
 /** An alert is open until it resolves. `raised` and `notified` are both open —
