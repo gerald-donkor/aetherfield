@@ -140,6 +140,32 @@ export function Seal({ className = "" }: { className?: string }) {
 
 type ButtonSize = "primary" | "secondary" | "compact";
 
+/**
+ * **`secondary` and `compact` resolve to the same string, and that is
+ * deliberate** — confirmed at prompt 111 rather than collapsed.
+ *
+ * They are two *roles*, not two appearances. `/design-system` has recorded the
+ * distinction since the exhibit was built: "Secondary — 159×38, no bullet" and
+ * "Compact — 100×38, **used inside cards**". The two comps' widths genuinely
+ * differ; the class string does not set a width, because width here is
+ * content-driven, so today the two strings coincide.
+ *
+ * The call sites cluster cleanly along that line, which is the evidence the
+ * distinction is real:
+ *
+ * - **`compact`** — an action *inside* something: a card (`cards.tsx`'s "View
+ *   role", `careers/sections.tsx`, `job/sections.tsx`) or a dense row
+ *   (`submissions/`, `members-panel`'s per-row controls, `report-controls`,
+ *   `recalculate-control`, `alert-preference-control`).
+ * - **`secondary`** — a standalone page-level action beside a primary one
+ *   (`home/case-study.tsx`, `home/journal.tsx`, the retire and mapping
+ *   controls).
+ *
+ * **So do not collapse them.** Merging the names would delete the distinction
+ * and make the next change to one silently move the other; the duplicated
+ * literal is the smaller problem. `git log` carries no reasoning — both names
+ * predate the history — so this comment is where the intent now lives.
+ */
 const buttonSizing: Record<ButtonSize, string> = {
   primary: "h-[46px] pl-4 pr-5 gap-2.5",
   secondary: "h-[38px] px-3",

@@ -1381,6 +1381,61 @@ rendering and every label wiring are untouched, no fifth primitive was added,
 `secondary`/`compact` was left for prompt 111, and neither `SiteFooter` nor
 `SiteNav` was touched.
 
+### `secondary` and `compact` are two roles, not two appearances, prompt 111
+
+`buttonSizing` maps both to `h-[38px] px-3` — the same string, twice. The
+prompt's substance was to determine whether that is an accident before touching
+it, and **it is not**: the distinction is real, so this is Path A, a comment and
+nothing else.
+
+#### The evidence
+
+**`/design-system` has recorded the intent since the exhibit was built.** Its
+two notes read "Secondary — 159×38, no bullet" and "Compact — 100×38, **used
+inside cards**". The comp widths genuinely differ; the class string sets no
+width because width here is content-driven, which is the whole reason the two
+strings coincide today.
+
+**The call sites cluster cleanly along that line**, enumerated in full:
+
+| name | sites | what they have in common |
+| --- | --- | --- |
+| `compact` | `cards.tsx` ×2 ("View role"), `careers/sections.tsx`, `job/sections.tsx`, `submissions/page.tsx`, `submissions/action-controls.tsx` ×3, `members-panel.tsx` ×5, `report-controls.tsx`, `recalculate-control.tsx`, `alert-preference-control.tsx`, `import-controls.tsx`, the exhibit | an action **inside** something — a card, or a dense row |
+| `secondary` | `home/case-study.tsx`, `home/journal.tsx`, `targets/retire-target-control.tsx`, `activity/retire-factor-button.tsx` ×2, `activity/retire-set-button.tsx` ×2, `activity/mapping-form.tsx`, `activity/factor-picker.tsx`, `activity/mappings/page.tsx`, `organization/invitation-response.tsx`, `import-controls.tsx`, the exhibit | a standalone **page-level** action, usually beside a primary one |
+
+`import-controls.tsx` uses both, and correctly: its page-level confirm is
+`secondary`, its in-row control is `compact`.
+
+**`git log` carries no reasoning** — both names predate the available history
+(`git log -S'compact: "h-[38px]'` returns only the initial commit), which is why
+§12 rule 5's "the repository is the authority" produced no answer here and the
+call sites and the exhibit had to. This comment is now where the intent lives.
+
+#### Why not collapse
+
+Merging the names would delete a real distinction and make the next change to
+one silently move the other — two call sets that look identical today diverging
+without anyone choosing it. That is the actual risk, and it is larger than a
+duplicated literal. Path B was available and was **not** taken; ambiguity would
+have resolved the same way, since deleting a name is irreversible in a way a
+comment is not.
+
+#### Verification, prompt 111
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 751 ms |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+| prerender diff | **21 of 21 byte-identical** |
+
+The change is a comment, so byte-identical output is the expected result rather
+than a hard-won one — but it was the prompt's stated pass condition and it was
+run rather than assumed. No height, padding, gap or any part of `BUTTON_BASE`
+changed; no size was added or removed; the exhibit is untouched; and neither
+`SiteFooter` nor `SiteNav` was touched.
+
 ### `Field` gained a textarea, and it was extended rather than forked
 
 `app/_components/primitives.tsx` now exports `TextareaField` alongside `Field`.
