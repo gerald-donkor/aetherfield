@@ -1360,3 +1360,38 @@ are judged, the audio's shape, the blurred `::backdrop`, and the §7.5 deviation
 that authorises GSAP there at all — is in **`docs/backend.md`, step 2**. This
 line exists so a session reading the motion record does not conclude the site
 has no dialog motion.
+
+---
+
+## `register.ts`'s SplitText docblock — corrected (prompt 92)
+
+The docblock in `app/_components/motion/register.ts` claimed SplitText was
+"used by exactly one module — `home/hero-text.tsx`" and that it "reaches no
+other route because nothing outside `home/` imports this file". **Both clauses
+were false**, and the second was the misleading one: the footer's split blur-in
+above (`motion/footer-reveal.tsx`) reaches every route through `SiteFooter`.
+
+The importer list, verified by
+`grep -rn SplitText app/_components/motion/ app/_components/home/`, is three
+modules and has been for some time:
+
+| module | what it splits | recorded in |
+| --- | --- | --- |
+| `app/_components/home/hero-text.tsx` | the homepage hero, words then lines | `docs/motion-homepage.md`, "The hero's split blur-in" |
+| `app/_components/motion/careers-masthead-text.tsx` | the `/careers` masthead, per character | this file, "`/careers`' reveals" |
+| `app/_components/motion/footer-reveal.tsx` | the footer's lines | this file, "The footer's split blur-in" |
+
+The comment also conflated two different rules. The bundle rule governs
+`home/sections.tsx` and the other `home/` client modules; `register.ts` sits in
+`motion/`, which the AGENTS.md front matter names as *the shared surface*, so
+cross-area imports of it are correct rather than a leak. The replacement says
+so explicitly, keeps the still-true SplitText-is-free-as-of-3.13 note (checked
+against `node_modules/gsap` 3.15.0, whose public package ships
+`SplitText.js`), and points at `docs/motion-homepage.md` rather than AGENTS.md,
+where that rationale now lives.
+
+**Impact: none.** Comments are stripped from build output; `npm run build`
+reproduced the expected route table (`/`, `/about`, `/careers`,
+`/design-system`, `/journal` `○ Static`; `/article/[slug]` and
+`/job-listing/[slug]` `● SSG`), and lint, typecheck and the 283 `lib/domain/`
+tests all passed.

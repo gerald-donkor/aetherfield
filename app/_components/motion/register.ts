@@ -10,10 +10,14 @@ import { SplitText } from "gsap/SplitText";
    so there is exactly one registration site and no ordering question.
 
    `SplitText` is free as of GSAP 3.13 and is bundled in the public package; it
-   needs no auth token and no registry override. It is used by exactly one
-   module — `home/hero-text.tsx` — and it reaches no other route because
-   nothing outside `home/` imports this file. See AGENTS.md, "The hero's split
-   blur-in", for why the earlier decision not to use it was overridden. */
+   needs no auth token and no registry override. Three modules use it today —
+   `home/hero-text.tsx`, `motion/careers-masthead-text.tsx` and
+   `motion/footer-reveal.tsx` — and the last of those ships on every route via
+   `SiteFooter`. That is correct: `motion/` is the shared client surface, so
+   being imported across areas is what it is for. The bundle rule governs
+   `home/sections.tsx` and the other `home/` client modules, not this file. See
+   `docs/motion-homepage.md`, "The hero's split blur-in", for why the earlier
+   decision not to use SplitText was overridden. */
 gsap.registerPlugin(useGSAP, ScrollTrigger, SplitText);
 
 export { gsap, ScrollTrigger, SplitText, useGSAP };
