@@ -8031,6 +8031,41 @@ retrigger the job, and the sweep is idempotent. It exists so a leaked secret
 cannot drive repeated full-tenant sweeps, not to shape traffic. The `/account`
 preference limiter is **30 per hour keyed by user id**, also a judgement.
 
+#### The bucket now covers three jobs, and the docblock said one (prompt 94)
+
+`CRON_SWEEP_LIMIT`'s docblock in `lib/rate-limit/index.ts` still read "there is
+exactly one job" after two purge crons joined the bucket. Three routes call
+`checkCronSweepLimit()` today —
+`app/api/cron/recalculate/route.ts`, `app/api/cron/purge-organizations/route.ts`
+and `app/api/cron/purge-submissions/route.ts` — and the latter two already
+document the sharing at their own call sites, so only the limiter's own comment
+was stale (§12 rule 8).
+
+**The limit, the window and the key are unchanged: 6, `"1 h"`, constant key
+`cron-sweep`, sliding window.** What changed is the reasoning printed above
+them, which no longer computes as written: six an hour across three daily jobs
+is **two runs per job per hour** — arithmetic on the two constants, not a new
+measurement. That is still ample, and the docblock now says why in those terms.
+
+The "not keyed by IP" conclusion is kept and is stronger under sharing: a
+constant key is exactly what makes one bucket cover all three, and it bounds the
+endpoint class rather than a caller.
+
+**Hobby scheduling precision re-verified rather than recalled** (§12 rule 7):
+`https://vercel.com/docs/cron-jobs/usage-and-pricing`, fetched 16 Aug 2026,
+gives Hobby **"Per-hour (±59 min)"** with a minimum interval of once per day —
+so the figure the comment carried was right.
+
+**Idempotency verified rather than repeated** (the prompt required stopping and
+reporting if any sweep were not idempotent — **checked and clean, nothing to
+report**):
+
+| sweep | why a second run in the same hour is safe |
+| --- | --- |
+| `recalculate` | `recalculateOrganization` → `replaceEmissions` keeps delete-then-insert semantics bounded by the covered record set, so a re-run reproduces the same figures; `raiseAlerts` inserts with `onConflictDoNothing` against the partial unique index and returns only rows actually written, so no duplicate alert and no duplicate email; `resolveAlerts` carries the status predicate in its `WHERE`, so a second pass matches no row |
+| `purge-organizations` | `listDueDeletions` selects `pending` requests past their grace window; a purged request is stamped by `markDeletionPurged` and drops out of the next run's list. A failure leaves the row `pending` on purpose, so tomorrow retries |
+| `purge-submissions` | every deletion is by a due-date predicate, so a completed run leaves nothing due. The blob-before-row ordering makes the one partial-failure case self-healing: the row stays, still due, and `deleteCvStrict` on an already-deleted object resolves it |
+
 The response body is counts only — organisations, recalculated, alerts raised,
 alerts resolved, alerts notified, failures. **No tenant identifier, no
 organisation name, no address and no figure** (§8.3 rule 2 as extended to

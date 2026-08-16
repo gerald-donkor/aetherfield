@@ -356,22 +356,38 @@ const INVITATION_RESPONSE_LIMIT = 30;
 const INVITATION_RESPONSE_WINDOW = "1 h" as const;
 
 /**
- * The nightly recalculation sweep, **keyed on a constant rather than an
- * identifier** — build step 14.
+ * The nightly sweeps, **keyed on a constant rather than an identifier** — build
+ * step 14, and shared since.
  *
  * **A judgement, not a measurement** (AGENTS.md 12 rule 4), like every window
- * above it. There is nothing to fit against: the endpoint has one legitimate
+ * above it. There is nothing to fit against: each endpoint has one legitimate
  * caller and it calls once a day.
  *
- * **Not keyed by IP.** Vercel's scheduler calls from its own infrastructure and
- * there is exactly one job, so an IP key would bound nothing an id key does not.
- * The constant key bounds the *endpoint*, which is the thing that can be abused:
- * a leaked `CRON_SECRET` driving repeated full-tenant sweeps.
+ * **Three jobs share this one bucket, on purpose** — `/api/cron/recalculate`,
+ * `/api/cron/purge-organizations` and `/api/cron/purge-submissions`, and two of
+ * the three say so at their own call site. This docblock used to claim "there
+ * is exactly one job"; the repository disagreed, so the repository is the fact
+ * (12 rule 8).
  *
- * **Six an hour against a once-daily schedule** is deliberately loose: the Hobby
- * plan's scheduling precision is ±59 minutes, a deploy can retrigger the job,
- * and the sweep is idempotent, so refusing a legitimate second run would cost
- * more than allowing it. This limiter is not traffic shaping.
+ * **Not keyed by IP**, and the sharing makes that conclusion stronger rather
+ * than weaker: Vercel's scheduler calls from its own infrastructure, so an IP
+ * key would bound nothing an id key does not, and a constant key is precisely
+ * what makes one bucket cover all three. What is bounded is the *endpoint
+ * class*, which is the thing that can be abused: a leaked `CRON_SECRET` driving
+ * repeated full-tenant sweeps.
+ *
+ * **Six an hour across three daily jobs is two runs per job per hour** —
+ * arithmetic on the two constants below, not a new measurement — and that is
+ * still deliberately loose. The Hobby plan's scheduling precision is per-hour,
+ * ±59 minutes (read from
+ * `https://vercel.com/docs/cron-jobs/usage-and-pricing`, not recalled), a
+ * deploy can retrigger a job, and **every one of the three sweeps is
+ * idempotent**: the recalculation replaces a bounded figure set and raises
+ * alerts through `onConflictDoNothing` against a partial unique index, and each
+ * purge selects by a due-date predicate that a completed run no longer
+ * satisfies. So a second run in the same hour costs work and changes nothing,
+ * and refusing a legitimate one would cost more than allowing it. This limiter
+ * is not traffic shaping.
  */
 const CRON_SWEEP_LIMIT = 6;
 const CRON_SWEEP_WINDOW = "1 h" as const;
