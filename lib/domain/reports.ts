@@ -720,6 +720,37 @@ export type NarrativeValidation =
  * invented number reaching a regulatory filing — is the single worst failure
  * this product can have (AGENTS.md 5.3).
  *
+ * ---
+ *
+ * ## What this does not check, and it is the important half
+ *
+ * **This is a membership test. It is not an attribution test** — prompt 104.
+ *
+ * It asks whether every numeric token in the prose is one of the figures this
+ * report computed. It never asks whether a figure is attached to the label it
+ * belongs to. A model can therefore write a number that is genuinely in the
+ * allowlist against the wrong label, and every token passes:
+ *
+ * > "Scope 3 emissions totalled 1,284.6 tCO2e"
+ *
+ * — where `1,284.6` is real, computed, and is the **scope 1** total. Fictional
+ * figures, but the hole is not. The same holds for the wrong period, the wrong
+ * site or the wrong target.
+ *
+ * **That is a deliberate limit and it is not fixable here.** Deciding whether
+ * prose attributes a number correctly is natural-language understanding; the
+ * label and the value travel together into the prompt through
+ * {@link reportSections}, but a token check only ever sees the value. Asking a
+ * model to check the model is forbidden by AGENTS.md 5.3 and is not a control in
+ * any case.
+ *
+ * **So this function is one of two controls, and the weaker one.** The other is
+ * human review: nothing auto-publishes, there is no `published` state, and both
+ * the report page and the export label the prose a draft. Do not read a passing
+ * validation as a correct narrative, and do not let the review step be removed
+ * on the strength of this check. `docs/backend.md`, step 13, carries the full
+ * statement.
+ *
  * The offending token is returned so the reporter is told what went wrong rather
  * than being handed a bare failure. It is a number the model produced, not
  * personal data, and it is shown to the tenant that owns the report and to
