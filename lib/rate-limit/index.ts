@@ -298,23 +298,6 @@ const ALERT_PREFERENCE_LIMIT = 30;
 const ALERT_PREFERENCE_WINDOW = "1 h" as const;
 
 /**
- * Inviting, cancelling an invitation and removing a member, **keyed by user
- * id** — prompt 63, closing what build step 8 deferred.
- *
- * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
- * as every window above it: the flow has never shipped, so there is nothing to
- * fit against.
- *
- * **A named limiter rather than a reuse**, for the reason each one above records
- * — but this one has a cost the others do not: an invite **sends mail to an
- * address the caller typed**, and that is the abusable surface. Nobody but an
- * owner of an existing organisation can reach it, and the address goes into a
- * row we own, so this is not an open relay; 20 an hour still bounds what one
- * compromised owner account can put into other people's inboxes, while leaving
- * an owner onboarding a team comfortable room — the three writes share the
- * bucket, and inviting a ten-person department costs ten of the twenty.
- */
-/**
  * Requesting and reversing an organisation's deletion, **keyed by user id** —
  * prompt 73.
  *
@@ -337,6 +320,23 @@ const ALERT_PREFERENCE_WINDOW = "1 h" as const;
 const ORGANIZATION_DELETION_LIMIT = 10;
 const ORGANIZATION_DELETION_WINDOW = "1 h" as const;
 
+/**
+ * Inviting, cancelling an invitation and removing a member, **keyed by user
+ * id** — prompt 63, closing what build step 8 deferred.
+ *
+ * **A judgement, not a measurement** (AGENTS.md 12 rule 4), on the same footing
+ * as every window above it: the flow has never shipped, so there is nothing to
+ * fit against.
+ *
+ * **A named limiter rather than a reuse**, for the reason each one above records
+ * — but this one has a cost the others do not: an invite **sends mail to an
+ * address the caller typed**, and that is the abusable surface. Nobody but an
+ * owner of an existing organisation can reach it, and the address goes into a
+ * row we own, so this is not an open relay; 20 an hour still bounds what one
+ * compromised owner account can put into other people's inboxes, while leaving
+ * an owner onboarding a team comfortable room — the three writes share the
+ * bucket, and inviting a ten-person department costs ten of the twenty.
+ */
 const INVITATION_WRITE_LIMIT = 20;
 const INVITATION_WRITE_WINDOW = "1 h" as const;
 

@@ -3523,6 +3523,20 @@ Neither is keyed by the invitation id: that is a capability in a link, and
 keying on it would let a probed link exhaust the limit for the person who
 legitimately holds it.
 
+**The invitation-write docblock was orphaned, and prompt 92's sweep found it
+(fixed by prompt 93).** In `lib/rate-limit/index.ts` the invite/cancel/remove
+docblock sat immediately above the *organisation-deletion* one (prompt 73), so
+the two docblocks stacked and `INVITATION_WRITE_LIMIT` / `_WINDOW` stood bare
+below `ORGANIZATION_DELETION_LIMIT` / `_WINDOW`. The file read as though the
+"sends mail to an address the caller typed" reasoning and the figure 20
+belonged to organisation deletion, which is 10 for unrelated reasons. **The
+comment was moved, not rewritten** — both texts were already correct about
+correct numbers, and rewording a justification would be a new judgement (§12
+rule 4). **Declaration order was left as it stands**: the deletion pair keeps
+its position and the invitation-write pair keeps its own, so nothing but the
+comment's placement changed. No limit or window moved, and `Ratelimit` reads
+these as literal values with no dependence on declaration order.
+
 ### Personal data
 
 - Stored: the **invited email address** in `invitation` (lowercased by
