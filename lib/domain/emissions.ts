@@ -256,6 +256,18 @@ export function convertQuantity(
   return { ok: true, value: fromUnits(quantity.units, quantity.scale - exponent) };
 }
 
+/**
+ * Restates a `kWh` or `MWh` energy quantity in `MWh`. Exact, and the one place
+ * that ×1000 ratio is written — `lib/domain/dashboard.ts`'s recorded-energy
+ * comparison calls this rather than repeating the exponent {@link
+ * UNIT_DIMENSIONS} already carries for `MWh`.
+ */
+export function energyToMWh(quantity: Decimal, unit: "kWh" | "MWh"): Decimal {
+  return unit === "MWh"
+    ? quantity
+    : fromUnits(quantity.units, quantity.scale + 3);
+}
+
 /* -------------------------------------------------------------------------- */
 /*  One record                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -827,6 +839,37 @@ export function totalsByPeriod(
 export function monthOf(activityDate: string): string {
   return activityDate.slice(0, 7);
 }
+
+/**
+ * A `"YYYY-MM"` month as a single ordinal, so two months compare and subtract
+ * as integers rather than as strings. {@link monthLabel} is its inverse.
+ *
+ * Shared by `lib/domain/dashboard.ts` and `lib/domain/targets.ts` — both walk
+ * fixed month windows, and a month-arithmetic bug fixed in one used to have to
+ * be remembered in the other.
+ */
+export function monthIndex(month: string): number {
+  const year = Number.parseInt(month.slice(0, 4), 10);
+  const monthNumber = Number.parseInt(month.slice(5, 7), 10);
+  return year * 12 + monthNumber - 1;
+}
+
+/** {@link monthIndex}'s inverse. */
+export function monthLabel(index: number): string {
+  const year = Math.floor(index / 12);
+  const monthNumber = (index % 12) + 1;
+  return `${year}-${String(monthNumber).padStart(2, "0")}`;
+}
+
+/**
+ * The one 12 behind "the latest 12 complete months" everywhere that phrase is
+ * true: `/dashboard`'s trailing window, a projection's minimum history, and a
+ * report's covered period. `lib/domain/dashboard.ts`, `targets.ts` and
+ * `reports.ts` each read this rather than restating `12`, so the number
+ * driving the windowing and the number printed in report prose cannot drift
+ * apart from each other.
+ */
+export const REPORTING_WINDOW_MONTHS = 12;
 
 /* -------------------------------------------------------------------------- */
 /*  Presentation                                                               */

@@ -56,6 +56,7 @@ import { toFixed, type Decimal } from "./decimal";
 import { dashboardWindows } from "./dashboard";
 import {
   ENGINE_VERSION,
+  REPORTING_WINDOW_MONTHS,
   toTonnes,
   totalsOf,
   type RecordEmission,
@@ -69,7 +70,7 @@ import { assessTarget } from "./targets";
 
 /** How many complete months a report covers. Used as a structural integer in
     the prose ("the latest 12 complete months"), so it is on the allowlist. */
-export const REPORT_WINDOW_MONTHS = 12;
+export const REPORT_WINDOW_MONTHS = REPORTING_WINDOW_MONTHS;
 
 /**
  * The latest 12 complete UTC calendar months, ending before the month

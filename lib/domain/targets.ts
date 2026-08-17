@@ -63,6 +63,9 @@ import {
   sum,
 } from "./decimal";
 import {
+  REPORTING_WINDOW_MONTHS,
+  monthIndex,
+  monthLabel,
   monthOf,
   totalsByPeriod,
   type RecordEmission,
@@ -248,7 +251,7 @@ export type ProjectionResult =
 
 /** The minimum history a projection is willing to stand on, and the point at
     which a second window exists to compare against. */
-const WINDOW_MONTHS = 12;
+const WINDOW_MONTHS = REPORTING_WINDOW_MONTHS;
 const TREND_MONTHS = WINDOW_MONTHS * 2;
 
 /**
@@ -521,28 +524,6 @@ export function assessTarget(input: TargetAssessmentInput): TargetAssessment {
 /* -------------------------------------------------------------------------- */
 /*  Calendar helpers                                                           */
 /* -------------------------------------------------------------------------- */
-
-/**
- * `"2026-07"` to a month count, so windows are arithmetic rather than date
- * handling. **No `Date`**: `activity_date` is `date(..., { mode: "string" })`
- * and parsing it into a `Date` would introduce a timezone where the data has
- * none — the reasoning `monthOf` already records.
- *
- * These are calendar indices and month counts, not figures, so `number` is the
- * right type for them: they are small integers, exact in a double, and none of
- * them is ever multiplied into a tCO2e value except through `BigInt`.
- */
-function monthIndex(month: string): number {
-  const year = Number.parseInt(month.slice(0, 4), 10);
-  const monthNumber = Number.parseInt(month.slice(5, 7), 10);
-  return year * 12 + (monthNumber - 1);
-}
-
-function monthLabel(index: number): string {
-  const year = Math.floor(index / 12);
-  const monthNumber = (index % 12) + 1;
-  return `${year}-${String(monthNumber).padStart(2, "0")}`;
-}
 
 /** `"2026-03-14"` to `"2026"`. The year counterpart of `monthOf`, for the
     period grouping a baseline suggestion needs. A string slice, for the same

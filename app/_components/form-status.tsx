@@ -90,11 +90,6 @@ export type FormStatusProps = {
   as?: "p" | "div";
   /** Passed through. See the note above on prompt 108. */
   role?: string;
-  /** Defaults to `assertive` for `alert` and `polite` for `status`, which is
-      what all 28 sites already did. No site needs to override it — `factor-picker`
-      switches both on one condition and the derivation already gives it the same
-      pair — but the prop stays for a site that one day does. */
-  live?: "polite" | "assertive" | "off";
   /** The site's own leading utilities — spacing and width. */
   className?: string;
   /** Added when a message is present. `block` at most sites; a few carry their
@@ -115,7 +110,6 @@ export function FormStatus({
   children,
   as = "p",
   role = "status",
-  live,
   className = "",
   shown = "block",
   pinned = false,
@@ -147,7 +141,9 @@ export function FormStatus({
   const shared = {
     id,
     role,
-    "aria-live": live ?? (role === "alert" ? "assertive" : "polite"),
+    "aria-live": (role === "alert" ? "assertive" : "polite") as
+      | "assertive"
+      | "polite",
     tabIndex: -1,
     className: classes,
   };

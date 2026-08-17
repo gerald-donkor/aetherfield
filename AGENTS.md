@@ -498,6 +498,7 @@ lib/
   storage/    blob upload and signed reads   server-only
   auth/       session, roles, org resolution server-only
   domain/     phase two, pure                no I/O
+  reporting/  step 13's one model call        server-only
 ```
 
 Every module under `lib/` that touches a secret carries `import "server-only"`

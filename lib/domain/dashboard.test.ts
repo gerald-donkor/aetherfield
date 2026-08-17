@@ -8,6 +8,7 @@ import {
   recordedEnergy,
   selectDashboardTarget,
   trendTotal,
+  type DashboardTarget,
   type EnergyInput,
 } from "./dashboard";
 import type { RecordEmission } from "./emissions";
@@ -169,6 +170,19 @@ describe("recorded energy", () => {
     );
   });
 
+  it("refuses rather than throws on a stored quantity that will not parse", () => {
+    const result = recordedEnergy(
+      [row({ quantity: "not-a-number" })],
+      windows,
+      1,
+      "half-even",
+    );
+    expect(!result.change.ok && result.change.refusal).toBe(
+      "unreadable_quantity",
+    );
+    expect(str(result.currentMWh)).toBe("0");
+  });
+
   it("does not coerce arithmetic inputs through Number", () => {
     const result = recordedEnergy(
       [
@@ -185,7 +199,7 @@ describe("recorded energy", () => {
 });
 
 describe("dashboard target and action priority", () => {
-  const target = (over: Record<string, unknown>) => ({
+  const target = (over: Partial<DashboardTarget>): DashboardTarget => ({
     id: "b",
     status: "active",
     targetYear: 2030,

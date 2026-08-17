@@ -298,9 +298,10 @@ async function listAlertRecipientsImpl(
     );
 }
 
-/** The organisation's name, for the email's subject line. Tenant-predicated
-    like everything else, so a caller cannot read another organisation's name by
-    holding its id. */
+/** The organisation's name, for the email's subject line. A primary-key
+    lookup, not a tenant predicate — safe because `organizationId` here is
+    always the id the sweep itself derived server-side, never a value a caller
+    supplies, so there is no cross-tenant read to guard against. */
 export const getOrganizationName = safe("getOrganizationName", getOrganizationNameImpl);
 
 async function getOrganizationNameImpl(

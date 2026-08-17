@@ -6,11 +6,13 @@
  */
 
 import type { ActivityCategory, ActivityUnit } from "../validation/activity";
+import type { TargetStatus } from "../validation/targets";
 import {
   ZERO,
   add,
   compare,
   divide,
+  multiplyByInteger,
   parseDecimal,
   subtract,
   sum,
@@ -18,6 +20,10 @@ import {
   type RoundingMode,
 } from "./decimal";
 import {
+  REPORTING_WINDOW_MONTHS,
+  energyToMWh,
+  monthIndex,
+  monthLabel,
   monthOf,
   totalsByPeriod,
   totalsOf,
@@ -25,7 +31,7 @@ import {
   type ScopeTotals,
 } from "./emissions";
 
-const WINDOW_MONTHS = 12;
+const WINDOW_MONTHS = REPORTING_WINDOW_MONTHS;
 const ENERGY_CATEGORIES = new Set<ActivityCategory>(["electricity", "heat"]);
 const ENERGY_UNITS = new Set<ActivityUnit>(["kWh", "MWh"]);
 
@@ -58,7 +64,10 @@ export type EnergyComparison =
   | {
       ok: false;
       refusal:
-        "no_current_readings" | "no_comparison_readings" | "zero_comparison";
+        | "no_current_readings"
+        | "no_comparison_readings"
+        | "zero_comparison"
+        | "unreadable_quantity";
       reason: string;
     };
 
@@ -83,22 +92,10 @@ export type DashboardAction = {
 
 export type DashboardTarget = {
   id: string;
-  status: string;
+  status: TargetStatus;
   targetYear: number;
   createdAt: Date;
 };
-
-function monthIndex(month: string): number {
-  const year = Number.parseInt(month.slice(0, 4), 10);
-  const monthNumber = Number.parseInt(month.slice(5, 7), 10);
-  return year * 12 + monthNumber - 1;
-}
-
-function monthLabel(index: number): string {
-  const year = Math.floor(index / 12);
-  const monthNumber = (index % 12) + 1;
-  return `${year}-${String(monthNumber).padStart(2, "0")}`;
-}
 
 function lastDateOfMonth(index: number): string {
   const next = new Date(
@@ -158,17 +155,25 @@ export function emissionsTrend(
   });
 }
 
-function asMWh(row: EnergyInput): Decimal | null {
+/** `ok: false, unreadable: false` for a row outside the energy categories or
+    units — silently excluded, as before. `unreadable: true` for a row that
+    *is* in scope but whose stored quantity will not parse, which is data
+    corruption rather than an ineligible reading and must not be swallowed the
+    same way (AGENTS.md 5.3 / decimal.ts's parseDecimal contract). */
+type AsMWhResult =
+  | { ok: true; value: Decimal }
+  | { ok: false; unreadable: false }
+  | { ok: false; unreadable: true; reason: string };
+
+function asMWh(row: EnergyInput): AsMWhResult {
   if (!ENERGY_CATEGORIES.has(row.category) || !ENERGY_UNITS.has(row.unit)) {
-    return null;
+    return { ok: false, unreadable: false };
   }
   const quantity = parseDecimal(row.quantity);
   if (!quantity.ok) {
-    throw new Error("A stored energy reading could not be read as a decimal.");
+    return { ok: false, unreadable: true, reason: quantity.error };
   }
-  return row.unit === "MWh"
-    ? quantity.value
-    : { units: quantity.value.units, scale: quantity.value.scale + 3 };
+  return { ok: true, value: energyToMWh(quantity.value, row.unit as "kWh" | "MWh") };
 }
 
 export function recordedEnergy(
@@ -180,10 +185,23 @@ export function recordedEnergy(
   const current: Decimal[] = [];
   const comparison: Decimal[] = [];
   for (const row of rows) {
-    const value = asMWh(row);
-    if (!value) continue;
-    if (inWindow(row.activityDate, windows.primary)) current.push(value);
-    if (inWindow(row.activityDate, windows.comparison)) comparison.push(value);
+    const result = asMWh(row);
+    if (!result.ok) {
+      if (!result.unreadable) continue;
+      return {
+        currentMWh: ZERO,
+        comparisonMWh: ZERO,
+        currentReadings: 0,
+        comparisonReadings: 0,
+        change: {
+          ok: false,
+          refusal: "unreadable_quantity",
+          reason: `A stored energy reading could not be read as a decimal: ${result.reason}`,
+        },
+      };
+    }
+    if (inWindow(row.activityDate, windows.primary)) current.push(result.value);
+    if (inWindow(row.activityDate, windows.comparison)) comparison.push(result.value);
   }
 
   const currentMWh = sum(current);
@@ -212,15 +230,16 @@ export function recordedEnergy(
     };
   } else {
     const difference = subtract(currentMWh, comparisonMWh);
-    const numerator = {
-      units: difference.units * 100n,
-      scale: difference.scale,
-    };
+    const numerator = multiplyByInteger(difference, 100n);
     const divided = divide(numerator, comparisonMWh, scale, mode);
-    if (!divided.ok) {
-      throw new Error("The recorded-energy comparison could not be derived.");
-    }
-    change = { ok: true, percent: divided.value };
+    change = divided.ok
+      ? { ok: true, percent: divided.value }
+      : {
+          ok: false,
+          refusal: "zero_comparison",
+          reason:
+            "The comparison-window total is zero, so no percentage change exists.",
+        };
   }
 
   return {

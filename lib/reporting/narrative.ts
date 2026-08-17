@@ -44,11 +44,16 @@ import {
  * ## What crosses to the provider, and what does not
  *
  * Only the **rendered deterministic sections** — the labels and already-rounded
- * strings a reporter can already see on the page — plus the report's title and
- * period. No raw activity row, no uploaded CSV body, no site name, no personal
+ * strings a reporter can already see on the page — plus the reporting period.
+ * No raw activity row, no uploaded CSV body, no site name, no personal
  * name, no email address, no session, no identifier of the organisation or the
- * user, and no secret. The prompt is assembled from `reportSections()` output
- * and nothing else, and it is capped at
+ * user, and no secret. **Not the report's title either** — it is free text a
+ * reporter chose (`lib/validation/reports.ts`'s `createReportSchema` places no
+ * constraint on its content beyond a length), so it is exactly the field most
+ * likely to carry the organisation's own name, and sending it would make the
+ * paragraph above false on the first tenant who titles a report after their
+ * company. The prompt is assembled from `reportSections()` output and the
+ * period alone, and it is capped at
  * {@link NARRATIVE_MAX_PROMPT_CHARS} characters.
  *
  * A tenant's aggregate emissions figures *are* customer commercial data, and
@@ -139,13 +144,13 @@ export type NarrativeDraft =
  * Deliberately the **same** `reportSections()` the page and the export render,
  * so the model cannot be shown a figure the document does not contain — the
  * prompt is a projection of the disclosure, never a richer view of it.
+ *
+ * **Takes no title.** The report's title is reporter-chosen free text and the
+ * one field most likely to carry the organisation's own name — see the module
+ * docblock's "What crosses to the provider" section.
  */
-export function buildNarrativePrompt(
-  title: string,
-  evidence: ReportEvidence,
-): string {
+export function buildNarrativePrompt(evidence: ReportEvidence): string {
   const lines: string[] = [
-    `REPORT TITLE: ${title}`,
     `REPORTING PERIOD: ${evidence.period.startDate} to ${evidence.period.endDate}`,
     "",
     "REPORT DATA — these are the only numbers you may write:",
@@ -178,14 +183,13 @@ export function buildNarrativePrompt(
  * tenant's figures (AGENTS.md 8.3 rule 2).
  */
 export async function draftNarrative(
-  title: string,
   evidence: ReportEvidence,
 ): Promise<NarrativeDraft> {
   try {
     const result = await generateText({
       model: NARRATIVE_MODEL,
       system: SYSTEM_PROMPT,
-      prompt: buildNarrativePrompt(title, evidence),
+      prompt: buildNarrativePrompt(evidence),
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       temperature: TEMPERATURE,
       maxRetries: MAX_RETRIES,

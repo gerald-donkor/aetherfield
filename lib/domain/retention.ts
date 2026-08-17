@@ -33,17 +33,21 @@ export const RETENTION_WINDOWS = {
 } as const;
 
 /**
- * The same windows as the words a person reads.
+ * The same windows as the words a person reads, **derived from
+ * {@link RETENTION_WINDOWS} rather than restated** — a hand-typed "24 months"
+ * here could drift from the number that actually feeds the SQL predicate,
+ * which is exactly the duplication this module exists to prevent (see the
+ * module docblock).
  *
  * **The single source the emails and the docs quote**, so the sentence in an
  * inbox and the row in `docs/backend.md` cannot drift from the predicate that
  * actually deletes.
  */
 export const RETENTION_WINDOW_TEXT = {
-  lead: "24 months",
-  application: "12 months",
-  pendingSubscriber: "30 days",
-  unsubscribedSubscriber: "12 months",
+  lead: `${RETENTION_WINDOWS.leadMonths} months`,
+  application: `${RETENTION_WINDOWS.applicationMonths} months`,
+  pendingSubscriber: `${RETENTION_WINDOWS.pendingSubscriberDays} days`,
+  unsubscribedSubscriber: `${RETENTION_WINDOWS.unsubscribedSubscriberMonths} months`,
 } as const;
 
 /**

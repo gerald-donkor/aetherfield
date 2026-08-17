@@ -2,7 +2,7 @@
 
 import { createAuthClient } from "better-auth/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../primitives";
 
@@ -10,13 +10,24 @@ const authClient = createAuthClient();
 
 export function SignOutButton() {
   const router = useRouter();
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
 
   return (
     <div>
       {error ? (
-        <p role="alert" className="mb-4 font-mono text-[12px] text-ink">
+        <p
+          ref={errorRef}
+          role="alert"
+          aria-live="assertive"
+          tabIndex={-1}
+          className="mb-4 font-mono text-[12px] text-ink outline-none"
+        >
           {error}
         </p>
       ) : null}

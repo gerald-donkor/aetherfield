@@ -14161,3 +14161,109 @@ Two deviations from the prompt's letter, both deliberate:
   was that `app/globals.css` declares no `@source`, so automatic content
   detection still scans the relocated class strings — it does, and every moved
   class resolves as before.
+
+## A full-project code review, fixed in place, 2026-08-17
+
+Ran the `code-review` skill's Standards + Spec axes across the whole tree at
+`HEAD` (no fixed diff point — `git status` was clean going in beyond two
+pre-existing, unrelated skill-directory changes). Six parallel sub-agents
+covered `lib/db/` + `lib/validation/`, `lib/domain/` + `lib/reporting/`,
+actions/auth/routes, components/motion, and the two build-sequence halves.
+24 Standards findings and 8 Spec findings came back; every hard violation and
+documented-standard breach, and the judgement calls cheap enough to close
+without a redesign, were fixed in the same pass. `npm run lint`,
+`npm run typecheck`, `npm test` (303/303, one test added) and `npm run build`
+all ran clean afterwards, and the route table matched §8.1 exactly.
+
+**Fixed:**
+
+- **`lib/domain/dashboard.ts:167` threw on an unreadable stored quantity**,
+  where `decimal.ts`'s own contract says a factor or quantity read from
+  storage takes a typed refusal, never a throw (AGENTS.md 5.3). `asMWh` now
+  returns a three-way result (`ok`, `not_energy`, `unreadable`) and
+  `recordedEnergy` surfaces the unreadable case as a new `EnergyComparison`
+  refusal, `"unreadable_quantity"`, rather than crashing the dashboard read.
+  The unreachable `divide` failure at the percentage step (guarded already by
+  the `zero_comparison` check immediately above it) got the same treatment
+  instead of a throw.
+- **`DashboardTarget.status` was `string`**, where `TargetStatus` already
+  exists in `lib/validation/targets.ts` and every query-layer caller already
+  returns it typed. Narrowed; `dashboard.test.ts`'s target-literal helper is
+  now typed against `DashboardTarget` instead of `Record<string, unknown>`.
+- **Two hand-built `Decimal` object literals** in `dashboard.ts` (the kWh→MWh
+  scale shift and the ×100 numerator for the percentage), where
+  `decimal.ts`'s own docblock says the shape is "exported for typing, not for
+  literal construction." Replaced with `fromUnits`-backed helpers:
+  `lib/domain/emissions.ts` gained `energyToMWh` (also collapsing a duplicate
+  of the same ×1000 ratio dashboard.ts carried separately from the exponent
+  table `convertQuantity` already reads) and `multiplyByInteger` from
+  `decimal.ts` replaced the numerator literal.
+- **`monthIndex` / `monthLabel` were byte-identical private copies** in
+  `dashboard.ts` and `targets.ts`. Moved to `lib/domain/emissions.ts` (beside
+  `monthOf`, the other calendar-string helper) and both modules import them.
+- **The 12-month window was three separate constants** — `dashboard.ts`,
+  `targets.ts`, `reports.ts`'s `REPORT_WINDOW_MONTHS` (which also feeds the
+  narrative allowlist and the "the latest 12 complete months" prose). Added
+  `REPORTING_WINDOW_MONTHS` to `emissions.ts` as the one source; the three
+  call sites read it instead of restating `12`.
+- **`lib/domain/retention.ts`'s `RETENTION_WINDOW_TEXT` hand-restated
+  `RETENTION_WINDOWS`'s numbers as prose**, despite its own docblock claiming
+  to be "the single source." Now template-literals off `RETENTION_WINDOWS`
+  directly.
+- **`lib/db/alert-queries.ts:301`'s docblock claimed `getOrganizationName` is
+  "tenant-predicated … so a caller cannot read another organisation's name by
+  holding its id,"** but the query is a bare primary-key lookup. Not
+  exploitable — the id is always sweep-derived, never caller-supplied — but
+  the comment was corrected to say that instead of asserting a check that
+  isn't there (AGENTS.md 12 rule 8).
+- **`lib/db/factor-mapping-queries.ts:189`** carried `isNotNull(emissionFactor.id)`
+  on a not-null primary key — a tautology its own docblock credited with
+  keeping a broken default from being inserted. Removed the predicate and
+  corrected the docblock to name what actually keeps a defaulted
+  `source_row_id` with no matching factor from inserting: the `innerJoin`
+  producing no row for it.
+- **`app/_components/auth/sign-out-button.tsx`'s error `<p role="alert">` had
+  no `aria-live` and no focus move** — the one case a screen reader most often
+  misses, and every sibling leaf in the codebase pairs `role` with
+  `aria-live` and a focus effect (`retire-factor-button.tsx` was the pattern
+  followed). Added `aria-live="assertive"`, a `ref`, `tabIndex={-1}` and a
+  focus effect keyed on `error`.
+- **`app/_components/form-status.tsx`'s `live` prop had zero call sites**
+  across all ~28 sites using the component, and its own docblock said as much
+  ("No site needs to override it … but the prop stays for a site that one day
+  does") — speculative generality against AGENTS.md's front-matter rule
+  against designing for hypothetical requirements. Removed; `aria-live`
+  derives from `role` unconditionally, as it already did for every real
+  caller.
+- **AGENTS.md §6.3's directory map omitted `lib/reporting/`**, present in the
+  repository and in this file's own step-13 entry. Added a row.
+- **`lib/reporting/narrative.ts` sent a report's title to the model** while
+  its own docblock claimed "no identifier of the organisation … crosses."
+  `lib/validation/reports.ts`'s `createReportSchema` places no constraint on
+  the title's content beyond a 120-character length — it is exactly the field
+  a reporter would title after their own company, which would have made that
+  sentence false. Removed the title from `buildNarrativePrompt` and
+  `draftNarrative`'s signatures entirely (the narrative's content — scopes,
+  coverage, target performance, basis of preparation — never needed it) and
+  updated the docblock to state plainly that the title does not cross.
+  `app/reports/actions.ts`'s `generateNarrative` no longer reads
+  `stored.title` at all.
+
+**Left as recorded, deliberate gaps** — flagged by the review, not closed
+here, because each is already tracked as an open, self-documented limitation
+rather than a silent one:
+
+- The narrative guardrail (`lib/domain/reports.ts`'s `validateNarrative`)
+  checks that every numeric token in a draft is a member of the snapshot's
+  allowlist, not that it is attached to the *right* label — a valid figure
+  could in principle be misattributed to the wrong scope. Named at prompt
+  103/commit `88ca3ce` and in this file's step 13 entry; unchanged.
+- Quantities spelled as words remain a partial hole in the same guardrail,
+  per `reports.ts:803-812` and `narrative.ts`'s system-prompt rule 4 — both
+  self-describe as not closing it fully.
+- `app/activity/actions.ts` (1512 lines, eleven actions across three
+  unrelated subjects) and `lib/rate-limit/index.ts` (~19 near-identical
+  `checkXLimit` wrappers) were flagged as judgement calls, not violations —
+  nothing in AGENTS.md §6.3 requires one `actions.ts` per route directory, and
+  each rate-limit wrapper carries its own docblock justifying its number. Not
+  restructured.

@@ -189,7 +189,6 @@ export async function generateNarrative(
   // -- d. Authorisation was resolved at stage b ----------------------------
   // -- e. The read predicates on both tenant and report id -----------------
   let evidence;
-  let title: string;
   try {
     const stored = await getReport(parsed.data, tenant.organizationId);
     if (!stored) return { ok: false, error: REPORT_ERRORS.notFound };
@@ -199,7 +198,6 @@ export async function generateNarrative(
     const read = parseReportEvidence(stored.evidence);
     if (!read) return { ok: false, error: REPORT_ERRORS.unreadable };
     evidence = read;
-    title = stored.title;
   } catch {
     return { ok: false, error: REPORT_ERRORS.failure };
   }
@@ -214,7 +212,7 @@ export async function generateNarrative(
   if (!limit.ok) return limit;
 
   // -- e-bis. The model call, over the deterministic snapshot only ---------
-  const draft = await draftNarrative(title, evidence);
+  const draft = await draftNarrative(evidence);
 
   // -- f. Validate the model's output before it is stored ------------------
   const outcome = draft.ok

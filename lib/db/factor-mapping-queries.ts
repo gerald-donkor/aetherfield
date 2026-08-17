@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { getDb } from "./client";
 import {
@@ -126,9 +126,10 @@ async function setFactorMappingImpl(input: {
  * `ON CONFLICT DO UPDATE` would silently undo a deliberate override. Called
  * once, when an organisation first reaches the totals surface.
  *
- * `isNotNull` on the resolved factor is what keeps a default that names a
- * `source_row_id` the seeded set does not contain from inserting a broken row:
- * the join simply produces nothing for it.
+ * A default that names a `source_row_id` the seeded set does not contain
+ * inserts nothing for it: the `innerJoin` below produces no row for a
+ * `source_row_id` absent from `emission_factor`, so `byRowId` never has an
+ * entry to resolve and the `.filter` after it drops that default.
  *
  * **Which set's copy of a row a default names is decided by
  * `preferredBySourceRow`, not by the order Postgres happens to return.** Two
@@ -186,7 +187,6 @@ async function seedDefaultMappingsImpl(
           isNull(emissionFactorSet.deletedAt),
           isNull(emissionFactorSet.supersededBySetId),
           visibleFactorScope(organizationId),
-          isNotNull(emissionFactor.id),
         ),
       );
 
