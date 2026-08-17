@@ -10971,6 +10971,10 @@ call site below it unchanged.
 different predicate**, and merging it is the failure this record exists to
 prevent:
 
+*(`visibleFactorScope` moved to `lib/db/factor-scope.ts` at prompt 119, together
+with the docblock that explains it. Everything below about the two predicates is
+unchanged; only the file naming it moved.)*
+
 |  | `tenantVisible` | `visibleFactorScope` |
 | --- | --- | --- |
 | operator | `and` | `or` |
@@ -11046,6 +11050,239 @@ Noted here so it is a known remainder rather than something missed.
 
 No migration, no schema change, `visibleFactorScope` untouched, no query module
 split, and `withSafeQueryErrors` usage unchanged (prompt 101's ground).
+
+### `emission-queries.ts` split along its eight edit reasons, prompt 119
+
+`lib/db/emission-queries.ts` held **2,571 lines** — the factor-set reads, the
+factor writes, the set lifecycle, the picker, the mapping writes, the coverage
+reads, the recalculation seam and the stored-emission reads. Prompts 99, 100 and
+101 each named "do not split `emission-queries.ts`" as a non-goal and deferred it
+here; all three were committed first, so this moved settled code.
+
+**The prompt file says 2,616 lines. It is 2,571 at `2f0eef8`** — the figure came
+from the review that raised the finding and was not re-counted when the prompt was
+written. Corrected here rather than repeated (§12 rule 8).
+
+#### The eight edit reasons, and every exported symbol mapped to one
+
+Established from the file itself — its own section banners and the prompt numbers
+its docblocks cite — before a line was moved.
+
+| # | edit reason | what makes it edited | module |
+| --- | --- | --- | --- |
+| 1 | **A set's catalogue reads** — what a set says about its own provenance | a surface needs a different set column, or a different exclusion (prompts 66, 67, 82) | `factor-set-queries.ts` |
+| 2 | **A set's lifecycle** — correcting or retiring one | prompt 84, which touched only these | `factor-set-queries.ts` |
+| 3 | **Authoring a tenant's own factor rows** — one at a time or in bulk | the custom-factor form or the CSV importer changes (66, 67, 71, 82) | `factor-queries.ts` |
+| 4 | **The picker** — what may be offered for a pair | a new eligibility rule, lane or ranking (75, 76, 85, 86) | `factor-search-queries.ts` |
+| 5 | **Choosing and seeding a mapping** | the mapping surface or the defaults change (65, 70, 85) | `factor-mapping-queries.ts` |
+| 6 | **Coverage reporting** — what is mapped, what has no figure | a new kind of gap has to be named (65, 68, 85, 86) | `coverage-queries.ts` |
+| 7 | **The recalculation seam** | the resolution rule or a second lane (62, 68, 71, 85) | `emission-queries.ts` |
+| 8 | **Reading the stored figures back** | a downstream consumer needs a different column (59, 60, 61) | `emission-queries.ts` |
+
+Reasons 1 and 2 share a module because they are one table and one surface;
+7 and 8 share one because they are `activity_emission`, written then read.
+**Eight reasons, seven modules, plus two shared-internal modules** — the shared
+helpers had to land somewhere every dependent could import, and the prompt made
+that a condition rather than a detail.
+
+| module | lines | exports |
+| --- | --- | --- |
+| `lib/db/factor-scope.ts` | 91 | `visibleFactorScope`, `factorLabelOf` |
+| `lib/db/insert-batch.ts` | 23 | `INSERT_BATCH`, `chunk` |
+| `lib/db/factor-set-queries.ts` | 329 | `ListedFactorSet`, `listFactorSets`, `FactorGasBasis`, `TenantFactorSet`, `listTenantFactorSets`, `UpdateTenantFactorSetOutcome`, `updateTenantFactorSet`, `retireTenantFactorSet` |
+| `lib/db/factor-queries.ts` | 599 | `TenantFactorRow`, `listTenantFactors`, `CreateTenantFactorOutcome`, `createTenantFactor`, `ImportTenantFactorsOutcome`, `importTenantFactors`, `retireTenantFactor`, `SupersedableRow`, `listSupersedableRows` |
+| `lib/db/factor-search-queries.ts` | 349 | `FACTOR_SEARCH_LIMIT`, `FactorSearchRow`, `searchFactorsForPair`, `FuzzyFactorSearchRow`, `searchFactorsByWording`, `VisibleFactor`, `getVisibleFactor` |
+| `lib/db/factor-mapping-queries.ts` | 208 | `setFactorMapping`, `seedDefaultMappings` |
+| `lib/db/coverage-queries.ts` | 458 | `countUncalculatedRecords`, `countOutOfPeriodRecords`, `hasAnyFactorMapping`, `FactorCoveragePair`, `listFactorCoverage`, `MarketBasedMapping`, `listMarketBasedMappings` |
+| `lib/db/emission-queries.ts` | 698 | `ResolvedMapping`, `FactorSibling`, `listFactorMappings`, `listFactorSiblings`, `buildFactorResolver`, `listRecordsForCalculation`, `StoredEmission`, `replaceEmissions`, `RecalculationOutcome`, `recalculateOrganization`, `PersistedEmission`, `listEmissions` |
+
+Total 2,755 lines against 2,571, the difference being eight module headers.
+**That growth is not the point and neither is the reduction** — the point is that
+each of the eight reasons now has one file to open.
+
+Private helpers moved with their only users: `outOfPeriodPredicate` to
+`coverage-queries.ts` (both callers are there), `escapeLike` and `marketLaneScope`
+to `factor-search-queries.ts`, `resolveWritableSet`,
+`sourceRowIdForCustomFactor`, `normaliseHashPart`, `TenantFactorInput` and `Tx` to
+`factor-queries.ts`, `UNIQUE_VIOLATION` to `factor-set-queries.ts`.
+
+The import graph is **acyclic and one-directional**: `emission-queries.ts` →
+`factor-mapping-queries.ts` (for `seedDefaultMappings`), `factor-queries.ts` →
+`factor-set-queries.ts` (for the `FactorGasBasis` type), and everything that
+reads a factor → `factor-scope.ts`.
+
+#### Where `visibleFactorScope` landed, and why the docblock's claim still holds
+
+**`lib/db/factor-scope.ts`**, together with the module docblock that explains it.
+The prompt made this a condition: the docblock claims "the predicate is written
+once … so no query can filter on half of it", and scattering the predicate would
+have been a reason to cut differently.
+
+It is now stronger than before, and locally checkable. The docblock states the
+new invariant — **`factor-scope.ts` is the only place
+`emissionFactor.organizationId` is compared for *visibility*** — and the grep
+that checks it is one line. The strict `eq(emissionFactor.organizationId, id)`
+that remains in `factor-queries.ts` and `factor-set-queries.ts` is a different
+question ("this tenant's own rows, and not published ones") and the docblock now
+says so explicitly, which the single-file version never had to.
+
+`factor-scope.ts` deliberately sits beside `tenant-scope.ts`, so the pair prompt
+100 warned must never be merged is visible in one directory listing. Both files'
+docblocks were updated to cite each other's new path.
+
+#### The barrel decision: none
+
+**No barrel, and the importers were updated.** A barrel re-exporting all
+forty-odd symbols would have recreated exactly the coupling the split exists to
+break — every consumer would still depend on the union — and it would have made
+`npm run typecheck` weak evidence, because a symbol resolved through a barrel
+type-checks wherever it came from. There are **eight importers**, which is
+manageable, so the honest option was taken. `typecheck` is therefore **strong**
+evidence here: every one of the forty-odd symbols had to resolve at its new path.
+
+| importer | now imports from |
+| --- | --- |
+| `app/activity/factors/page.tsx` | `factor-set-queries` (1), `factor-queries` (2) |
+| `app/activity/mappings/page.tsx` | `coverage-queries` (2), `factor-set-queries` (1), `factor-search-queries` (3) |
+| `app/activity/actions.ts` | `emission-queries` (1), `factor-mapping-queries` (1), `factor-queries` (3), `factor-search-queries` (1), `factor-set-queries` (2) |
+| `app/_components/activity/emissions-summary.tsx` | `coverage-queries` (2), `emission-queries` (1), `factor-set-queries` (1) |
+| `lib/db/target-queries.ts` | `coverage-queries` (1), `emission-queries` (1) |
+| `lib/db/dashboard-queries.ts` | `coverage-queries` (1), `emission-queries` (1), `factor-set-queries` (1) |
+| `lib/db/report-evidence.ts` | `coverage-queries` (1), `emission-queries` (1), `factor-scope` (1) |
+| `app/api/cron/recalculate/sweep.ts` | **unchanged** — `recalculateOrganization` stayed in `emission-queries.ts` |
+
+#### The emitted SQL is unchanged, and that was measured
+
+The acceptance condition was identical SQL, so it was established by a **scripted
+comparison of the multiset of code lines**, old against new: every query in this
+layer is generated from its builder expression, so a byte-identical set of
+non-comment lines is a byte-identical set of queries.
+
+Comment lines, blank lines, `import` lines and the one
+`const safe = queryErrorScope(…)` line per module were excluded — those are the
+module frame, not the query:
+
+```
+query/body lines, imports and error-scope lines excluded:
+  old = 1409   new = 1409
+  differing lines: 6
+   -1  const INSERT_BATCH = 500;
+   +1  export const INSERT_BATCH = 500;
+   -1  function chunk<T>(items: readonly T[], size: number): T[][] {
+   +1  export function chunk<T>(items: readonly T[], size: number): T[][] {
+   -1  const factorLabelOf = factorMatchSourceText;
+   +1  export const factorLabelOf = factorMatchSourceText;
+```
+
+**Three lines differ and all three are the `export` keyword**, added because a
+helper that was file-private now has importers. **No query-building line differs
+at all** — not a `.where`, not a `.select`, not a `.orderBy`, not a raw `sql`
+fragment. No database was queried, so no warm/cold connection question arises
+(§7.3).
+
+The unfiltered run of the same comparison differs only in `import` lines and the
+five new `queryErrorScope` lines; it was read line by line before the filter was
+applied, so the filter is not hiding anything.
+
+#### Everything that is not a relocation, line by line
+
+1. **Three `export` keywords** — `INSERT_BATCH`, `chunk`, `factorLabelOf`, above.
+2. **Five new `const safe = queryErrorScope("<module>")` lines**, and this is a
+   deliberate behaviour change with a visible consequence. `operation` is
+   `<module>.<function>` (`query-error.ts`), and prompt 101 exists because a label
+   naming the wrong module is undiagnosable. So each new module labels itself:
+   `listSupersedableRows` now reports `factor-queries.listSupersedableRows`, not
+   `emission-queries.listSupersedableRows` as the prompt 83 incident record above
+   quotes. **The alternative — keeping the `emission-queries` prefix in all eight
+   files — was rejected**: it would have reintroduced precisely the desync prompt
+   101 removed. Twelve exports keep their old label, because reasons 7 and 8
+   stayed in `emission-queries.ts`. `operation` still carries no personal data and
+   still cannot.
+3. **Eight module docblocks**, one per new file, each naming its edit reason and
+   pointing at `factor-scope.ts` for the tenant predicate and the no-logging rule.
+4. **Two paragraphs of moved prose corrected**, because relocating them made them
+   false: `visibleFactorScope`'s "it is exported from here rather than moved" now
+   records that prompt 119 moved the predicate and its explanation together, and
+   its `{@link listFactorCoverage}` became a `coverage-queries.ts` reference.
+5. **Nine stale path citations in files outside the split**, corrected in the same
+   change (§12 rules 1 and 8): `lib/db/tenant-scope.ts`,
+   `lib/db/report-evidence.ts`, `lib/db/report-queries.ts`,
+   `lib/db/alert-queries.ts`, `lib/db/target-queries.ts`,
+   `lib/domain/factor-import.ts`, `lib/domain/emissions.ts` and two in
+   `lib/validation/emissions.ts` each named `emission-queries.ts` as the file
+   holding something that now lives elsewhere.
+
+Nothing was renamed, no signature changed, no argument reordered, no query
+touched, no logging added, and no finding from prompts 92-118 was folded in.
+
+#### The tenant boundary, re-verified across all eight modules
+
+The property most easily lost when 2,571 lines move, so it was counted rather
+than reasoned about — every tenant column and every soft-delete predicate, HEAD
+against the eight new modules:
+
+| occurrence | HEAD | after |
+| --- | --- | --- |
+| `visibleFactorScope(` (code only, incl. its definition) | 10 | 10 |
+| `emissionFactor.organizationId` (code only) | 8 | 8 |
+| `emissionFactorSet.organizationId` | 18 | 18 |
+| `activityFactorMapping.organizationId` | 11 | 11 |
+| `activityRecord.organizationId` | 4 | 4 |
+| `activityEmission.organizationId` | 2 | 2 |
+| `organization_id` (in raw `sql` fragments) | 14 | 14 |
+| `isNull(emissionFactor.deletedAt)` | 13 | 13 |
+| `isNull(emissionFactorSet.deletedAt)` | 11 | 11 |
+| `supersededBySetId` | 6 | 6 |
+
+Every count is identical. §9.2 rule 6 and its published-reference-data exception
+hold exactly as before.
+
+#### Prerender impact: none, verified
+
+`npm run build`'s route table is unchanged — `/`, `/about`, `/careers`,
+`/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and
+`/job-listing/[slug]` (3) `● SSG`; every backend route `ƒ Dynamic`, and `ƒ Proxy
+(Middleware)` present.
+
+That was not left as an assumption. A transitive-import walk over all twelve
+prerendered entry points plus `app/layout.tsx` found **one** changed file
+reachable from any of them: `lib/validation/emissions.ts`, which is the shared Zod
+module and deliberately not `server-only` (§6.3). Its entire diff is the **two
+comment lines** in item 5 above, and neither string appears in any emitted `.js`
+under `.next/` — only in `.js.map`, the same evidence pattern prompt 101 used for
+mangled function names. So no prerendered byte can have moved.
+
+Each new module carries `import "server-only"`, including the two helper modules,
+so a mistaken client import is a build error rather than a runtime leak.
+
+#### Checks run, prompt 119
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output — **strong evidence**, no barrel |
+| `npm test` | 12 files, **302 passed**, 718 ms |
+| `npm run build` | compiled in 8.2s, 32 static pages, route table above |
+| emitted-SQL comparison | 1409 body lines in, 1409 out, **3 `export` keywords the only difference** |
+| tenant-column counts | all ten identical, table above |
+| `npm run test:e2e` — Chromium / Firefox | **110 passed, 12 skipped, 0 failed**, 4.0 m |
+| `npm run test:e2e` — WebKit | **could not run.** `scripts/playwright-webkit.sh` reports "Podman is required for WebKit on Arch Linux" — Podman is not installed on this machine. Blocked by a missing system dependency, not by this change, and reported rather than glossed (§12 rule 3) |
+
+The E2E run covers the surfaces that read through this layer: `factor-picker.spec.ts`
+walks the picker, the staged-row commit and the wording search, and the activity,
+dashboard, targets and reports specs read the split modules end to end.
+
+#### What this prompt deliberately did not do
+
+- **No barrel**, for the reason above.
+- **`activity-queries.ts` keeps its own `INSERT_BATCH` / `chunk` copy.** It was a
+  copy before this split; consolidating it would have edited a module the prompt
+  put out of scope, and `insert-batch.ts`'s docblock records the remainder.
+- **No other module split** — prompt 120 covers the route pages.
+- **`docs/automation.md`'s NUL-byte row** claims two NUL bytes in
+  `emission-queries.ts`. Both the file at `2f0eef8` and all eight new modules
+  contain **zero**, so that row was already stale before this change; noted rather
+  than edited, since chasing it is not this prompt's scope.
 
 
 ---
