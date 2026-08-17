@@ -307,39 +307,3 @@ body {
   background-size: 2560px 220px;
   background-repeat: repeat;
 }
-
-/* Footer duotone band — the reference uses a halftone-screened photograph of
-   draped fabric. Rebuilt in CSS so the page carries no external image:
-   soft diagonal folds in brand-ink, overprinted with a yellow dot screen. */
-@utility duotone-band {
-  background-color: var(--color-brand);
-  background-image:
-    /* 1. halftone screen, punched in brand yellow over everything below */
-    radial-gradient(
-      circle at 1px 1px,
-      var(--color-brand) 0 1.15px,
-      transparent 1.25px
-    ),
-    /* 2 + 3. interfering fold gradients at slightly different angles and
-       periods, which reads as cloth rather than stripes */
-      repeating-linear-gradient(
-        107deg,
-        color-mix(in srgb, var(--color-brand-ink) 88%, transparent) 0px,
-        color-mix(in srgb, var(--color-brand-ink) 22%, transparent) 48px,
-        color-mix(in srgb, var(--color-brand-ink) 92%, transparent) 84px,
-        color-mix(in srgb, var(--color-brand-ink) 14%, transparent) 141px,
-        color-mix(in srgb, var(--color-brand-ink) 88%, transparent) 203px
-      ),
-    repeating-linear-gradient(
-      119deg,
-      color-mix(in srgb, var(--color-brand-ink) 55%, transparent) 0px,
-      transparent 37px,
-      color-mix(in srgb, var(--color-brand-ink) 62%, transparent) 79px,
-      transparent 118px,
-      color-mix(in srgb, var(--color-brand-ink) 55%, transparent) 157px
-    );
-  background-size:
-    4px 4px,
-    100% 100%,
-    100% 100%;
-}

@@ -25,6 +25,53 @@ three comps — glyph height 55 / 125 / 204, insets 20 on both sides at each.
 If a design genuinely calls for a different footer, ask first rather than
 editing this one.
 
+### The band's earlier CSS implementation, removed in prompt 115
+
+The band was first planned as **CSS, not a photograph**. `prompts/01-design-systems.md:249`
+records the intent — "the footer band uses a CSS-generated duotone" — and
+`app/globals.css` carried the implementation as a 32-line Tailwind v4
+`@utility duotone-band`: a `radial-gradient` halftone screen in `--color-brand`
+over two interfering `repeating-linear-gradient`s in `--color-brand-ink` at
+**107°** and **119°**, with a three-part `background-size` of
+`4px 4px, 100% 100%, 100% 100%`.
+
+**Outcome (a) of prompt 115's three: the footer uses a different technique now
+and the utility was superseded.** What ships is the treated photograph
+`/assets/generated/texture-brand.png`, rendered through `next/image` at
+`app/_components/chrome.tsx:226-234` with
+`className="h-[120px] w-full object-cover sm:h-[210px] lg:h-[280px]"`. The
+evidence for (a) rather than (b) or (c):
+
+- `SiteFooter` renders a band — it is not an unfinished feature — and the band
+  it renders is the `<Image>` above, not a `div` carrying a class.
+- `grep -rl "duotone-band"` over the tree found the string only in
+  `app/globals.css` (the definition) and in prompt 115's own file. `git grep
+  -l "duotone-band" HEAD` returned `app/globals.css` alone.
+- Nothing could reach it dynamically: `grep -rn "@apply" app/ lib/` has **no
+  hits at all**, `app/globals.css` is the only stylesheet in `app/` or `lib/`,
+  there is no safelist or `@source inline(…)`, and no template-literal
+  `className` composes the name from fragments.
+
+So it is deleted, comment included. **The fitted values above are the record —
+they are not to be re-derived from the comp** — and the full source is in `git`
+history at `app/globals.css:311-345` as of commit `2f0eef8`.
+
+**It was not being tree-shaken.** Tailwind v4 emitted the whole utility into the
+production stylesheet even with no `className` using it, because the extractor
+scans `app/globals.css` itself as a source file and finds `duotone-band` in the
+`@utility` line — so a definition is its own class candidate. Measured, not
+assumed: the built CSS went from **409,806 to 408,563 bytes** in the large chunk
+(the 11,186-byte chunk unchanged), **−1,243 bytes**, and the shipped rule was
+present twice — once with `color-mix()` and once pre-resolved to `#66640fe0`
+etc. for browsers without it. This is the one interesting finding here: an
+unreferenced v4 `@utility` is **not** free, and a dead-CSS audit can quote a
+real number.
+
+All **21** prerendered HTML files are byte-identical across the two builds
+(normalising only `.next/BUILD_ID` and the CSS chunk name; JS chunk names left
+un-normalised and matched anyway), which is the pass condition — a stylesheet
+change must appear in no markup.
+
 ## Site header (`SiteNav`)
 
 The header is **sticky, full-bleed frosted glass**: `sticky top-0 z-50` on a
