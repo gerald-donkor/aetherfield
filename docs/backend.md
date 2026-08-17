@@ -13996,3 +13996,168 @@ required it. The two native projects passed and WebKit did not run; that is
 stated rather than reported as a pass. The E2E suite is what exercises these
 seven authenticated write paths end to end — the 283 domain tests cannot see any
 of them.
+
+## Three route pages carrying unrelated edit reasons, prompt 120 (build steps 7, 9, 10 and 12)
+
+**The finding: Divergent Change on the render side.** Three authenticated pages
+each mixed several concerns in one file, so a change to one of them meant opening
+a file that also owned the others. All three decomposed cleanly; none was left
+alone.
+
+**It is a move, not a redesign.** No rendered output changed, no data fetching
+moved, no client boundary was added, and no authorisation check travelled with
+any JSX. Line counts are recorded below as context and are not the benefit — the
+benefit is that a column added to the leads list no longer means editing the file
+that decides how a staff role is labelled.
+
+### `/submissions` — 412 → **154**
+
+Eight concerns; seven moved to `app/_components/submissions/`.
+
+| concern | declarations | now |
+| --- | --- | --- |
+| the view vocabulary | `VIEW_LABELS`, `viewHref`, `requestedCallback`, `RawSearchParams` | `views.ts` (39) |
+| the shared read idiom | `Detail`, `RecordCard`, `EmptyState`, `DATE_FORMAT` | `record.tsx` (53) |
+| demo requests | `LeadList` | `lead-list.tsx` (44) |
+| newsletter lifecycles | `SubscriberList` | `subscriber-list.tsx` (56) |
+| job applications | `ApplicationList` | `application-list.tsx` (63) |
+| verified accounts and the staff role | `StaffList` | `staff-list.tsx` (68) |
+| paging | `Pagination` | `pagination.tsx` (55) |
+| the page's own read path | metadata, `requireSubmissionsAccount`, the four fetch branches, the redirect, the layout | stays in `page.tsx` |
+
+**Authorisation placement verified.** `requireSubmissionsAccount(requestedCallback(query))`
+is still the second statement in the page and runs above everything it renders;
+the `staff` view is still narrowed to `leads` for a non-admin *before* any account
+row is read. `RemoveSubmissionControl` and `StaffRoleControl` were not moved —
+they stay colocated with the actions they call, and each action re-reads the role
+from Postgres, so `admin ? … : null` remains presentation (AGENTS.md 11.2 rule 2).
+
+**The two role-label maps were left as two maps.** The review proposed merging
+`submissions/page.tsx`'s staff map with `account/page.tsx`'s
+`ORGANIZATION_ROLE_LABELS`, and that was refused: AGENTS.md 11.1 makes the staff
+and organisation role systems orthogonal, and one map spanning both is the thing
+that rule warns against. The staff map moved into `staff-list.tsx` with the
+reasoning written beside it.
+
+**No logging was added**, and the CV link is still the route
+`/submissions/applications/<id>/cv`, which mints the short-lived signed URL per
+request — no blob URL is embedded in the moved JSX (AGENTS.md 8.3 rule 4).
+
+### `/dashboard` — 550 → **204**
+
+| concern | declarations | now |
+| --- | --- | --- |
+| figure formatting | `MONTH_FORMAT`, `monthName`, `tonnes`, `mwh` | `format.ts` (35) |
+| the incompleteness caveat | `GapCaveat` | `gap-caveat.tsx` (21) |
+| the three summary cards | the `aria-label="Current evidence summary"` section, `MiniFigure`, `EmptyCard`, `TargetReading` | `evidence-summary.tsx` (258) |
+| the twelve-month trend | `TrendChart` | `trend-chart.tsx` (104) |
+| Track · Model · Report · Act | the `evidence-loop-heading` section, `EvidenceBlock`, the attribution line | `evidence-loop.tsx` (122) |
+| the read and its derivation | `readDashboardEvidence`, `storedEmissions`, the target projection | stays in `page.tsx` |
+
+`GapCaveat` earned its own file rather than sitting inside the summary because
+three sections render it, and the trend section that keeps it is still in the
+page.
+
+**`tonnes` was deliberately not shared with
+`app/_components/activity/emissions-summary.tsx`**, which has a `tonnes` of its
+own. The two round under different modes, so merging them would have changed a
+rendered figure — the one thing this prompt was not allowed to do.
+
+**Authorisation placement verified.** `requireOrganization("/dashboard")` is
+still the first statement in the page, `readDashboardEvidence` is still called
+once and only there, and every figure a section renders is derived from that one
+read by the pure functions in `lib/domain/`. A card that queried for its own
+figure could disagree with the rest of the page; none does.
+
+### `/activity/mappings` — 729 → **364**
+
+| concern | declarations | now |
+| --- | --- | --- |
+| the query-string selection vocabulary | `first`, `isCategory`, `isUnit`, `label`, `Lane`, `laneOf`, `basisOf`, `pairHref` | `mapping-selection.ts` (74) |
+| coverage, and each pair's market-based lane | the `factor-coverage-heading` section, `MarketLane` | `factor-coverage-list.tsx` (264) |
+| choosing a factor for the selected pair | the `factor-picker-heading` section, the prose, the lane and basis links, the search form | `factor-choice-panel.tsx` (185) |
+| the reads | `presentSearch`, `PresentedFactor`, `SearchPresentation`, the three-way `Promise.all`, the attribution line | stays in `page.tsx` |
+
+**`presentSearch` stayed in the page, and that is the point of the constraint.**
+It is the page's data path — two factor searches over `lib/db/` — and moving it
+into the panel that renders its output would have pushed a query into a
+component. Only a Server Component fetches this page's initial data and the page
+is where it is fetched (AGENTS.md 6.2). The panel receives the finished result.
+
+**Neither new component imports `lib/db` at all.** Their props are structural,
+and `FactorChoicePanel` types its factor rows as
+`ComponentProps<typeof FactorPicker>["factors"]` — `FactorPicker` is
+component-only and exports no type (the bundle rule), so reading its prop type
+back keeps the query layer out of both files without breaking that rule.
+
+**The search form is still `children` of the client leaf**, so it stays
+server-rendered and searching is still a navigation the page re-reads. The
+`page.tsx` import of `lib/db/emission-queries` is unchanged and remains the only
+one on this route.
+
+**The attribution paragraph was left in the page.** It is near-identical to the
+one in `emissions-summary.tsx`, and de-duplicating the two would have meant
+editing that file — a change, not a move, and out of this prompt's scope. Named
+here rather than left as an unexplained near-duplicate.
+
+**Authorisation placement verified.** `requireOrganization("/activity/mappings")`
+is still the first statement, and the three tenant reads and both factor searches
+are still predicated on the organisation id it returns.
+
+### What did not change
+
+No rendered markup, no class string, no prop name, no JSX order. No query moved.
+No `"use client"` was added anywhere. No environment variable, and no logging —
+`/submissions` renders real personal data and nothing extracted from it logs,
+serialises to an attribute, or embeds a CV link (AGENTS.md 8.3).
+
+**No new client boundary, and it was measured rather than assumed.** The route
+table is unchanged and would not have shown one, so each route's client module set
+was read back from its `page_client-reference-manifest.js` and compared against a
+build of the parent commit `2f0eef8`:
+
+| route | client modules, before and after |
+| --- | --- |
+| `/submissions` | `_components/chrome.tsx`, `submissions/action-controls.tsx`, `submissions/error.tsx` |
+| `/dashboard` | `_components/chrome.tsx`, `dashboard/error.tsx` |
+| `/activity/mappings` | `_components/chrome.tsx`, `_components/activity/factor-picker.tsx` |
+
+Identical in all three cases. Of the 15 files the three splits produced, **none
+carries `"use client"`.**
+
+The three pages fell 1,691 → **722** lines and the 15 new files hold 1,441, a net
+gain of about 470 — the moved code is documented where it landed, and the
+docblocks are most of the difference. The line count was never the goal.
+
+### Verification
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output (per commit) |
+| `npm run typecheck` | exit 0, no output (per commit) |
+| `npm test` | 12 files, **302 passed** (per commit) |
+| `npm run build` | route table unchanged at each commit — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG`; all three split routes still `ƒ` |
+| `npm run test:e2e:local` | **110 passed, 12 skipped**, 4.0 min — Chromium and Firefox |
+| `npm run test:e2e:webkit` | **not run — blocked.** `podman` is absent on this machine, as at prompts 89, 92 and 98 |
+
+**`npm run test:e2e` therefore did not complete as a matrix**, and this prompt
+required it. The two native projects passed and WebKit did not run; that is
+stated rather than reported as a pass.
+
+Two deviations from the prompt's letter, both deliberate:
+
+- **The E2E suite was run once, after the third commit, not per commit.** Four
+  sibling agents were building concurrently on a machine with a few GB free, and
+  three builds plus three four-minute browser matrices would not have completed.
+  The suite covers all three pages (`e2e/submissions.spec.ts`,
+  `e2e/authenticated.spec.ts`, `e2e/factor-picker.spec.ts`,
+  `e2e/market-based-scope-2.spec.ts`,
+  `e2e/scope-2-grid-average-fallback.spec.ts`), so the single run exercises every
+  commit's surface — but the first two commits were not independently E2E-verified
+  and are recorded as such.
+- **The Tailwind docs snapshot was not present in this worktree** (it is
+  gitignored, so `git worktree add` does not copy it). It was read from the
+  repository root's copy, commit `bd868a31`, dated 2026-08-11. The relevant check
+  was that `app/globals.css` declares no `@source`, so automatic content
+  detection still scans the relocated class strings — it does, and every moved
+  class resolves as before.
