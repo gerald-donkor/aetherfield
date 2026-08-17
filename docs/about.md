@@ -208,3 +208,56 @@ above them reveals.
 files that were, after normalising `BUILD_ID` and both content-hashed chunk
 patterns, all unchanged. See `docs/motion-homepage.md`, prompt 114, for the
 paired-build method and the CSS-delta finding that came with it.
+
+
+## Prompt 116 — the team roster is content, and its fields are named
+
+`TEAM` was twelve positional `[name, title, email]` tuples declared inside
+`app/_components/about/sections.tsx`. It now lives in **`app/_content/team.ts`**,
+beside `articles.ts` and `jobs.ts`, which is where AGENTS.md §8.1 puts page
+content held as typed constants. `sections.tsx` imports it as
+`import { TEAM } from "../../_content/team";` — the same relative form the other
+six consumers of `_content/` already use — and lost sixteen lines (364 → 348).
+No top-level data constant remains in that file.
+
+**The shape is named fields, matching `Article` and `Job`:**
+
+```ts
+export type TeamMember = { name: string; title: string; email: string };
+export const TEAM: TeamMember[] = [ … ];
+```
+
+The render site destructures by name — `TEAM.map(({ name, title, email }) => …)`
+— where it previously read `([name, title, email])`. That is the whole point of
+the move: three interchangeable strings in a fixed order is a shape where a
+transposed pair puts a job title in the email column and TypeScript cannot see
+it. `email` remains the row key and the `mailto:` target.
+
+**The comp-transcription comment travelled with the two rows it describes.** It
+sits between `Will O'Watt` and `Lana Terra` in the new module, verbatim:
+
+```
+// "Earth Systems Research" and "Earth Systems Researcher" are both in the
+// comp, on consecutive rows. Transcribed as drawn.
+```
+
+Neither title was normalised. Under the front matter's "record, don't chase"
+rule that pair is not a typo, and a move that quietly fixed it would have
+destroyed the record.
+
+**Every string is byte-identical and the row order is the comp's**, verified
+mechanically rather than by eye: the twelve tuples extracted from
+`git show HEAD:app/_components/about/sections.tsx` compare equal, in order, to
+the twelve `{ name, title, email }` objects parsed out of the new module. The
+straight apostrophe in `Will O'Watt` survives into the built HTML as `&#x27;`
+(U+0027) in the markup and as a literal `'` in the flight payload;
+`app/about.html` contains **zero** U+2019 curly apostrophes.
+
+**Nothing measured on this page moved** — not a class, a spacing value or a
+column width. The team table's geometry above is untouched. The paired-build
+diff (snapshot, `git stash push --include-untracked`, rebuild, `git stash pop`,
+per `docs/automation.md`) put **all 21 prerendered HTML files byte-identical**
+with only `BUILD_ID` and the CSS chunk name normalised — `/about` at **exactly
+zero**. The CSS chunk name was in fact the same string on both sides
+(`3zblso65oiquq.css`), and the JS chunk names were left un-normalised and
+matched anyway, which is the stronger result `docs/automation.md` asks for.

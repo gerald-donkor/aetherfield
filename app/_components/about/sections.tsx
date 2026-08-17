@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { TEAM } from "../../_content/team";
 import { ButtonLink } from "../primitives";
 import { Container } from "../home/container";
 import { PrincipleCard } from "../home/principle-card";
@@ -279,23 +280,6 @@ export function FounderStory() {
 /*  Meet the team                                                              */
 /* -------------------------------------------------------------------------- */
 
-const TEAM = [
-  ["Eunji Park", "Founder", "e.park@aetherfield.com"],
-  ["Al Gorithm", "Senior Systems Architect", "a.gorithm@aetherfield.com"],
-  ["Cassandra Query", "Head of Data Platforms", "c.query@aetherfield.com"],
-  ["Sue Logic", "Principal Software Engineer", "s.logic@aetherfield.com"],
-  ["Dash Bordman", "Product Manager", "d.bordman@aetherfield.com"],
-  ["Greta Watt", "Director of Climate Strategy", "g.watt@aetherfield.com"],
-  ["Gail Force", "Environmental Risk Analyst", "g.force@aetherfield.com"],
-  ["Polly Nation", "UX Designer", "p.nation@aetherfield.com"],
-  ["Will O'Watt", "Clean Energy Solutions Manager", "w.owatt@aetherfield.com"],
-  // "Earth Systems Research" and "Earth Systems Researcher" are both in the
-  // comp, on consecutive rows. Transcribed as drawn.
-  ["Lana Terra", "Earth Systems Research", "l.terra@aetherfield.com"],
-  ["Ella Vation", "Earth Systems Researcher", "e.vation@aetherfield.com"],
-  ["Phil Scope", "Lifecycle Assessment Lead", "p.scope@aetherfield.com"],
-] as const;
-
 export function TeamTable() {
   return (
     <section
@@ -338,7 +322,7 @@ export function TeamTable() {
             </tr>
           </thead>
           <tbody>
-            {TEAM.map(([name, title, email]) => (
+            {TEAM.map(({ name, title, email }) => (
               <tr
                 key={email}
                 className="block border-t border-border pt-6 pb-8 md:table-row md:border-t-0 md:border-b md:pt-0 md:pb-0"
