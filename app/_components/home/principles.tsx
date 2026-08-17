@@ -1,5 +1,6 @@
 import { Reveal } from "../motion/reveal";
 import { Container } from "./container";
+import { PrincipleCard } from "./principle-card";
 import { PRINCIPLES } from "./principles-data";
 
 /* This module is **component-only**, and the front matter's bundle rule is why:
@@ -29,26 +30,13 @@ export function Principles() {
 
         <ul className="mt-10 grid gap-6 md:mt-12 lg:grid-cols-3">
           {PRINCIPLES.map((p) => (
-            <li
+            <PrincipleCard
               key={p.title}
-              className="flex flex-col rounded-card bg-white p-8 md:p-10"
-              data-reveal-item
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-12"
-                aria-hidden
-              >
-                {p.icon}
-              </svg>
-              <h3 className="mt-8 font-sans text-p1 font-bold">{p.title}</h3>
-              <p className="mt-2 font-serif text-p2">{p.body}</p>
-            </li>
+              principle={p}
+              className="bg-white p-8 md:p-10"
+              headingClassName="mt-8"
+              revealItem
+            />
           ))}
         </ul>
       </Container>

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { ButtonLink } from "../primitives";
 import { Container } from "../home/container";
+import { PrincipleCard } from "../home/principle-card";
 import { PRINCIPLES } from "../home/principles-data";
 import { Reveal } from "../motion/reveal";
 
@@ -137,25 +138,12 @@ export function Values() {
           className="mt-8 grid gap-4 md:mt-10 lg:grid-cols-3"
         >
           {PRINCIPLES.map((p) => (
-            <li
+            <PrincipleCard
               key={p.title}
-              className="flex flex-col rounded-card bg-surface p-10"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-12"
-                aria-hidden
-              >
-                {p.icon}
-              </svg>
-              <h3 className="mt-5 font-sans text-p1 font-bold">{p.title}</h3>
-              <p className="mt-2 font-serif text-p2">{p.body}</p>
-            </li>
+              principle={p}
+              className="bg-surface p-10"
+              headingClassName="mt-5"
+            />
           ))}
         </Reveal>
       </Container>

@@ -181,3 +181,30 @@ three breakpoints (`magick compare -metric AE` = 0 against a worktree build of
 the parent commit) — the `PRINCIPLES` export and the `CtaBand` prop are inert.
 The sticky bar still pins on `/about` past the fold at all three widths.
 
+
+## Prompt 114 — the values cards now share the homepage's card component
+
+"Our values" renders the same three `PRINCIPLES` items as `/`'s "Built for
+clarity", and until this prompt the card markup existed twice. It now comes from
+`app/_components/home/principle-card.tsx`, which holds only the invariant part —
+the `<li>` box model, the SVG attribute block, and the `h3` / `p` pair.
+
+**Nothing measured on this page moved.** The five differences between the two
+call sites are preserved exactly, and the table recording them lives in
+`docs/motion-homepage.md` under prompt 114 rather than being repeated here. The
+two that belong to `/about` are its grid, `mt-8 grid gap-4 md:mt-10
+lg:grid-cols-3`, and its card, `rounded-card bg-surface p-10` with the heading at
+`mt-5`. The deviations already recorded above — the 48px icon against the comp's
+42px of ink among them — are untouched, because the icon rendering did not
+change.
+
+`Reveal as="ul"` stays at this call site. It is not the homepage's section-level
+`stagger`, and the two are measured separately (`docs/motion-site.md`): the cards
+here carry **no** `data-reveal-item`, and a browser probe of the production build
+confirms they sit at `opacity 1` / `transform: none` throughout while the list
+above them reveals.
+
+`/about`'s prerendered HTML is **byte-identical** across the change — one of 21
+files that were, after normalising `BUILD_ID` and both content-hashed chunk
+patterns, all unchanged. See `docs/motion-homepage.md`, prompt 114, for the
+paired-build method and the CSS-delta finding that came with it.

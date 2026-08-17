@@ -1245,3 +1245,100 @@ guarantee and what the four cautionary comments citing it protect
 (`nav-drop.tsx:69`, `footer-reveal.tsx:56`, `journal/stamp-perforations.tsx:35`,
 `capability-visual.tsx:43`). This codebase has no such importer today. The value
 of the deletion is that the door is shut, not that a bundle shrank.
+
+## Prompt 114 — the principle card, extracted (the `/` side and the stagger hook)
+
+The same card rendered twice over the same `PRINCIPLES` array, in
+`home/principles.tsx` and `about/sections.tsx`. Prompt 113 had just shut the
+re-export between those two files; this one collapses the markup that sat on
+either side of it.
+
+**It is a variant, not a copy, and the five differences are the record.** They
+were read out of the two sources and are preserved unchanged — the next session
+does not have to re-derive them:
+
+| | `/` | `/about` |
+| --- | --- | --- |
+| list wrapper | `<ul>` inside `<Reveal as="section" stagger>` | `<Reveal as="ul">` |
+| grid | `mt-10 grid gap-6 md:mt-12 lg:grid-cols-3` | `mt-8 grid gap-4 md:mt-10 lg:grid-cols-3` |
+| card | `rounded-card bg-white p-8 md:p-10` | `rounded-card bg-surface p-10` |
+| heading spacing | `mt-8` | `mt-5` |
+| stagger hook | `data-reveal-item` | absent |
+
+`app/_components/home/principle-card.tsx` holds only the invariant part — the
+`<li>` box model, the eight-attribute SVG block, and the `h3` / `p` pair — and
+takes three props: `className` (background and padding), `headingClassName`
+(the measured top margin), and `revealItem`. The grid and the `Reveal` wrapper
+stay at each call site, because they differ structurally and not by a class;
+`/about`'s list-level reveal is a separate measurement in `docs/motion-site.md`.
+
+**Why extracting won the judgement the prompt left open.** The invariant surface
+is ~15 lines of markup, the variant surface is three props. Where those numbers
+had come out level the prompt's own instruction was to leave both sites alone
+and cross-reference them instead.
+
+**It stays a server component.** It imports the `PRINCIPLES` *type* only, from
+`principles-data.tsx`, so neither page gains a client boundary and the front
+matter's bundle rule is untouched.
+
+### `data-reveal-item` survives being emitted by a child
+
+The hook is a GSAP selector, not styling, and getting it wrong would break the
+homepage stagger silently — the cards would still render, just without their
+reveal. Two things confirm it did not:
+
+- `revealItem` is written `data-reveal-item={revealItem || undefined}`, so React
+  emits `data-reveal-item="true"` on `/` and the attribute is **absent** on
+  `/about` — which is exactly what the built HTML shows (45 occurrences in
+  `index.html`, 3 in `about.html`, none of the latter on a values card).
+- A `Reveal` scope selector still matches an attribute set by a child component,
+  because the scope is a DOM subtree and not a compile-time one.
+
+### Checks
+
+`npm run lint` and `npm run typecheck` exited 0 with no diagnostics. `npm test`
+passed 302 tests in 12 files.
+
+### Prerender diff — `cd928f6` vs this change
+
+Paired builds per `docs/automation.md`, both with the same in-memory
+`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, both trees excluding `.claude/` and
+`.agents/`. Route tables identical, 32 static pages generated on each side.
+Both sides produced the same **21** `app/**/*.html` paths, and after normalising
+`BUILD_ID` and both content-hashed chunk patterns and stripping the
+`self.__next_f.push` scripts, **0 files differed**.
+
+**The HTML being byte-identical is what settles `/` and `/about`.** No
+`magick compare` was run, and the standing capabilities-cloth masking warning
+therefore never came into play — a pixel comparison answers a weaker question
+than the one already answered here.
+
+### A CSS delta that was not this change
+
+The first paired build reported **three added rules, all for one custom utility
+unrelated to this work** — the dead two-word band class that `prompts/115` exists
+to delete, deliberately not spelled here. It is defined in `app/globals.css`, has
+no consumer, and shipped only because that **untracked** prompt file names the
+token six times and Tailwind v4 scans `prompts/` — the prompt-74 trap, hit again
+by the prompt file written to remove the utility. Rebuilding the implementation
+tree with that one file removed put the CSS at **68,656 bytes on both sides,
+0 rules added and 0 removed**. Nothing in this change touches the CSS.
+
+### The stagger, confirmed running rather than assumed
+
+A prerendered-HTML diff cannot see a GSAP failure, so the production build was
+served on port 3001 and driven with the project's own Playwright Chromium at
+1280×900, sampling computed style on the three cards after scrolling the section
+into view:
+
+| | card 1 | card 2 | card 3 |
+| --- | --- | --- | --- |
+| at scroll-in | `opacity 0`, `y 36` | `opacity 0`, `y 36` | `opacity 0`, `y 36` |
+| t ≈ 150 ms | 0.032 | 0 | 0 |
+| t ≈ 300 ms | 0.810 | 0.548 | 0.078 |
+| t ≈ 450 ms | 0.984 | 0.928 | 0.789 |
+| settled | `opacity 1`, `y 0` | `opacity 1`, `y 0` | `opacity 1`, `y 0` |
+
+The three lead each other in order, which is the stagger and not one shared
+tween. `/about`'s values cards read `opacity 1` and `transform: none`
+throughout, as they must — there the reveal is on the `<ul>` itself.
