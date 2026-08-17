@@ -42,6 +42,7 @@ skips the read will re-derive it by hand or silently break it.
 | `docs/about.md` | `/about`, the half-width sky band, the Forecast card, `AetherfieldSeal`, `about-founder.png` |
 | `docs/motion-homepage.md` | GSAP on `/` — `Reveal`, the emissions chart and its hover readout, the journal mark, the hero split, the Capabilities section |
 | `docs/motion-site.md` | motion everywhere else — `/journal`, the card hovers, the footer's split blur-in, `/about`, `/careers`, the navbar drop-in, `/job-listing` |
+| `docs/design-system.md` | `/design-system`, the nine colour swatches and why they no longer print a hex, the specs on that page that still restate `@theme` by hand |
 | `docs/site-affordances.md` | the pointer cursor on buttons |
 | `docs/backend.md` | the backend build record — the Neon resource, the connection split, `lib/db/`, the phase-one schema's column types and enums, the migrations, `.env.example` |
 | `docs/skills.md` | the installed agent skills, where each came from, what was deliberately excluded and why, and how to sync the two authored doc snapshots |

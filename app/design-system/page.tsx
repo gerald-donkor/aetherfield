@@ -30,16 +30,35 @@ export const metadata: Metadata = {
     "Foundations and components for Aetherfield, derived from the Styles reference.",
 };
 
+/**
+ * The nine colour tokens, **named here and valued only in `@theme`.**
+ *
+ * Each row used to carry a `hex` literal, and the swatch was painted from that
+ * literal — so the nine values were a hand-kept mirror of `@theme` in
+ * `app/globals.css`, and re-fitting a token moved *nothing* on this page. The
+ * page documenting the design system could report a colour the design system no
+ * longer had. Prompt 117 removed the mirror rather than trying to keep it in
+ * step: Tailwind v4 is config-less, `@theme` is the only place a colour is
+ * valued, and there is no build-time API for reading it back (v4 dropped v3's
+ * `resolveConfig`; the documented JS route is `getComputedStyle`, which is
+ * client-side and would render nothing into this static page's HTML). So the
+ * exhibit stops restating the value: it paints from the utility the token
+ * generates and prints the token's name and its role.
+ *
+ * **`utility` is a literal string per row, deliberately.** Tailwind v4 only
+ * emits what it finds in scanned source, so a `` `bg-${name}` `` template would
+ * generate no class and the swatch would paint nothing.
+ */
 const SWATCHES = [
-  { name: "ink", hex: "#000000", role: "Primary text, fills" },
-  { name: "muted", hex: "#6C6C6C", role: "Meta, captions" },
-  { name: "border", hex: "#DBE0EC", role: "Hairlines, placeholders" },
-  { name: "surface", hex: "#F6F8FB", role: "Tinted bands" },
-  { name: "white", hex: "#FFFFFF", role: "Page, cards" },
-  { name: "accent-soft", hex: "#ADD5FD", role: "Tints" },
-  { name: "accent", hex: "#2683EB", role: "Links, focus" },
-  { name: "brand", hex: "#FFF546", role: "Footer field" },
-  { name: "brand-ink", hex: "#66640F", role: "Ink on brand" },
+  { name: "ink", utility: "bg-ink", role: "Primary text, fills" },
+  { name: "muted", utility: "bg-muted", role: "Meta, captions" },
+  { name: "border", utility: "bg-border", role: "Hairlines, placeholders" },
+  { name: "surface", utility: "bg-surface", role: "Tinted bands" },
+  { name: "white", utility: "bg-white", role: "Page, cards" },
+  { name: "accent-soft", utility: "bg-accent-soft", role: "Tints" },
+  { name: "accent", utility: "bg-accent", role: "Links, focus" },
+  { name: "brand", utility: "bg-brand", role: "Footer field" },
+  { name: "brand-ink", utility: "bg-brand-ink", role: "Ink on brand" },
 ];
 
 /* Sample content for the card specimens — the styleguide renders them inert,
@@ -210,13 +229,11 @@ export default function Page() {
           {SWATCHES.map((s) => (
             <li key={s.name}>
               <div
-                style={{ backgroundColor: s.hex }}
-                className="aspect-square w-full border border-border"
+                className={`aspect-square w-full border border-border ${s.utility}`}
               />
               <p className="mt-3 font-sans text-[13px] leading-tight font-bold">
                 {s.name}
               </p>
-              <p className="mt-1 font-mono text-[11px] text-muted">{s.hex}</p>
               <p className="mt-1 font-serif text-[13px] leading-tight text-muted">
                 {s.role}
               </p>
