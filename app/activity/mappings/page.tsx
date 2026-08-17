@@ -1,9 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { FactorPicker } from "../../_components/activity/factor-picker";
+import { FactorChoicePanel } from "../../_components/activity/factor-choice-panel";
+import { FactorCoverageList } from "../../_components/activity/factor-coverage-list";
+import {
+  basisOf,
+  first,
+  isCategory,
+  isUnit,
+  laneOf,
+  type Lane,
+} from "../../_components/activity/mapping-selection";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
-import { Button } from "../../_components/primitives";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
 import {
@@ -21,17 +29,11 @@ import {
   type RankedFactorMatch,
 } from "../../../lib/domain/factor-match";
 import {
-  ACTIVITY_CATEGORIES,
-  ACTIVITY_UNITS,
   factorSearchSchema,
   offersMarketLane,
-  type ActivityCategory,
   type ActivityUnit,
 } from "../../../lib/validation/activity";
-import {
-  SCOPE2_MARKET_BASIS_LABELS,
-  type Scope2MarketBasis,
-} from "../../../lib/validation/emissions";
+import type { Scope2MarketBasis } from "../../../lib/validation/emissions";
 
 /**
  * The factor-mapping surface — prompt 65.
@@ -44,6 +46,14 @@ import {
  * The route is deliberately not a top-level `WorkspaceNav` tab. It is an
  * Activity sub-flow: a reporter comes here from the coverage line or the
  * Activity page when committed records are outside the current mapping.
+ *
+ * **The composition root.** Prompt 120 moved the coverage list with its
+ * market-based lane, the factor-choice panel with its search form, and the
+ * query-string vocabulary into `app/_components/activity/`. What stays here is
+ * every read — `listFactorCoverage`, `listFactorSets`,
+ * `listMarketBasedMappings` and `presentSearch`'s two factor searches — because
+ * only a Server Component fetches this page's data and the page is where it is
+ * fetched (AGENTS.md 6.2). Neither extracted component imports `lib/db` at all.
  */
 
 export const metadata: Metadata = {
@@ -67,57 +77,6 @@ type SearchPresentation = {
       re-deriving the rule beside the button. */
   lexicalOnly: boolean;
 };
-
-function first(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
-}
-
-function isCategory(value: string): value is ActivityCategory {
-  return ACTIVITY_CATEGORIES.includes(value as ActivityCategory);
-}
-
-function isUnit(value: string): value is ActivityUnit {
-  return ACTIVITY_UNITS.includes(value as ActivityUnit);
-}
-
-function label(value: string): string {
-  return value.replaceAll("_", " ");
-}
-
-/** The lane, as it travels in the query string. `market` is the only value that
-    means anything other than the default lane, and anything else reads as the
-    default — a forged value selects the lane a reporter would have got anyway,
-    and the action re-derives it from its own input regardless. */
-type Lane = "market_based" | null;
-
-function laneOf(value: string): Lane {
-  return value === "market" ? "market_based" : null;
-}
-
-/** The basis, on the same footing as the lane — prompt 86. `fallback` is the
-    only value that means anything other than a contractual instrument, and
-    anything else reads as the contractual basis, which is the one a reporter
-    reaching the market lane would have got anyway. The action re-derives it
-    from its own input and re-checks the factor against it regardless. */
-function basisOf(value: string): Scope2MarketBasis {
-  return value === "fallback" ? "grid_average" : "contractual_instrument";
-}
-
-function pairHref(
-  category: ActivityCategory,
-  unit: ActivityUnit,
-  q = "",
-  lane: Lane = null,
-  basis: Scope2MarketBasis = "contractual_instrument",
-): string {
-  const params = new URLSearchParams({ category, unit });
-  if (q.trim() !== "") params.set("q", q.trim());
-  if (lane === "market_based") {
-    params.set("lane", "market");
-    if (basis === "grid_average") params.set("basis", "fallback");
-  }
-  return `/activity/mappings?${params.toString()}`;
-}
 
 async function presentSearch(
   organizationId: string,
@@ -220,96 +179,6 @@ async function presentSearch(
     invalid: false,
     lexicalOnly,
   };
-}
-
-/**
- * One pair's market-based lane — prompt 85, extended by prompt 86.
- *
- * **Three states, and the panel says which**: a mapped contractual rate, a
- * mapped grid-average fallback, and an unmapped lane. None of them reads as an
- * error — an absent market-based rate is the expected state for most reporters.
- *
- * **The fallback is a second, separately-worded choice, never a toggle that
- * silently changes what the picker returns.** It is the Scope 2 Guidance's
- * rung 5, and offering it wordlessly beside rung 1–3 would be exactly the
- * silent substitution prompt 85's D5 refuses. So it is named, its consequence
- * is stated in the same sentence as the offer, and choosing it records an
- * assertion rather than picking a filter.
- */
-function MarketLane({
-  mapping,
-  href,
-  fallbackHref,
-}: {
-  mapping: {
-    basis: Scope2MarketBasis;
-    factorLabel: string;
-    source: string;
-    datasetVersion: string;
-    customerSupplied: boolean;
-    chosenBy: string | null;
-  } | null;
-  href: string;
-  fallbackHref: string;
-}) {
-  const fallback = mapping?.basis === "grid_average";
-  return (
-    <div className="mt-5 border-t border-border pt-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <p className="font-mono text-[11px] leading-[16px] text-muted uppercase">
-          Market-based lane
-        </p>
-        <Link
-          href={href}
-          className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          {mapping ? "Change rate" : "Map a rate"}
-        </Link>
-      </div>
-      {mapping ? (
-        <>
-          <p className="mt-3 wrap-anywhere font-serif text-[16px] leading-6 text-ink">
-            {mapping.factorLabel}
-          </p>
-          <p className="mt-2 font-mono text-[11px] leading-[18px] text-muted">
-            {SCOPE2_MARKET_BASIS_LABELS[mapping.basis]} ·{" "}
-            {mapping.source} {mapping.datasetVersion}
-            {mapping.customerSupplied ? " · customer-supplied" : ""}
-            {mapping.chosenBy ? ` · chosen by ${mapping.chosenBy}` : ""}
-          </p>
-          {fallback ? (
-            <p className="mt-3 max-w-[34rem] border-l-2 border-ink py-1 pl-4 font-mono text-[11px] leading-[18px]">
-              This pair&apos;s market-based figure is a grid average, recorded
-              as the hierarchy&apos;s rung 5. It is labelled as a fallback
-              wherever it is shown and in the report&apos;s caveats. Map a
-              contractual rate to replace it.
-            </p>
-          ) : null}
-        </>
-      ) : (
-        <>
-          <p className="mt-3 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
-            No market-based rate is mapped, so this pair contributes to the
-            location-based figure only. Nothing is substituted for it.
-          </p>
-          <p className="mt-3 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
-            If you hold no contract, certificate or supplier rate for this
-            consumption, you can report the grid average on the market lane as
-            the hierarchy&apos;s rung 5. It is a statement that no better
-            instrument exists, it is labelled as a fallback everywhere it
-            appears, and it does not make the market-based figure comparable to
-            a procured one.{" "}
-            <Link
-              href={fallbackHref}
-              className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            >
-              Use the grid-average fallback
-            </Link>
-          </p>
-        </>
-      )}
-    </div>
-  );
 }
 
 export default async function ActivityMappingsPage({
@@ -446,253 +315,19 @@ export default async function ActivityMappingsPage({
           </section>
         ) : (
           <div className="mt-16 grid gap-12 xl:grid-cols-[0.9fr_1.3fr] xl:items-start">
-            <section aria-labelledby="factor-coverage-heading">
-              <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
-                <h2
-                  id="factor-coverage-heading"
-                  className="font-sans text-[28px] leading-8 font-bold"
-                >
-                  Coverage
-                </h2>
-                <p className="font-mono text-caption text-muted">
-                  Unmapped first
-                </p>
-              </div>
-              <ul aria-label="Activity pairs and mapped factors">
-                {coverage.map((pair) => {
-                  const current =
-                    selected?.category === pair.category &&
-                    selected.unit === pair.unit;
-                  return (
-                    <li
-                      key={`${pair.category}.${pair.unit}`}
-                      className={`border-b border-border py-5 first:border-t ${
-                        current ? "border-l-2 border-l-ink pl-4" : ""
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="font-sans text-[17px] leading-6 font-bold text-ink">
-                            {label(pair.category)} · {pair.unit}
-                          </p>
-                          <p className="mt-2 font-mono text-[11px] leading-[18px] text-muted">
-                            {pair.recordCount.toLocaleString("en-GB")}{" "}
-                            {pair.recordCount === 1 ? "record" : "records"}
-                          </p>
-                        </div>
-                        <Link
-                          href={pairHref(pair.category, pair.unit)}
-                          aria-current={current ? "true" : undefined}
-                          className="font-sans text-nav font-bold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                        >
-                          {pair.mapping ? "Change" : "Map factor"}
-                        </Link>
-                      </div>
-                      {pair.mapping ? (
-                        <div className="mt-4">
-                          <p className="wrap-anywhere font-serif text-[16px] leading-6 text-ink">
-                            {pair.mapping.factorLabel}
-                          </p>
-                          <p className="mt-2 font-mono text-[11px] leading-[18px] text-muted">
-                            {pair.mapping.source}{" "}
-                            {pair.mapping.datasetVersion}
-                            {pair.mapping.customerSupplied
-                              ? " · customer-supplied"
-                              : ""}
-                            {pair.mapping.chosenBy
-                              ? ` · chosen by ${pair.mapping.chosenBy}`
-                              : " · seeded default"}
-                          </p>
-                          {/* Mapped and still contributing nothing. Without
-                              this the pair reads as covered. */}
-                          {pair.outOfPeriodRecords > 0 ? (
-                            <p className="mt-3 max-w-[34rem] border-l-2 border-ink py-1 pl-4 font-mono text-[11px] leading-[18px]">
-                              {`${pair.outOfPeriodRecords.toLocaleString(
-                                "en-GB",
-                              )} of ${
-                                pair.recordCount === pair.outOfPeriodRecords
-                                  ? "these"
-                                  : "them"
-                              } fall outside every loaded factor set's activity dates and produce no figure.`}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-4 max-w-[34rem] font-serif text-[16px] leading-6 text-muted">
-                          No factor is mapped, so records in this pair do not
-                          contribute to the emissions total.
-                        </p>
-                      )}
-                      {/* The market-based lane — prompt 85. Shown beside the
-                          grid-average mapping, never in place of it: the Scope
-                          2 Guidance asks for both figures, and a pair with no
-                          contractual rate says so rather than borrowing the
-                          grid average. */}
-                      {offersMarketLane(pair.category) ? (
-                        <MarketLane
-                          mapping={
-                            marketByPair.get(
-                              `${pair.category}.${pair.unit}`,
-                            ) ?? null
-                          }
-                          /* "Change rate" lands on the basis the pair is
-                             already mapped under, so changing a fallback does
-                             not silently offer a contractual list. */
-                          href={pairHref(
-                            pair.category,
-                            pair.unit,
-                            "",
-                            "market_based",
-                            marketByPair.get(`${pair.category}.${pair.unit}`)
-                              ?.basis ?? "contractual_instrument",
-                          )}
-                          fallbackHref={pairHref(
-                            pair.category,
-                            pair.unit,
-                            "",
-                            "market_based",
-                            "grid_average",
-                          )}
-                        />
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
+            <FactorCoverageList
+              coverage={coverage}
+              selected={selected}
+              marketByPair={marketByPair}
+            />
 
             {selected ? (
-              <section aria-labelledby="factor-picker-heading">
-                <h2
-                  id="factor-picker-heading"
-                  className="font-sans text-[28px] leading-8 font-bold"
-                >
-                  {lane !== "market_based"
-                    ? "Choose a factor"
-                    : basis === "grid_average"
-                      ? "Choose a grid-average factor as the fallback"
-                      : "Choose a market-based rate"}
-                </h2>
-                <p className="mt-4 max-w-[700px] font-serif text-p2 text-muted">
-                  {lane !== "market_based"
-                    ? `Showing factors whose denominator can calculate activity measured in ${selected.unit}. Search the publisher level and column descriptions to narrow the list.`
-                    : basis === "grid_average"
-                      ? `Showing scope 2 grid-average factors whose denominator can calculate activity measured in ${selected.unit} — the same published factors the location-based lane uses. Choosing one records that no contract, certificate or supplier rate covers this consumption, and reports the grid average on the market lane as the hierarchy's rung 5. It is labelled as a fallback on every surface and in the report's caveats.`
-                      : `Showing scope 2 factors recorded as market-based whose denominator can calculate activity measured in ${selected.unit}. A market-based rate comes from a contract, a supplier disclosure or an energy attribute certificate you hold. Add one under Add customer factor if the rate you need is not listed.`}
-                </p>
-                {offersMarketLane(selected.category) ? (
-                  <p className="mt-4 font-sans text-nav font-bold">
-                    <Link
-                      href={pairHref(
-                        selected.category,
-                        selected.unit,
-                        "",
-                        lane === "market_based" ? null : "market_based",
-                      )}
-                      className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                    >
-                      {lane === "market_based"
-                        ? "Choose the location-based factor instead"
-                        : "Choose the market-based rate instead"}
-                    </Link>
-                    {/* The two bases are two choices, not a filter toggle: each
-                        link says what the other one asserts. */}
-                    {lane === "market_based" ? (
-                      <>
-                        <span className="mx-4 font-mono text-caption text-muted">
-                          /
-                        </span>
-                        <Link
-                          href={pairHref(
-                            selected.category,
-                            selected.unit,
-                            "",
-                            "market_based",
-                            basis === "grid_average"
-                              ? "contractual_instrument"
-                              : "grid_average",
-                          )}
-                          className="underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                        >
-                          {basis === "grid_average"
-                            ? "Map a contractual rate instead"
-                            : "Use the grid-average fallback instead"}
-                        </Link>
-                      </>
-                    ) : null}
-                  </p>
-                ) : null}
-                <FactorPicker
-                  category={selected.category}
-                  unit={selected.unit}
-                  lane={lane}
-                  basis={basis}
-                  factors={search.factors}
-                  searchMessage={search.message}
-                  searchInvalid={search.invalid}
-                >
-                  <form method="get" className="mt-8 border-y border-border py-6">
-                    <input
-                      type="hidden"
-                      name="category"
-                      value={selected.category}
-                    />
-                    <input type="hidden" name="unit" value={selected.unit} />
-                    {/* Without this the search would drop the reporter back to
-                        the default lane on every submit. */}
-                    {lane === "market_based" ? (
-                      <input type="hidden" name="lane" value="market" />
-                    ) : null}
-                    {/* And the basis with it, for the same reason. */}
-                    {lane === "market_based" && basis === "grid_average" ? (
-                      <input type="hidden" name="basis" value="fallback" />
-                    ) : null}
-                    <label
-                      htmlFor="factor-search"
-                      className="block font-sans text-nav font-bold text-ink"
-                    >
-                      Search factors for {label(selected.category)} ·{" "}
-                      {selected.unit}
-                    </label>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
-                      <input
-                        id="factor-search"
-                        name="q"
-                        defaultValue={search.q}
-                        maxLength={120}
-                        className="h-[52px] w-full border border-border bg-white px-4 font-sans text-[16px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-muted/70 focus:border-accent focus:shadow-[0_0_0_1px_var(--color-accent)]"
-                        placeholder="Diesel, electricity, landfill..."
-                      />
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          type="submit"
-                          name="mode"
-                          value="lexical"
-                          bullet={false}
-                        >
-                          Search exact text
-                        </Button>
-                        {search.lexicalOnly ? null : (
-                          <Button
-                            type="submit"
-                            name="mode"
-                            value="fuzzy"
-                            size="secondary"
-                            bullet={false}
-                          >
-                            Find close wording
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    <p className="mt-3 max-w-[40rem] font-mono text-[11px] leading-[18px] text-muted">
-                      {search.lexicalOnly
-                        ? "This list holds only the market-based rates recorded in this workspace, so it is searched by exact text."
-                        : "Close-wording search compares character groups in this database. It can help with misspellings, but it can miss synonyms and does not choose a factor for you."}
-                    </p>
-                  </form>
-                </FactorPicker>
-              </section>
+              <FactorChoicePanel
+                selected={selected}
+                lane={lane}
+                basis={basis}
+                search={search}
+              />
             ) : null}
           </div>
         )}
