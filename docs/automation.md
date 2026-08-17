@@ -1222,6 +1222,56 @@ For reference, at `08f61a2` that gives `/` 901,275 B over 10 chunks, `/about`
 `/design-system` 889,192 over 9.
 
 
+## Two traps in building the baseline somewhere else, found at prompts 115-120
+
+**Trap 11 — a CSS byte figure is meaningless without saying where the build
+ran.** `.claude/skills/` and `.agents/skills/` sit inside the scanned root, and
+the Tailwind docs snapshot in them is thousands of class names, so v4's automatic
+content detection generates utilities for all of them. The *same commit*
+(`2f0eef8`) emits:
+
+| built at | CSS |
+| --- | --- |
+| the repository root | **11,186 + 408,563 = 419,749** bytes, two chunks |
+| inside a worktree (cannot see the root's snapshots) | **74,868** bytes, one chunk |
+
+The chunk *count* differs too, so every page's `<link rel="stylesheet">` set
+differs and **all 21 pages report as differing** — trap 2's signature from a new
+cause. **Build both sides in the same place.** The cheapest correct baseline is
+therefore at the root itself, on a clean `.next`:
+
+```bash
+rm -rf .next && git checkout --detach <base> -q && npm run build   # snapshot
+git checkout main -q && rm -rf .next && npm run build              # snapshot
+```
+
+Trap 1's advice to exclude the snapshots is still right for a *scratch tree*, but
+then the comparison must exclude them on **both** sides.
+
+The same asymmetry explains why prose scanning (trap, "Tailwind v4 scans prose")
+can make a **dead** class ship: at prompt 115 an untracked
+`prompts/115-dead-duotone-band-utility.md` quoting `duotone-band` a dozen times
+put the class in the build, and the emitted rule was then misattributed to the
+`@utility` definition itself. **Before pricing a CSS deletion, `grep -c` the
+class in the built chunks and check no prose in the root names it.** See
+`docs/chrome.md`, which records the corrected measurement.
+
+**Trap 12 — Turbopack refuses a `node_modules` symlink that leaves the project
+root.** A throwaway baseline worktree outside the repository fails the build
+outright:
+
+```
+Error [TurbopackInternalError]: Symlink [project]/node_modules is invalid,
+it points out of the filesystem root
+```
+
+So put a scratch worktree **inside** the repository (`.claude/worktrees/base`),
+where the symlink resolves — or `cp -al` the real `node_modules` instead of
+linking it. Note that a worktree inside `.claude/` then triggers trap 11, and
+that **ESLint lints worktrees too**: five of them under `.claude/worktrees/`
+turned `npm run lint` into `179,832 problems (5,465 errors)`, none of them real.
+Remove the worktrees before believing a root-level lint.
+
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.

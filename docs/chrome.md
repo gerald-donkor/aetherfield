@@ -56,21 +56,42 @@ So it is deleted, comment included. **The fitted values above are the record —
 they are not to be re-derived from the comp** — and the full source is in `git`
 history at `app/globals.css:311-345` as of commit `2f0eef8`.
 
-**It was not being tree-shaken.** Tailwind v4 emitted the whole utility into the
-production stylesheet even with no `className` using it, because the extractor
-scans `app/globals.css` itself as a source file and finds `duotone-band` in the
-`@utility` line — so a definition is its own class candidate. Measured, not
-assumed: the built CSS went from **409,806 to 408,563 bytes** in the large chunk
-(the 11,186-byte chunk unchanged), **−1,243 bytes**, and the shipped rule was
-present twice — once with `color-mix()` and once pre-resolved to `#66640fe0`
-etc. for browsers without it. This is the one interesting finding here: an
-unreferenced v4 `@utility` is **not** free, and a dead-CSS audit can quote a
-real number.
+**It *was* being tree-shaken, and the deletion costs the stylesheet nothing.**
+This corrects the first measurement recorded here, which claimed the opposite
+(**−1,243 bytes**, and that "a definition is its own class candidate"). Both
+halves were wrong, and the cause is a **measurement artifact worth knowing
+about**: the original figure was taken while
+`prompts/115-dead-duotone-band-utility.md` sat untracked in the project root
+quoting `duotone-band` a dozen times. Tailwind v4's automatic content detection
+scans `.md` files, so **the prompt file describing the dead class is what made
+the class live** — and the rule it caused to be emitted was then attributed to
+the `@utility` definition.
 
-All **21** prerendered HTML files are byte-identical across the two builds
-(normalising only `.next/BUILD_ID` and the CSS chunk name; JS chunk names left
-un-normalised and matched anyway), which is the pass condition — a stylesheet
-change must appear in no markup.
+Re-measured at the repository root against a clean `.next`, with the class named
+nowhere but `globals.css` itself:
+
+- at `2f0eef8`, `grep -c duotone-band` over both built CSS chunks returns **`0`**
+  — the utility never reached the stylesheet;
+- built CSS at `2f0eef8` is **11,186 + 408,563 = 419,749 bytes**, which is
+  exactly the total the first measurement recorded as its *post*-deletion figure.
+
+So the deletion is still right — the utility is dead and the footer's band is
+`texture-brand.png` — but its benefit is **legibility only, zero bytes**. An
+unreferenced v4 `@utility` *is* free.
+
+**The general trap, for anyone measuring built CSS here: `.claude/skills/` and
+`.agents/skills/` are inside the scanned root, and the Tailwind docs snapshot in
+them is thousands of class names.** A build at the repository root emits
+~419.7 KB of CSS; the identical commit built inside a worktree, which cannot see
+them, emits ~74.9 KB in a single chunk instead of two. **Two builds are only
+comparable when both ran in the same place**, and a CSS byte figure is
+meaningless without saying which. Prompt 117's ~68 KB figures and prompt 115's
+~420 KB figures are both internally consistent for this reason.
+
+All **21** prerendered HTML files are byte-identical across the two root builds
+(normalising `.next/BUILD_ID`, both chunk-name patterns and the flight payload's
+module ids), which is the pass condition — a stylesheet change must appear in no
+markup.
 
 ## Site header (`SiteNav`)
 
