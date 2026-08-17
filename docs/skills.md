@@ -154,10 +154,23 @@ Prompt 40 initialized `tailwind-4-docs` with the license-gated sync its own
 `SKILL.md` requires. The successful script is silent; success must be checked
 from the three generated artefacts rather than inferred from terminal output:
 
-- `references/docs-source.txt` now says `Status: Initialized` and pins upstream
-  commit `6393f18203c68e29c4ca5b398873e6b89bb4930b` from 28 Jul 2026;
-- `references/docs/` contains **236 files / 5.0 MB**;
+- `references/docs-source.txt` pins the upstream commit, its date, and a
+  `Snapshot-Date`. **It carries no `Status:` line** — this file claimed one until
+  17 Aug 2026, describing a format the script does not write, so do not go
+  looking for it. Re-synced that day from `6393f18` (28 Jul 2026) to
+  `bd868a314bd05ca78acd047e3da289274dd6ccd7` (11 Aug 2026);
+- `references/docs/` contains **236 files / 5.0 MB**, unchanged across that
+  re-sync. Count them with `find … -type f`: a bare `ls | wc -l` sees only the
+  199 top-level entries and under-reports by whatever the three subdirectories
+  hold;
 - `references/docs-index.tsx` exists and is 12 KB.
+
+**The skill treats a snapshot older than one week as stale** and asks before
+answering from it. That is a real gate, not a formality — but it is also not an
+automatic blocker: prompt 114 proceeded on a 10-day-old snapshot because it
+introduced no utility and was verified by byte-identical prerendered output, and
+said so. Re-sync when the answer depends on what the docs say; record the
+judgement when it does not.
 
 The snapshot is deliberately **not committed**. `tailwindcss.com` is
 source-available, not open-source, and the sync requires the user to accept its
