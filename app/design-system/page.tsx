@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import {
   ArticleCardCompact,
   ArticleCardHorizontal,
@@ -17,6 +19,16 @@ import {
   Placeholder,
   SelectField,
 } from "../_components/primitives";
+
+/**
+ * **The string that used to be the root default**, moved here at prompt 112 —
+ * this is the page it was written for. Unchanged, word for word.
+ */
+export const metadata: Metadata = {
+  title: "Aetherfield — Design System",
+  description:
+    "Foundations and components for Aetherfield, derived from the Styles reference.",
+};
 
 const SWATCHES = [
   { name: "ink", hex: "#000000", role: "Primary text, fills" },

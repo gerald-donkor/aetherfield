@@ -178,3 +178,98 @@ panel-close callback. The fitted blur, tint, geometry and type are untouched.
 The homepage's `Explore the platform` uses the same destination. `Request a
 demo` remains inert for build step 2, and the footer's settled links remain
 unchanged.
+
+## The tab title, prompt 112
+
+The browser tab is chrome, and the homepage's read **"Aetherfield — Design
+System"**. So did its bookmark, its search result and every social unfurl. The
+root default in `app/layout.tsx` was a leftover from when `/design-system` was
+the only route; seven routes later it was wrong for all of them and right for
+exactly one. This is the only finding in the step-13/standards review that a
+visitor to the shipped site could see.
+
+### Which routes inherited it
+
+Every `page.tsx` was enumerated first, because the finding is about the homepage
+but the blast radius is everything that inherits. **Three routes set no metadata
+of their own**, and a fourth turned up in the build:
+
+| route | disposition |
+| --- | --- |
+| `/` | **given its own metadata** |
+| `/design-system` | **given the string that was moved off the root** — it is the page that description was written for |
+| `app/submissions/applications/[id]/cv` | **left alone, deliberately.** It only ever `notFound()`s or `redirect()`s to a signed URL; it never renders a document, so its `<title>` is never seen |
+| `/_not-found` | **not in the prompt's enumeration**, and found in the prerender diff. It carries the root default, so its title changed from "Aetherfield — Design System" to "Aetherfield". Correct and intended |
+
+Three inheriting routes is inside the prompt's "more than two or three, stop and
+report" threshold, so no split was needed.
+
+### The strings
+
+All four are **editorial judgements** (§12 rule 4). There is no comp for a
+`<title>`, and none is claimed.
+
+| where | title | description |
+| --- | --- | --- |
+| root default | `Aetherfield` | `Track impact, reduce emissions, and accelerate progress—with clarity and confidence.` |
+| `/` | `Aetherfield — Sustainability insights, built for business` | the same line |
+| `/design-system` | `Aetherfield — Design System` | `Foundations and components for Aetherfield, derived from the Styles reference.` — both moved verbatim |
+
+**The homepage leads with the brand where subpages take `"<Page> — Aetherfield"`,
+and that is a decision rather than an inconsistency.** Both shapes were already
+in the repository: `/account` and eighteen others use the suffix form, and the
+root default used the brand-leading form. A tab or a bookmark for the site
+itself should open with the name, not end with it; a subpage should say what it
+is first.
+
+**No new prose was written.** The title is the hero's own H1 and the description
+is its subline, verbatim from `app/_components/home/hero.tsx` — AGENTS.md §5
+states the thesis and forbids re-deriving it, and this is a metadata fix rather
+than a copywriting exercise. The register is the site's: measured and
+operational, no tagline.
+
+**No `title.template`.** Twenty routes already write their full suffix, so a
+template would have to be threaded through all of them to remove something none
+of them minds repeating.
+
+### Deferred on purpose
+
+**No Open Graph or Twitter card metadata, and no OG image.** Both are real gaps
+and both are worth doing — as their own prompt, with the design attention an OG
+image needs. Adding them here would have smuggled a design deliverable into a
+one-line fix. No favicon change, no `metadataBase`, no canonical URLs, no robots
+directives, and **no `NEXT_PUBLIC_*`** — these are literals in source, not
+environment values (§8.4).
+
+### Verified
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, 302 passed |
+| `npm run build` | route table unchanged — `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG` |
+
+**The prerender diff: 19 of 21 pages byte-identical**, and the two that differ —
+`index.html` and `_not-found.html` — differ **only** in `<title>` and
+`<meta name="description">`, confirmed by a prefix/suffix scan showing the
+surrounding bytes match exactly. No on-page markup changed anywhere, which was
+the condition. Titles read back out of the built HTML:
+
+```
+index.html          Aetherfield — Sustainability insights, built for business
+design-system.html  Aetherfield — Design System
+_not-found.html     404: This page could not be found.  (+ the inherited "Aetherfield")
+about.html          About — Aetherfield
+journal.html        Journal — Aetherfield
+careers.html        Careers — Aetherfield
+```
+
+> **A false alarm worth recording.** A naive `<body.*>` capture reports the body
+> as differing on those two pages. It does not: **the App Router streams the
+> metadata tags inside `<body>`**, so the regex swallows the title and the meta
+> description. Compare `<head>` and on-page markup separately, or normalise the
+> metadata tags out first.
+
+`SiteFooter`, `SiteNav`, the font setup in `layout.tsx` and every piece of
+visible on-page copy are untouched.
