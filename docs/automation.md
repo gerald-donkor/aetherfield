@@ -1167,6 +1167,60 @@ With that in place, a genuinely output-neutral change comes back as **21 of 21
 byte-identical**, which is a much stronger result than "markup identical" and is
 worth the two extra lines.
 
+## Chunk names and Server Action ids are per-build too — normalise both
+
+**Trap 10, found at prompt 113.** Trap 9 is not the last source of identical
+-byte-length noise. Two more move between builds of byte-identical input:
+
+**Chunk filenames.** Turbopack emits `/_next/static/chunks/2i1_rw9u6c5a7.js` on
+one build and `3240u-9wziia1.js` on the next, for the same code. Do **not** just
+strip them — that hides a genuine change of chunk set. Canonicalise each name to
+a hash of the chunk's *contents*, so identical code agrees and different code
+still shows:
+
+```python
+import hashlib, re, pathlib
+def chunk_map(side):
+    d = WD/side/".next/static/chunks"
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+            for p in d.rglob("*.js")}
+CHUNK = re.compile(r"/_next/static/chunks/([A-Za-z0-9._%\[\]-]+\.js)")
+html = CHUNK.sub(lambda m: f"/_next/static/chunks/#{cmap.get(m[1], m[1])}.js", html)
+```
+
+**Server Action ids.** `createServerReference("40cc1357…", …)` carries a 40–42
+hex-char id that is salted per build. At prompt 113 this was the *sole* remaining
+difference in a 255 KB shared chunk — which therefore hashed differently, which
+made nine pages report as differing, again at identical byte length. Replace them
+positionally, on both sides, after the build id and chunk names:
+
+```python
+def norm_actions(s):
+    n = iter(range(10**6))
+    return re.sub(r"\b[0-9a-f]{40,42}\b", lambda _: f"__ACTION_{next(n)}__", s)
+```
+
+**What is left after all three is real, and worth reading rather than dismissing.**
+At prompt 113 the residue was three `/job-listing/*` pages differing inside one
+6292-byte chunk by a **minifier local-identifier permutation** —
+`{immediate:m, className:d}` against `{immediate:d, className:m}`, same length,
+no semantic change. That is genuinely noise; a differing *length*, or a differing
+chunk count, is not.
+
+**Measuring a page's client bundle without `app-build-manifest.json`.** Turbopack
+does not write that file, so the manifest-based recipes fail. Sum the sizes of
+the chunks the prerendered HTML actually references instead — it is what the page
+loads, and it compares cleanly across builds:
+
+```python
+names = sorted(set(CHUNK.findall((WD/side/".next/server/app"/page).read_text())))
+total = sum((WD/side/".next/static/chunks"/n).stat().st_size for n in names)
+```
+
+For reference, at `08f61a2` that gives `/` 901,275 B over 10 chunks, `/about`
+890,190 over 10, `/careers` 896,558 over 10, `/journal` 891,253 over 10, and
+`/design-system` 889,192 over 9.
+
 
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than

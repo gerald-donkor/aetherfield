@@ -2,9 +2,13 @@ import { Reveal } from "../motion/reveal";
 import { Container } from "./container";
 import { PRINCIPLES } from "./principles-data";
 
-/* Re-exported so `home/sections` and every existing import still resolve;
-   the array itself lives in a component-free module — see principles-data.tsx. */
-export { PRINCIPLES };
+/* This module is **component-only**, and the front matter's bundle rule is why:
+   it imports `Reveal`, which is `"use client"` and calls `useGSAP`, so a
+   constant exported from here is an edge along which GSAP reaches an importer's
+   bundle. `PRINCIPLES` used to be re-exported from this line "so every existing
+   import still resolves" — by prompt 113 no import did. The one cross-area
+   consumer, `about/sections.tsx`, already reads it from `principles-data.tsx`,
+   which exists precisely because this went wrong once. */
 
 export function Principles() {
   return (

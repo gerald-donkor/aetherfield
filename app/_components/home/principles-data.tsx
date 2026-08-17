@@ -4,8 +4,9 @@
    values" cards are these three items verbatim and `principles.tsx` now pulls
    in the client-side `Reveal`. Importing the constant from there would put
    GSAP into /about's client chunk graph for a plain array — the same bundle
-   discipline `chrome.tsx` follows by inlining `CONTAINER`. `principles.tsx`
-   re-exports it, so `home/sections` and every existing import still resolve. */
+   discipline `chrome.tsx` follows by inlining `CONTAINER`. This module is the
+   only place to import it from — `principles.tsx` re-exported it for a while,
+   which prompt 113 removed as the open door it was. */
 export const PRINCIPLES = [
   {
     title: "Clarity drives action",
@@ -38,4 +39,3 @@ export const PRINCIPLES = [
     ),
   },
 ];
-

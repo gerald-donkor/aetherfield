@@ -50,8 +50,9 @@ route's prerendered HTML gained the homepage's 118 KB GSAP `<script>`** —
 measured on `/careers`, `/about`, `/journal`, all six articles and all three job
 listings. So `/journal`, `/careers`, `/job-listing/[slug]`, `article/sections`
 and `about/sections` import `home/container` directly, and `/about` imports
-`PRINCIPLES` from **`home/principles-data`**, a component-free module that
-`principles.tsx` re-exports.
+`PRINCIPLES` from **`home/principles-data`**, a component-free module.
+(`principles.tsx` re-exported it as well until prompt 113 — see the entry at the
+end of this file.)
 
 That last file is the one addition prompt 17 did not anticipate: `PRINCIPLES`
 could not stay in `principles.tsx` once that file imported `Reveal`, or `/about`
@@ -1157,3 +1158,90 @@ counter still runs the six readings to `583.7 ↓12.4%`, the on-screen gate stil
 holds the fall paused at scroll 0, and reduced motion still writes no transform
 at all.
 
+
+---
+
+## Prompt 113 — the dead `PRINCIPLES` re-export in `principles.tsx`
+
+`principles.tsx` carried `export { PRINCIPLES };` under a comment claiming it
+existed "so `home/sections` and every existing import still resolve". **No
+import resolved through it.** `grep -rn "PRINCIPLES" app/ lib/` returns eleven
+lines and only three are references rather than prose: `principles.tsx:3` (its
+own import) and `:31` (its own render), and `about/sections.tsx:4`, which
+already reads `from "../home/principles-data"` — the correct module. The
+comment's premise was stale, and the evidence governs (§12 rule 8).
+
+The line is deleted, together with the comment that justified it; the surviving
+comment records why the module stays component-only. `principles-data.tsx`'s own
+docstring made the same stale claim in its last sentence and is corrected in the
+same change. (`npx prettier --write` also dropped a pre-existing trailing blank
+line from that file — the committed version fails `prettier --check` too, so it
+is an incidental format fix, not a change this prompt set out to make.)
+
+### Checks
+
+`npm run lint` clean · `npm run typecheck` clean — **the primary evidence no
+importer was missed** · `npm test` **12 files, 302 tests passed** ·
+`npm run build` ✓, route table unchanged: `/`, `/about`, `/careers`,
+`/design-system`, `/journal` `○ Static`, `/article/[slug]` (6) and
+`/job-listing/[slug]` (3) `● SSG`.
+
+### Prerender diff — `08f61a2` vs this change
+
+Two built worktrees under `~/.cache/aetherfield-prerender/`, compared over all
+**21** prerendered HTML files. Three normalisations were needed, and the third
+is new — **it is written up in `docs/automation.md` as trap 10**:
+
+1. the build id, which also appears inside the flight payload as `"b":"<id>"`;
+2. the Turbopack chunk filenames, which are **not** stable between builds of
+   identical input — canonicalised here to a hash of each chunk's *contents*, so
+   a real change still shows;
+3. **Server Action ids** — `createServerReference("40cc1357…")` is salted per
+   build. Before normalising it, the 255 KB shared chunk reported as differing
+   at *identical byte length*, exactly the way the build id used to.
+
+**18 of 21 byte-identical.** The remaining three (`/job-listing/*`) differ in one
+6292-byte chunk, at identical byte length, by a **minifier local-identifier
+permutation inside `Reveal`** — `{immediate:m, className:d}` against
+`{immediate:d, className:m}`. Nothing semantic; no route's markup changed.
+
+### Bundle measurement — nothing moved
+
+Summed bytes of the client chunks each prerendered page references:
+
+| page | before | after | delta |
+| --- | --- | --- | --- |
+| `/` | 901,275 | 901,275 | **0** |
+| `/about` | 890,190 | 890,190 | **0** |
+| `/careers` | 896,558 | 896,558 | **0** |
+| `/journal` | 891,253 | 891,253 | **0** |
+| `/design-system` | 889,192 | 889,192 | **0** |
+
+Chunk counts are identical too (10/10, except `/design-system` 9/9). **No bundle
+win, and none is claimed** (§12 rule 7) — a re-export nobody imports is an edge
+nobody traverses.
+
+### The mechanism, probed rather than restated — and the result is honest
+
+The front matter's rule is that a constant exported from a client-importing
+module drags GSAP into the importer's bundle. A third build **probed** it:
+`export { PRINCIPLES };` restored *and* `about/sections.tsx` repointed at
+`../home/principles`, so an importer genuinely walks through.
+
+`/about`'s chunk bytes came back **890,190 — unchanged, 10 chunks**.
+
+**The probe cannot demonstrate the hazard on `/about`, because `/about` already
+loads GSAP.** Two of its ten chunks carry it before any probe: a 998-byte chunk
+containing `"Reveal"` and `useGSAP`, and the 255,315-byte shared chunk
+containing `useGSAP`. `/about` has its own motion (`docs/motion-site.md`), so the
+cost the rule warns about is already paid there for independent reasons, and
+Turbopack has nothing left to pull in.
+
+So, stated as §12 rule 4 requires: **measured** — removing the re-export changes
+no byte of any bundle, and re-adding it with a live importer changes no byte of
+`/about`'s. **Judged** — the invariant still holds for an importer that is *not*
+already a GSAP page, which is what `principles-data.tsx` was created to
+guarantee and what the four cautionary comments citing it protect
+(`nav-drop.tsx:69`, `footer-reveal.tsx:56`, `journal/stamp-perforations.tsx:35`,
+`capability-visual.tsx:43`). This codebase has no such importer today. The value
+of the deletion is that the door is shut, not that a bundle shrank.
