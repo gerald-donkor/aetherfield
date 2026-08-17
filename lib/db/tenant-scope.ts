@@ -16,7 +16,7 @@ import type { PgColumn } from "drizzle-orm/pg-core";
  * ---
  *
  * **This is not `visibleFactorScope`, and the two must never be merged.**
- * That helper, in `lib/db/emission-queries.ts`, is §9.2 rule 6's sanctioned
+ * That helper, in `lib/db/factor-scope.ts`, is §9.2 rule 6's sanctioned
  * *published-reference-data exception*:
  *
  * ```

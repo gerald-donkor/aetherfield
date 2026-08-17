@@ -455,7 +455,7 @@ export function factorEligibility(
  * Every published denominator an activity in `unit` can be calculated against.
  *
  * **Derived from {@link factorEligibility}, never enumerated by hand.** It is
- * what lets `lib/db/emission-queries.ts` narrow a factor search in SQL without
+ * what lets `lib/db/factor-search-queries.ts` narrow a factor search in SQL without
  * restating the engine's unit rule: the query filters `activity_unit` to this
  * list, and the action re-checks the chosen row against the predicate itself.
  * A hand-written list here would be a second definition of the same rule and

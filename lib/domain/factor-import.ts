@@ -322,7 +322,7 @@ function listOf(values: readonly string[]): string {
 /**
  * The parts of a row that make it *that* row inside its set.
  *
- * **`lib/db/emission-queries.ts` hashes exactly this list**, prefixed with the
+ * **`lib/db/factor-queries.ts` hashes exactly this list**, prefixed with the
  * organisation and set ids, and it imports the function rather than restating
  * the field list — so the in-file duplicate check below and the
  * `(set_id, source_row_id)` unique index agree by construction. `publishedGhgUnit`

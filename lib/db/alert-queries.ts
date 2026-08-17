@@ -28,7 +28,7 @@ const safe = queryErrorScope("alert-queries");
  *
  * **Every function takes `organizationId` and predicates on it.** An alert and a
  * preference are a customer's own data, so §9.2 rule 6 applies unchanged and the
- * reference-data exception that `emission-queries.ts` records does *not* reach
+ * reference-data exception that `factor-scope.ts` records does *not* reach
  * these tables: there is no `IS NULL OR` anywhere below. The predicate is
  * written once, in {@link visible}, so no query can be added that filters on
  * half of it.

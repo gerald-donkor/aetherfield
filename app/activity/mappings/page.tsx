@@ -7,13 +7,15 @@ import { Button } from "../../_components/primitives";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
 import {
-  type FactorSearchRow,
   listFactorCoverage,
-  listFactorSets,
   listMarketBasedMappings,
+} from "../../../lib/db/coverage-queries";
+import { listFactorSets } from "../../../lib/db/factor-set-queries";
+import {
+  type FactorSearchRow,
   searchFactorsByWording,
   searchFactorsForPair,
-} from "../../../lib/db/emission-queries";
+} from "../../../lib/db/factor-search-queries";
 import {
   rankFactorMatches,
   type RankedFactorMatch,

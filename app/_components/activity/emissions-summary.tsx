@@ -1,11 +1,11 @@
 import Link from "next/link";
 
 import {
-  listEmissions,
   countOutOfPeriodRecords,
   countUncalculatedRecords,
-  listFactorSets,
-} from "../../../lib/db/emission-queries";
+} from "../../../lib/db/coverage-queries";
+import { listEmissions } from "../../../lib/db/emission-queries";
+import { listFactorSets } from "../../../lib/db/factor-set-queries";
 import { parseDecimal, toFixed } from "../../../lib/domain/decimal";
 import { totalsOf, toTonnes, type RecordEmission } from "../../../lib/domain/emissions";
 import {

@@ -10,11 +10,11 @@ import { RetireSetButton } from "../../_components/activity/retire-set-button";
 import { SiteFooter, SiteNav } from "../../_components/chrome";
 import { WorkspaceNav } from "../../_components/workspace-nav";
 import { requireOrganization } from "../../../lib/auth/organization";
+import { listTenantFactorSets } from "../../../lib/db/factor-set-queries";
 import {
   listSupersedableRows,
-  listTenantFactorSets,
   listTenantFactors,
-} from "../../../lib/db/emission-queries";
+} from "../../../lib/db/factor-queries";
 
 export const metadata: Metadata = {
   title: "Customer factors — Aetherfield",

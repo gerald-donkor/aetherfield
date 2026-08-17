@@ -4,7 +4,8 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "./client";
 import { tenantVisible } from "./tenant-scope";
-import { countUncalculatedRecords, listEmissions } from "./emission-queries";
+import { countUncalculatedRecords } from "./coverage-queries";
+import { listEmissions } from "./emission-queries";
 import { emissionTarget } from "./schema";
 import { parseDecimal } from "../domain/decimal";
 import {
@@ -35,7 +36,7 @@ const safe = queryErrorScope("target-queries");
  *
  * **Every function takes `organizationId` and predicates on it.** A target is a
  * customer's own commitment, so §9.2 rule 6 applies unchanged and the
- * reference-data exception that `emission-queries.ts` records does *not* reach
+ * reference-data exception that `factor-scope.ts` records does *not* reach
  * this table: there is no `IS NULL OR` anywhere below.
  *
  * **A target id belonging to another organisation answers exactly what a

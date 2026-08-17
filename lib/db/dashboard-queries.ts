@@ -3,11 +3,9 @@ import "server-only";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { countActivityRecords } from "./activity-queries";
-import {
-  countUncalculatedRecords,
-  listEmissions,
-  listFactorSets,
-} from "./emission-queries";
+import { countUncalculatedRecords } from "./coverage-queries";
+import { listEmissions } from "./emission-queries";
+import { listFactorSets } from "./factor-set-queries";
 import { activityRecord } from "./schema";
 import { listTargets } from "./target-queries";
 import { getDb } from "./client";

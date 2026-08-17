@@ -377,7 +377,7 @@ export const newFactorSetSchema = z.object({
 });
 
 /** A set the organisation already owns. **The id is a claim, not a
-    capability** — `lib/db/emission-queries.ts` re-reads it under the tenant
+    capability** — `lib/db/factor-queries.ts` re-reads it under the tenant
     predicate before a row is written into it. */
 export const existingFactorSetSchema = z.object({
   mode: z.literal("existing"),
@@ -637,7 +637,7 @@ export const retireCustomFactorSchema = z.object({
  */
 export const editFactorSetSchema = z
   .object({
-    /** A claim, not a capability — `lib/db/emission-queries.ts` re-reads it
+    /** A claim, not a capability — `lib/db/factor-set-queries.ts` re-reads it
         under the tenant predicate inside the updating transaction. */
     setId: z.uuid({ error: "Choose a factor set." }),
     ...newFactorSetSchema.omit({ mode: true }).shape,

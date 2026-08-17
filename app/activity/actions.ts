@@ -17,16 +17,18 @@ import {
   restageImport,
   type StagedRow,
 } from "../../lib/db/activity-queries";
+import { recalculateOrganization } from "../../lib/db/emission-queries";
+import { setFactorMapping as setFactorMappingRow } from "../../lib/db/factor-mapping-queries";
 import {
   createTenantFactor,
-  getVisibleFactor,
   importTenantFactors,
-  recalculateOrganization,
   retireTenantFactor,
+} from "../../lib/db/factor-queries";
+import { getVisibleFactor } from "../../lib/db/factor-search-queries";
+import {
   retireTenantFactorSet,
-  setFactorMapping as setFactorMappingRow,
   updateTenantFactorSet,
-} from "../../lib/db/emission-queries";
+} from "../../lib/db/factor-set-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
 import { factorEligibility } from "../../lib/domain/emissions";

@@ -23,7 +23,7 @@ const safe = queryErrorScope("report-queries");
  *
  * **Every function takes `organizationId` and predicates on it.** A report is a
  * customer's own disclosure, so §9.2 rule 6 applies unchanged and the
- * reference-data exception `emission-queries.ts` records does *not* reach this
+ * reference-data exception `factor-scope.ts` records does *not* reach this
  * table: there is no `IS NULL OR` anywhere below.
  *
  * **A report id belonging to another organisation answers exactly what a
