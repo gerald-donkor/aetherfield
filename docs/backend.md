@@ -10217,6 +10217,98 @@ Playwright path supplied the browser verification instead.
   data and soft-deletable.
 - Nothing reaches a third party. No email, blob or AI provider is involved.
 
+### Retiring a target confirms first — prompt 118
+
+`RetireTargetControl` retired on a single click. It was the only destructive
+control in the codebase that did not confirm, and step 11 shipped it that way.
+
+**Retiring is a soft transition, and it is terminal from the UI.** Both halves
+are read from the code, not assumed. `retireTargetImpl` in
+`lib/db/target-queries.ts` sets `status = 'retired'` and stamps `retired_at`; it
+deletes no row and never touches `deleted_at`, and `emission_target`'s own schema
+docblock already calls it "a soft transition rather than a delete" — so the
+record survives, and `TargetCard` keeps rendering it with a "Retired … The
+commitment remains visible as part of the organisation's record" line. **But
+nothing in this repository writes `status` back to `active`**: there is no
+reactivate query, no reactivate action, and `TargetCard` renders this control
+only while `target.status === "active"`, so the control disappears the moment it
+succeeds.
+
+**That is why the wording is a safeguard rather than a courtesy.** The question
+reads *"Retire this target? It cannot be made active again."* — accurate on both
+counts, where "this cannot be undone" would have overstated the data loss and
+"you can restore it later" would have promised a path that does not exist. **No
+undo was added** (prompt 118's non-goal); that a target cannot be un-retired is
+recorded here as a real gap for a later prompt to weigh, not silently filled.
+
+**The idiom was matched, not reinvented.** `app/submissions/action-controls.tsx`
+established arm → inline question → "Confirm *verb*" / "Cancel" at step 7 and
+`app/_components/organization/members-panel.tsx` adopted it at prompt 63; this is
+the third adopter and it copies that structure, those element choices and the
+Cancel button's class string
+(`h-[38px] px-3 font-mono text-button font-medium underline underline-offset-4 …`)
+verbatim. Nothing was re-fitted and no third variant was designed. **No native
+`confirm()`** — a browser modal blocks the page, is not the site's idiom, and
+blocks the automation this project runs. **No GSAP** (§7.5).
+
+**This is presentation and it adds no enforcement.** `retireTarget` was not
+touched: it still resolves the tenant, re-reads the membership from Postgres,
+spends its user-keyed rate limit and predicates the update on
+`organization_id` *and* `status = 'active'`. §6.2 and §11.2 rule 2 are explicit
+that gating a control in the browser is never the check. What this change buys is
+one fewer accidental click, and it must not be read as a security improvement.
+
+Two deliberate departures from the two existing adopters, both stated rather than
+absorbed:
+
+| departure | why |
+| --- | --- |
+| **Focus returns to "Retire target" on cancel.** A ref on the arm button, plus a flag ref so the effect cannot fire on mount or after a failed confirm | `RemoveSubmissionControl` and `RemoveMemberControl` unmount the Cancel button and let focus fall to the document body. §8.2 rule 5 asks for managed focus, and prompt 118 required cancel not to lose it. A superset of the idiom, not a different one |
+| **The result region became `FormStatus`** | Prompt 118 asked for it if prompt 105 had landed, and it has. This site is a **29th** region prompt 105 did not reach: its class string carried `pl-3` and `text-[11px]` where the shared string is `pl-4` and `text-[12px]`, so it matched neither the 28 adopted sites nor the four named in *Sites not adopted*. Adopting it therefore **does change the rendered class string by `pl-3`→`pl-4` and `11px`→`12px`** — the only visual change in this prompt. It is a correction, not a re-fit: `target-card.tsx`'s own note lines beside this control already use `border-l-2 border-ink … pl-4 … text-[12px]` |
+
+`size="secondary"` is unchanged. `primitives.tsx`'s `buttonSizing` docblock names
+the retire control as a `secondary` call site and `secondary` and `compact`
+resolve to the same string today, so the copied `h-[38px]` Cancel button lines up
+without changing the role.
+
+#### Verification, prompt 118
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 12 files, **302 passed**, 770 ms — unchanged; the domain tests see none of this |
+| `npm run build` | route table unchanged. `/`, `/about`, `/careers`, `/design-system`, `/journal` `○ Static`; `/article/[slug]` (6) and `/job-listing/[slug]` (3) `● SSG`; **`/targets` `ƒ Dynamic`, as before** |
+| `npm run test:e2e` | **did not run as a matrix, and this is not reported as a pass** |
+| keyboard operability | **code-level, not observed in a browser** — say which (§12 rule 4) |
+
+**Prerender impact: none.** `/targets` is `ƒ Dynamic` and was never prerendered,
+so no HTML diff applies and none was taken.
+
+**The E2E matrix could not complete, on three consecutive attempts.**
+`[setup] › e2e/auth.setup.ts:181:6 › provisions the authenticated fixture` failed
+each time inside `countTables()` with `connect ETIMEDOUT <ip>:5432` /
+`connect ENETUNREACH`, and **120 tests did not run**. The failure is the fixture's
+connection to Neon, not any assertion: a direct TCP probe to both
+`ep-purple-forest-au7r2if4.c-10.us-east-1.aws.neon.tech:5432` and its `-pooler`
+host answered `OPEN` between attempts, and the teardown project reached the
+database successfully on one run (`rate_limit rows: 3 before, 3 after`). Four
+sibling agents were building and running suites against the same free-tier
+compute concurrently, which is the most likely cause. WebKit is blocked
+independently — `podman` is absent on this machine, exactly as prompt 105
+recorded. **So the arm / cancel / confirm / error-while-armed states prompt 118
+called load-bearing are unverified in a browser**, and the suite carries no
+retire-control coverage to have exercised them: `/targets` appears in
+`e2e/authenticated.spec.ts` only as a reachability path.
+
+Keyboard operability was therefore established from the rendered markup rather
+than observed: all three controls are native `<button>` elements, so Tab reaches
+each and Enter and Space activate them with no handler of ours involved; the
+armed state contains only buttons, so it is dismissible without a pointer; and
+the cancel path sets the flag ref before the state change, so the effect returns
+focus to "Retire target" rather than leaving it on a removed node. **That is a
+reading of the code, not a measurement.**
+
 ### What step 11 deliberately did not do
 
 | not done | why |
