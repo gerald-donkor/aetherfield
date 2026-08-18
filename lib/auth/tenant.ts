@@ -1,6 +1,6 @@
 import "server-only";
 
-import { formatRetry, type RateLimitOutcome } from "../rate-limit";
+import { checkLimit, formatRetry, type RateLimitPolicy } from "../rate-limit";
 import { getCurrentMembership, type CurrentMembership } from "./organization";
 import { getCurrentAccount } from "./server";
 
@@ -131,11 +131,22 @@ export type TenantGateOptions =
     })
   | (TenantGateShared & {
       messages: TenantWriteMessages;
-      /** Passed as a function, not selected from a registry: the call site
-          names the limiter it has always spent, and the set of limiters stays
-          in `lib/rate-limit/`. Architecture candidate 5 changes that, and this
-          gate deliberately does not pre-empt it. */
-      limiter: (identifier: string) => Promise<RateLimitOutcome>;
+      /** A policy key rather than a function — architecture candidate 5
+          (`docs/architecture.md`, prompt 126). The call site still names the
+          limiter it has always spent; it now does so by looking one up in
+          `lib/rate-limit/`'s `POLICIES` table instead of importing a
+          function. `RateLimitPolicy` is a closed string-literal union, so an
+          unknown key is still a compile error — only a plausible-but-wrong one
+          (`"target-write"` where `"report-write"` was meant) gets through,
+          which was equally true of importing the wrong symbol.
+
+          **`"cron-sweep"` is excluded**, not merely unused: this gate always
+          supplies `membership.account.user.id` as the identifier, and
+          `checkLimit`'s own overload (`lib/rate-limit/index.ts`) rejects an
+          identifier on that one policy. Narrowing here is what makes passing
+          it a compile error at this call site too, rather than one only
+          `checkLimit` would catch. */
+      limiter: Exclude<RateLimitPolicy, "cron-sweep">;
     });
 
 /**
@@ -203,7 +214,7 @@ export async function resolveTenant(
 
   if (options.limiter) {
     try {
-      const limit = await options.limiter(membership.account.user.id);
+      const limit = await checkLimit(options.limiter, membership.account.user.id);
       if (!limit.allowed) {
         return {
           ok: false,

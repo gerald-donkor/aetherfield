@@ -9,10 +9,7 @@ import {
   getInvitationForLink,
   getMembership,
 } from "../../../lib/db/organization-queries";
-import {
-  checkInvitationResponseLimit,
-  formatRetry,
-} from "../../../lib/rate-limit";
+import { checkLimit, formatRetry } from "../../../lib/rate-limit";
 import {
   invitationResponseSchema,
   MEMBERSHIP_ERRORS,
@@ -58,7 +55,7 @@ export async function respondToInvitation(
   if (!account) return { ok: false, error: MEMBERSHIP_ERRORS.SIGNED_OUT };
 
   try {
-    const limit = await checkInvitationResponseLimit(account.user.id);
+    const limit = await checkLimit("invitation-response", account.user.id);
     if (!limit.allowed) {
       return {
         ok: false,

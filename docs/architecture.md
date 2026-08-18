@@ -167,9 +167,13 @@ matches the layers either side; 12 constants become 3 sets of 4.
 > `lib/validation/emissions.ts` (754 lines) splits along the same three lines and
 > should move in the same change or not at all.
 
-### 5 · `lib/rate-limit/` — 18 wrappers over one call — *Worth exploring · ports & adapters*
+### 5 · `lib/rate-limit/` — twenty wrappers over one call — *Worth exploring · ports & adapters* — **implemented, prompt 126**
 
 `lib/rate-limit/index.ts` — 856 lines, 18 exported `check*Limit` functions.
+**Corrected at prompt 126: there were twenty, not eighteen.** The review's count
+predates `checkOrganizationDeletionLimit` (prompt 73) and
+`checkInvitationResponseLimit` (prompt 63), both landed after 17 Aug 2026's
+review and both counted in the 856-line total it cites.
 
 **Problem.** Eighteen exports each forward four arguments to `consume()`.
 Whether a key is hashed is a per-export decision spread over 400 lines, and
@@ -238,7 +242,7 @@ table below is appended to as prompts land, after the fact.
 | 2 · the submit lifecycle | 123, 124 | 18 Aug 2026 |
 | 3 · one tenant gate | 122 | 18 Aug 2026 |
 | 4 · cut `app/activity/actions.ts` | 125 | 18 Aug 2026 |
-| 5 · `lib/rate-limit/` policies | — | — |
+| 5 · `lib/rate-limit/` policies | 126 | 18 Aug 2026 |
 | 6 · one workspace boundary shell | — | — |
 
 ---
@@ -987,3 +991,197 @@ The landed table's candidate-4 row now reads `125` with today's date.
 Candidates 5 and 6 remain open — 5 depends only on candidate 3 (done) and is
 unblocked; 6 is still waiting on the user's `WorkspaceNav`/`loading.tsx`
 design answer recorded at line 229.
+
+---
+
+## Prompt 126 — the record
+
+`lib/rate-limit/policies.ts`'s `POLICIES` record and `lib/rate-limit/index.ts`'s
+`checkLimit(policy, identifier?)` replace twenty exported `check*Limit`
+functions with one lookup. This section carries the equivalence check, the
+measurements, the file-split decision, and one interface addition the prompt
+did not anticipate.
+
+### The measured inventory, re-verified at implementation time
+
+Every count in the prompt was re-run against the file as it stood, per §12
+rule 8, and all five matched exactly: `wc -l lib/rate-limit/index.ts` → 856;
+`grep -c "^export async function check"` → 20; `limiter: check` gate sites →
+14; direct `check*Limit(` sites → 12; importing files → 16 (15 under `app/`
+plus `lib/auth/tenant.ts`). `app/activity/factors/actions.ts` holds five gate
+sites, confirmed by reading the file rather than recounted from the prompt.
+
+### The file-split decision
+
+**Two files, as the prompt proposed** — `lib/rate-limit/policies.ts` (the
+`RateLimitPolicy` union, the `POLICIES` record, every docblock, **no I/O, no
+Redis import**) and `lib/rate-limit/index.ts` (`getRedis()`, `getLimiter()`,
+`consume()`, the exported `checkLimit()` and `formatRetry()`, re-exporting
+`RateLimitPolicy`). The split held up in practice — no docblock fought the
+table shape, because each policy's prose already read as "here is the
+judgement behind this entry" rather than as prose needing a home separate from
+its constants. `policies.ts` imports only the `Duration` **type** from
+`@upstash/ratelimit` (erased at compile time under `isolatedModules`, so no
+runtime import crosses into the pure file), rather than hand-rolling the
+`` `${number} ${Unit}` `` literal the prompt sketched — the SDK already exports
+it, and restating it would drift the moment the SDK's own type changed.
+
+Every existing import specifier stayed `…/lib/rate-limit`, so no call site's
+module path changed — only what each imported from it.
+
+### The two interface decisions, and one the prompt did not anticipate
+
+1. **`newsletter-address`'s two stages are modelled in the table**, not as an
+   `if` inside `checkLimit`. `checkLimit` walks a policy's `stages` in order and
+   returns the first rejection without touching the next — exactly what
+   `checkNewsletterAddressLimit` did inline at the old file's line 527, and its
+   "a rejected double-click does not consume one of the three hourly sends"
+   reasoning is preserved by the ordering rather than restated as a comment.
+2. **`cron-sweep`'s missing identifier is enforced by an overloaded
+   signature**, verified rather than assumed (below): one signature requires
+   `identifier: string` for every policy but `"cron-sweep"`; a second takes
+   `"cron-sweep"` alone.
+3. **Not anticipated by the prompt: `TenantGateOptions["limiter"]` had to
+   narrow to `Exclude<RateLimitPolicy, "cron-sweep">`, not the full
+   `RateLimitPolicy`.** `lib/auth/tenant.ts`'s gate always calls
+   `checkLimit(options.limiter, membership.account.user.id)` — it supplies an
+   identifier unconditionally, because a tenant-scoped write always has a
+   signed-in user id to key on. Left as the full `RateLimitPolicy`, that call
+   failed to typecheck: `checkLimit`'s first overload excludes `"cron-sweep"`
+   and its second takes no identifier, so a type that still included
+   `"cron-sweep"` matched neither. The fix narrows the field at its
+   declaration, which is a **stronger** result than the prompt asked for, not a
+   weaker one — passing `"cron-sweep"` to `resolveTenant` is now a compile
+   error at the gate's own call sites, not only inside `checkLimit`. Recorded
+   here because a prompt file is a plan (§12 rule 5) and this is where the plan
+   met the type checker.
+
+### The `tsc`-rejection probes, run and deleted per the prompt's instruction
+
+Three probe modules were written, compiled against the project's `tsconfig.json`,
+confirmed to fail with the expected diagnostic, then removed — none survives in
+the repository:
+
+| probe | expected | got |
+| --- | --- | --- |
+| `checkLimit("cron-sweep", "x")` | `TS2345`, argument not assignable to the first overload's identifier-taking policy union | `TS2345: Argument of type '"cron-sweep"' is not assignable to parameter of type '"demo-request" \| … \| "submission-write"'` |
+| `checkLimit("factor-mapping")` | `TS2345`, argument not assignable to the second overload's `"cron-sweep"`-only signature | `TS2345: Argument of type '"factor-mapping"' is not assignable to parameter of type '"cron-sweep"'` |
+| `TenantGateOptions` with `limiter: "factor-mapping"` and no `throttled` | `TS2322`, object literal not assignable to the union | `TS2322: Type '{ messages: {...}; limiter: "factor-mapping"; }' is not assignable to type 'TenantGateOptions'` |
+
+The first run also surfaced the interface addition above: before narrowing
+`TenantGateOptions["limiter"]`, `lib/auth/tenant.ts:210` itself failed
+`tsc -p tsconfig.json` with the same `TS2345` shape as probe 1 — a genuine
+compile error in the gate, not a probe. It cleared once the field was narrowed
+to `Exclude<RateLimitPolicy, "cron-sweep">`.
+
+### Union narrowing, verified rather than assumed
+
+`if (options.limiter)` still narrows `TenantGateOptions` to its
+`limiter`-bearing member with `limiter` typed as
+`Exclude<RateLimitPolicy, "cron-sweep">` (a non-empty string-literal union, so
+truthiness narrowing behaves the same as it did for the function type it
+replaces — no member of the union is `""`). Confirmed by the full-project
+`tsc -p tsconfig.json` run reporting zero errors outside the three probes
+above; `resolveTenant`'s body needed no edit beyond replacing
+`options.limiter(membership.account.user.id)` with
+`checkLimit(options.limiter, membership.account.user.id)`, which would not
+compile if the narrowing had stopped working.
+
+### The one new coupling, stated rather than smuggled
+
+`lib/auth/tenant.ts` now imports `checkLimit` — a **value**, not only
+`RateLimitPolicy`'s type — from `lib/rate-limit/`, where it previously imported
+only `formatRetry` and the `RateLimitOutcome` type. Both modules stay
+`server-only`, neither imports the other's caller, and no cycle is created:
+`lib/rate-limit/` still imports nothing from `lib/auth/`. This is a real new
+edge on the module graph, not a re-statement of the existing one, and it exists
+because the gate now looks a policy up rather than invoking a function it was
+handed.
+
+### Twenty-policy equivalence, old constant against new table entry
+
+Every value below was read from `lib/rate-limit/index.ts` as it stood before
+this prompt (`git show HEAD:lib/rate-limit/index.ts`, prompt `44f6666`) and
+compared against `policies.ts`'s `POLICIES` record. **All twenty are
+identical** — limit, window and key treatment unchanged, and no Redis prefix
+was touched.
+
+| policy (= prefix) | old constants | new table entry | key |
+| --- | --- | --- | --- |
+| `demo-request` | `DEMO_REQUEST_LIMIT` 5, `_WINDOW` 1 h | 5, 1 h | plain |
+| `newsletter-ip` | `NEWSLETTER_IP_LIMIT` 5, `_WINDOW` 1 h | 5, 1 h | plain |
+| `newsletter-address` | burst 1/60 s, then 3/1 h | burst 1/60 s, then 3/1 h | hash |
+| `newsletter-token` | `NEWSLETTER_TOKEN_LIMIT` 20, `_WINDOW` 1 h | 20, 1 h | plain |
+| `newsletter-one-click` | `NEWSLETTER_ONE_CLICK_LIMIT` 10, `_WINDOW` 1 h | 10, 1 h | hash |
+| `application` | `APPLICATION_LIMIT` 5, `_WINDOW` 1 h | 5, 1 h | plain |
+| `organization-create` | `ORGANIZATION_CREATE_LIMIT` 10, `_WINDOW` 1 h | 10, 1 h | plain |
+| `activity-import` | `ACTIVITY_IMPORT_LIMIT` 20, `_WINDOW` 1 h | 20, 1 h | plain |
+| `activity-commit` | `ACTIVITY_COMMIT_LIMIT` 60, `_WINDOW` 1 h | 60, 1 h | plain |
+| `factor-mapping` | `FACTOR_MAPPING_LIMIT` 30, `_WINDOW` 1 h | 30, 1 h | plain |
+| `factor-import` | `FACTOR_IMPORT_LIMIT` 6, `_WINDOW` 1 h | 6, 1 h | plain |
+| `target-write` | `TARGET_WRITE_LIMIT` 30, `_WINDOW` 1 h | 30, 1 h | plain |
+| `report-write` | `REPORT_WRITE_LIMIT` 20, `_WINDOW` 1 h | 20, 1 h | plain |
+| `report-narrative` | `REPORT_NARRATIVE_LIMIT` 10, `_WINDOW` 1 h | 10, 1 h | plain |
+| `alert-preference` | `ALERT_PREFERENCE_LIMIT` 30, `_WINDOW` 1 h | 30, 1 h | plain |
+| `organization-deletion` | `ORGANIZATION_DELETION_LIMIT` 10, `_WINDOW` 1 h | 10, 1 h | plain |
+| `invitation-write` | `INVITATION_WRITE_LIMIT` 20, `_WINDOW` 1 h | 20, 1 h | plain |
+| `invitation-response` | `INVITATION_RESPONSE_LIMIT` 30, `_WINDOW` 1 h | 30, 1 h | plain |
+| `cron-sweep` | `CRON_SWEEP_LIMIT` 6, `_WINDOW` 1 h | 6, 1 h | constant `"sweep"` |
+| `submission-write` | `SUBMISSION_WRITE_LIMIT` 30, `_WINDOW` 1 h | 30, 1 h | plain |
+
+Cross-checked mechanically, not only read by eye: the 21 distinct Redis prefix
+strings (20 policies, `newsletter-address` contributing two) extracted from the
+old file's `consume("…", …)` call sites and from `policies.ts`'s `prefix:`
+fields were diffed as sorted sets and found identical.
+
+### Call sites, confirmed after the change
+
+- `grep -rn "check[A-Za-z]*Limit(" app lib | grep -v lib/rate-limit/` → **13
+  matches, every one `checkLimit(`** — the intended zero-*named*-wrapper result
+  under a pattern that also matches the new function's own name; no
+  `checkXLimit(` survives anywhere in `app/` or `lib/`.
+- `grep -c "^export async function" lib/rate-limit/index.ts` → **1**
+  (`checkLimit`'s implementation signature; its two overload declarations are
+  `export function`, not `export async function`, and `formatRetry` is sync),
+  down from **20** — confirmed against `git show HEAD:lib/rate-limit/index.ts`,
+  matching the corrected twenty-wrapper count above rather than the review's
+  eighteen.
+- The 14 gate sites now read `limiter: "<policy>"`; the 12 direct sites now
+  read `checkLimit("<policy>", identifier)`, and the three cron routes read
+  `checkLimit("cron-sweep")`. Two prose docblock references to a since-removed
+  function name (`app/activity/mappings/actions.ts:110`,
+  `app/activity/factors/actions.ts:107,240`) were also updated, since a comment
+  naming a symbol that no longer exists is exactly what §12 rule 1 says not to
+  leave standing.
+
+### Measured line counts
+
+```
+before: lib/rate-limit/index.ts                    856 lines (single file)
+after:  lib/rate-limit/index.ts                     147 lines
+        lib/rate-limit/policies.ts                  511 lines
+        total                                        658 lines
+```
+
+The total fell rather than grew despite the added overload signatures and the
+new coupling documentation, because twenty near-identical five-line function
+bodies (`export async function checkXLimit(id) { return consume("x", X_LIMIT,
+X_WINDOW, id); }`) collapsed into one 20-entry record plus one loop.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output — confirmed separately with a bare `npx tsc --noEmit -p tsconfig.json` before and after the `TenantGateOptions` narrowing fix, isolating that one error from the rest of the change |
+| `npm test` | 318 passed, 13 files — unchanged from prompt 125's baseline; nothing in scope is under `lib/{domain,validation}` |
+| `npm run build` | route table unchanged: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, every authenticated route `ƒ` as before |
+| prerender diff | **all 21 prerendered files byte-identical** after normalising `.next/BUILD_ID` and the two chunk-name patterns (two-build method: `git stash push --include-untracked` the 19 changed/new files, rebuild, snapshot, `git stash pop`, rebuild, diff). 19 of 21 pages differed only in shared JS chunk filenames before normalising — the same shape prompt 121 recorded — with equal chunk counts per page on both sides confirmed before substitution |
+| `npm run test:e2e` / `test:e2e:local` | Chromium + Firefox: **110 passed, 12 skipped**, on a clean rerun. One earlier run in this session recorded a single flaky failure on `submissions.spec.ts`'s staff-grant test (`toHaveText` timed out on a still-in-flight "Updating…" button) after the suite had already been run twice in quick succession against the same live Neon/Upstash instances; re-run alone it passed in 2.1m, and the full matrix re-run clean passed 110/110, so this is recorded as session-local flake under load, not a regression, per §12 rule 4 (a judgement, not a re-run into silence). **WebKit did not run**: the same pinned-container `browserType.launch: Executable doesn't exist at /ms-playwright/chromium_headless_shell-1234/…` gap prompts 122–125 already recorded, not investigated further here, exactly as the prompt anticipated |
+
+### Where this leaves candidate 5
+
+The landed table's candidate-5 row is filled with `126` and today's date. Five
+of six candidates are now landed — 1, 2, 3, 4 and 5. **Candidate 6 remains the
+only open one**, still waiting on the user's `WorkspaceNav`/`loading.tsx`
+design answer recorded at line 229; nothing in this prompt bears on it.

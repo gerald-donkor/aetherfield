@@ -23,10 +23,6 @@ import {
   type RecalculateResult,
 } from "../../lib/validation/emissions";
 import {
-  checkActivityCommitLimit,
-  checkActivityImportLimit,
-} from "../../lib/rate-limit";
-import {
   deleteActivityImport,
   putActivityImport,
   sanitiseImportFilename,
@@ -170,7 +166,7 @@ const COMMIT_MESSAGES: TenantWriteMessages = {
 function resolveImportTenant() {
   return resolveTenantFor({
     messages: IMPORT_MESSAGES,
-    limiter: checkActivityImportLimit,
+    limiter: "activity-import",
   });
 }
 
@@ -179,7 +175,7 @@ function resolveImportTenant() {
 function resolveCommitTenant() {
   return resolveTenantFor({
     messages: COMMIT_MESSAGES,
-    limiter: checkActivityCommitLimit,
+    limiter: "activity-commit",
   });
 }
 

@@ -10,7 +10,6 @@ import { recalculateOrganization } from "../../../lib/db/emission-queries";
 import { setFactorMapping as setFactorMappingRow } from "../../../lib/db/factor-mapping-queries";
 import { getVisibleFactor } from "../../../lib/db/factor-search-queries";
 import { factorEligibility } from "../../../lib/domain/emissions";
-import { checkFactorMappingLimit } from "../../../lib/rate-limit";
 import {
   FACTOR_MAPPING_ERRORS,
   FACTOR_MAPPING_FIELDS,
@@ -107,7 +106,7 @@ const FACTOR_MAPPING_MESSAGES: TenantWriteMessages = {
  * derived from a factor that is no longer mapped, with nothing on screen saying
  * so — and a stale disclosure figure that looks current is the failure this
  * whole area is shaped against. The cost is a slower action on a large tenant;
- * it is bounded by `checkFactorMappingLimit` and by the platform's function
+ * it is bounded by the `"factor-mapping"` policy and by the platform's function
  * timeout. `recalculateOrganization` is called rather than restated: it is **the
  * one definition of what a recalculation is**, shared with `app/activity/
  * actions.ts`'s own `recalculate`.
@@ -127,7 +126,7 @@ export async function setFactorMapping(
      limiter are the gate's, unchanged. */
   const resolved = await resolveTenantFor({
     messages: FACTOR_MAPPING_MESSAGES,
-    limiter: checkFactorMappingLimit,
+    limiter: "factor-mapping",
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;

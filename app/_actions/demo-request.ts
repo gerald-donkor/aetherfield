@@ -8,7 +8,7 @@ import * as z from "zod";
 import { insertLead } from "../../lib/db/lead-queries";
 import { sendDemoRequestEmails } from "../../lib/email/demo-request";
 import { leadSource } from "../../lib/db/schema";
-import { checkDemoRequestLimit, formatRetry } from "../../lib/rate-limit";
+import { checkLimit, formatRetry } from "../../lib/rate-limit";
 import {
   demoRequestFieldsSchema,
   NO_FIELD_ERRORS,
@@ -69,7 +69,7 @@ export async function submitDemoRequest(
      documented `Request`-shaped branch. */
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
   try {
-    const limit = await checkDemoRequestLimit(ip);
+    const limit = await checkLimit("demo-request", ip);
     if (!limit.allowed) {
       return {
         ok: false,

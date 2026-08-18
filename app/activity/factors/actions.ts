@@ -45,10 +45,6 @@ import {
   type RetireCustomFactorResult,
 } from "../../../lib/validation/emissions";
 import {
-  checkFactorImportLimit,
-  checkFactorMappingLimit,
-} from "../../../lib/rate-limit";
-import {
   CSV_ERRORS,
   CSV_MAX_BYTES,
   CSV_MAX_ROWS,
@@ -108,7 +104,7 @@ const tooManyChanges = (retry: string) =>
 
 /** The bulk upload's own noun. `importCustomFactors` is the only one of the
     five factor actions that says "imports", and it is the only one that
-    spends `checkFactorImportLimit`. */
+    spends the `"factor-import"` policy. */
 const tooManyImports = (retry: string) =>
   `That's a few too many imports. Try again in ${retry}.`;
 
@@ -148,7 +144,7 @@ export async function createCustomFactor(
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
   const resolved = await resolveTenantFor({
     messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
+    limiter: "factor-mapping",
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
@@ -241,12 +237,12 @@ export async function importCustomFactors(
   //      actions.ts`'s `stageImport`. -------------------------------------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* The one of the five that spends `checkFactorImportLimit` and says
+  /* The one of the five that spends the `"factor-import"` policy and says
      "imports" rather than "changes" — the two things prompt 98's extraction
      is parameterised by. */
   const resolved = await resolveTenantFor({
     messages: CUSTOM_FACTOR_IMPORT_MESSAGES,
-    limiter: checkFactorImportLimit,
+    limiter: "factor-import",
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
@@ -456,7 +452,7 @@ export async function retireCustomFactor(
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
   const resolved = await resolveTenantFor({
     messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
+    limiter: "factor-mapping",
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
@@ -533,7 +529,7 @@ export async function editFactorSet(
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
   const resolved = await resolveTenantFor({
     messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
+    limiter: "factor-mapping",
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
@@ -619,7 +615,7 @@ export async function retireFactorSet(
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
   const resolved = await resolveTenantFor({
     messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
+    limiter: "factor-mapping",
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;

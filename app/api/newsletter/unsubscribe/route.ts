@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { unsubscribeByToken } from "../../../../lib/db/subscriber-queries";
-import { checkNewsletterOneClickLimit } from "../../../../lib/rate-limit";
+import { checkLimit } from "../../../../lib/rate-limit";
 
 /**
  * The one-click endpoint named in the welcome email's `List-Unsubscribe`
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
      unmetered for the duration of an outage is not. The reasoning is inverted
      because the risk is. */
   try {
-    const limit = await checkNewsletterOneClickLimit(token);
+    const limit = await checkLimit("newsletter-one-click", token);
     if (!limit.allowed) return ok();
   } catch {
     // Deliberately continues.

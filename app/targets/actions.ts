@@ -19,7 +19,6 @@ import {
   tonnesToKg,
   totalsForCoverage,
 } from "../../lib/domain/targets";
-import { checkTargetWriteLimit } from "../../lib/rate-limit";
 import { fieldErrorsFrom } from "../../lib/validation/result";
 import {
   createTargetSchema,
@@ -56,7 +55,7 @@ function resolveTenant() {
       failure: TARGET_ERRORS.failure,
       throttled: (retry) => `${TOO_MANY_WRITES} ${retry}.`,
     },
-    limiter: checkTargetWriteLimit,
+    limiter: "target-write",
   });
 }
 

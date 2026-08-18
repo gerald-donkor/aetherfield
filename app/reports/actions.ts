@@ -16,10 +16,6 @@ import {
   reportPeriod,
   validateNarrative,
 } from "../../lib/domain/reports";
-import {
-  checkReportNarrativeLimit,
-  checkReportWriteLimit,
-} from "../../lib/rate-limit";
 import { draftNarrative } from "../../lib/reporting/narrative";
 import {
   createReportSchema,
@@ -75,7 +71,7 @@ function resolveWriteTenant() {
       ...TENANT_MESSAGES,
       throttled: (retry) => `${TOO_MANY_WRITES} ${retry}.`,
     },
-    limiter: checkReportWriteLimit,
+    limiter: "report-write",
   });
 }
 
@@ -107,7 +103,7 @@ function resolveNarrativeTenant() {
       ...TENANT_MESSAGES,
       throttled: (retry) => `${TOO_MANY_DRAFTS} ${retry}.`,
     },
-    limiter: checkReportNarrativeLimit,
+    limiter: "report-narrative",
   });
 }
 

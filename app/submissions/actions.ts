@@ -10,10 +10,7 @@ import {
 import { setStaffRole } from "../../lib/db/auth-queries";
 import { softDeleteLead } from "../../lib/db/lead-queries";
 import { softDeleteSubscriber } from "../../lib/db/subscriber-queries";
-import {
-  checkSubmissionWriteLimit,
-  formatRetry,
-} from "../../lib/rate-limit";
+import { checkLimit, formatRetry } from "../../lib/rate-limit";
 import { deleteCvStrict } from "../../lib/storage/cv";
 import type { SubmitResult } from "../../lib/validation/result";
 import {
@@ -70,7 +67,7 @@ async function resolveAdminForWrite(): Promise<
   if (!admin) return { ok: false, error: FORBIDDEN };
 
   try {
-    const limit = await checkSubmissionWriteLimit(admin.user.id);
+    const limit = await checkLimit("submission-write", admin.user.id);
     if (!limit.allowed) {
       return {
         ok: false,

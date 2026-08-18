@@ -7,7 +7,7 @@ import { headers } from "next/headers";
 import { getJob } from "../_content/jobs";
 import { insertApplication } from "../../lib/db/application-queries";
 import { sendApplicationEmails } from "../../lib/email/application";
-import { checkApplicationLimit, formatRetry } from "../../lib/rate-limit";
+import { checkLimit, formatRetry } from "../../lib/rate-limit";
 import { deleteCv, putCv, sanitiseFilename } from "../../lib/storage/cv";
 import {
   applicationFieldsSchema,
@@ -89,7 +89,7 @@ export async function submitApplication(
      documented `Request`-shaped branch. */
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
   try {
-    const limit = await checkApplicationLimit(ip);
+    const limit = await checkLimit("application", ip);
     if (!limit.allowed) {
       return {
         ok: false,

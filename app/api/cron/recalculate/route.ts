@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { sweep } from "./sweep";
-import { checkCronSweepLimit } from "../../../../lib/rate-limit";
+import { checkLimit } from "../../../../lib/rate-limit";
 
 /**
  * The nightly recalculation and alert sweep — build step 14.
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
      an outage. It exists so a leaked secret cannot drive repeated full-tenant
      sweeps, not to shape normal traffic. */
   try {
-    const limit = await checkCronSweepLimit();
+    const limit = await checkLimit("cron-sweep");
     if (!limit.allowed) {
       return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
     }

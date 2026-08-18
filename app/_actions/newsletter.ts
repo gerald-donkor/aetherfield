@@ -14,12 +14,7 @@ import {
   sendNewsletterConfirmation,
   sendNewsletterWelcome,
 } from "../../lib/email/newsletter";
-import {
-  checkNewsletterAddressLimit,
-  checkNewsletterIpLimit,
-  checkNewsletterTokenLimit,
-  formatRetry,
-} from "../../lib/rate-limit";
+import { checkLimit, formatRetry } from "../../lib/rate-limit";
 import {
   newsletterFieldsSchema,
   NO_FIELD_ERRORS,
@@ -81,7 +76,7 @@ export async function subscribeToNewsletter(
      `docs/backend.md`, step 2. */
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
   try {
-    const limit = await checkNewsletterIpLimit(ip);
+    const limit = await checkLimit("newsletter-ip", ip);
     if (!limit.allowed) {
       return {
         ok: false,
@@ -116,7 +111,7 @@ export async function subscribeToNewsletter(
      produces — so it sits after the parse and before the write, which is still
      before anything expensive. The key is a sha256, never the address itself. */
   try {
-    const limit = await checkNewsletterAddressLimit(email);
+    const limit = await checkLimit("newsletter-address", email);
     if (!limit.allowed) {
       return {
         ok: false,
@@ -230,7 +225,7 @@ async function guardTokenRequest(
 
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
   try {
-    const limit = await checkNewsletterTokenLimit(ip);
+    const limit = await checkLimit("newsletter-token", ip);
     if (!limit.allowed) {
       return {
         ok: false,

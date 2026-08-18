@@ -16,13 +16,7 @@ import {
   listPendingInvitations,
 } from "../../lib/db/organization-queries";
 import { sendOrganizationDeletionNotice } from "../../lib/email/organization";
-import {
-  checkAlertPreferenceLimit,
-  checkInvitationWriteLimit,
-  checkOrganizationCreateLimit,
-  checkOrganizationDeletionLimit,
-  formatRetry,
-} from "../../lib/rate-limit";
+import { checkLimit, formatRetry } from "../../lib/rate-limit";
 import {
   ALERT_PREFERENCE_ERRORS,
   alertPreferenceSchema,
@@ -112,7 +106,7 @@ export async function createOrganization(
      grants nothing on this path — the same invariant `lib/auth/organization.ts`
      states for reads. */
   try {
-    const limit = await checkOrganizationCreateLimit(account.user.id);
+    const limit = await checkLimit("organization-create", account.user.id);
     if (!limit.allowed) {
       return {
         ok: false,
@@ -222,7 +216,7 @@ async function resolveMembershipForWrite() {
       throttled: (retry) =>
         `That's a few too many changes. Try again in ${retry}.`,
     },
-    limiter: checkInvitationWriteLimit,
+    limiter: "invitation-write",
   });
 }
 
@@ -489,7 +483,7 @@ async function resolveAlertPreferenceTenant() {
       throttled: (retry) =>
         `That's a few too many changes. Try again in ${retry}.`,
     },
-    limiter: checkAlertPreferenceLimit,
+    limiter: "alert-preference",
   });
 }
 
@@ -594,7 +588,7 @@ async function resolveOwnerForDeletion() {
       throttled: (retry) =>
         `That's a few too many attempts. Try again in ${retry}.`,
     },
-    limiter: checkOrganizationDeletionLimit,
+    limiter: "organization-deletion",
   });
 }
 
