@@ -14164,6 +14164,12 @@ Two deviations from the prompt's letter, both deliberate:
 
 ## A full-project code review, fixed in place, 2026-08-17
 
+> **A later pass exists.** This review ran at `2337ab1`, immediately before the
+> §5.4 remediation sequence began, so none of the six candidates' commits are
+> covered by it. Prompt 129 reviewed `2337ab1...HEAD` on both axes on
+> 2026-08-18 — see `docs/architecture.md`, "A second review, over the
+> remediation itself".
+
 Ran the `code-review` skill's Standards + Spec axes across the whole tree at
 `HEAD` (no fixed diff point — `git status` was clean going in beyond two
 pre-existing, unrelated skill-directory changes). Six parallel sub-agents

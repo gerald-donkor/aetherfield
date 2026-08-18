@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import {
-  resolveTenant as resolveTenantFor,
+  resolveTenant,
   type TenantWriteMessages,
 } from "../../lib/auth/tenant";
 import {
@@ -164,7 +164,7 @@ const COMMIT_MESSAGES: TenantWriteMessages = {
 /** The upload's gate. Not exported: a `"use server"` module's runtime exports
     must all be async entry points. */
 function resolveImportTenant() {
-  return resolveTenantFor({
+  return resolveTenant({
     messages: IMPORT_MESSAGES,
     limiter: "activity-import",
   });
@@ -173,7 +173,7 @@ function resolveImportTenant() {
 /** The gate for the four actions that act on an already-staged import, and for
     `recalculate`. */
 function resolveCommitTenant() {
-  return resolveTenantFor({
+  return resolveTenant({
     messages: COMMIT_MESSAGES,
     limiter: "activity-commit",
   });

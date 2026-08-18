@@ -191,13 +191,20 @@ Scripts that currently exist in `package.json`:
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
 - `npm run typecheck` — `tsc --noEmit`
-- `npm test` — Vitest, **scoped to `lib/domain/`** and nothing else (the script
-  is a bare `vitest run`; the scope is `include: ["lib/domain/**/*.test.ts"]` in
-  `vitest.config.mts`, not in `package.json`). Added by
+- `npm test` — Vitest, **scoped to `lib/domain/` and `lib/validation/`** and
+  nothing else (the script is a bare `vitest run`; the scope is
+  `include: ["lib/{domain,validation}/**/*.test.ts"]` in `vitest.config.mts`,
+  not in `package.json`). Added by
   build step 10, because AGENTS.md §6.2 requires the pure domain layer to be
   independently testable and that step put an exact-decimal engine there whose
-  output lands in disclosures. A test that needs a database, a browser or a mock
-  does not belong in it — `npm run test:e2e` covers that ground
+  output lands in disclosures. **`lib/validation/` was added by prompt 121** and
+  is the one addition that argument permits rather than an exception to it: it
+  is the one module under `lib/` §6.3 forbids to be `server-only`, to read a
+  secret or to import `lib/db/`, and `fieldErrorsFrom` is a pure function with
+  no I/O that decides which message a person sees on every write path.
+  `vitest.config.mts`'s own docblock carries the full reasoning. A test that
+  needs a database, a browser or a mock does not belong in either directory —
+  `npm run test:e2e` covers that ground
 - `npm run test:watch` — the same, in watch mode
 - `npm run test:e2e` — run the complete E2E matrix: Chromium / Firefox natively,
   then WebKit in the pinned rootless Podman container
@@ -455,8 +462,8 @@ candidate.
 | 1 | **Map a `ZodError` once** — one adapter in `lib/validation/result.ts` for every site turning a validation failure into `fieldErrors` | — |
 | 3 | **One tenant gate that also spends the limiter** — collapse `resolveTenant` and `resolveMembershipForWrite` in `lib/auth/tenant.ts` | — |
 | 2 | **The submit lifecycle is a module** — one client-side module owning the six stages 24 leaves copy | 1 |
-| 4 | **Cut `app/activity/actions.ts` along its three routes**, moving `lib/validation/emissions.ts` with it | 3 |
-| 5 | **`lib/rate-limit/` — 18 wrappers become one policy table** | 3 |
+| 4 | **Cut `app/activity/actions.ts` along its three routes.** The review offered "move `lib/validation/emissions.ts` with it, or not at all"; prompt 125 took **not at all**, and that file is unmoved | 3 |
+| 5 | **`lib/rate-limit/` — 20 wrappers become one policy table.** The review counted 18; prompt 126 recounted and found **twenty**, which is what landed | 3 |
 | 6 | **One workspace boundary shell** for the eight `loading.tsx` / `error.tsx` copies | a design answer from the user |
 
 **This is a plan, and nothing in it is ticked.** Which candidate is built is

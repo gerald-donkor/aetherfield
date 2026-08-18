@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { resolveTenant as resolveTenantFor } from "../../lib/auth/tenant";
+import { resolveTenant } from "../../lib/auth/tenant";
 import { readReportEvidence } from "../../lib/db/report-evidence";
 import {
   createReport as createReportRow,
@@ -66,7 +66,7 @@ const TENANT_MESSAGES = {
  * fails closed on a limiter error exactly as it did.
  */
 function resolveWriteTenant() {
-  return resolveTenantFor({
+  return resolveTenant({
     messages: {
       ...TENANT_MESSAGES,
       throttled: (retry) => `${TOO_MANY_WRITES} ${retry}.`,
@@ -84,7 +84,7 @@ function resolveWriteTenant() {
  * this is the one gate call in the four action modules that passes no limiter.
  */
 function resolveReadTenant() {
-  return resolveTenantFor({ messages: TENANT_MESSAGES });
+  return resolveTenant({ messages: TENANT_MESSAGES });
 }
 
 /**
@@ -98,7 +98,7 @@ function resolveReadTenant() {
  * path it sits on then makes a model call.
  */
 function resolveNarrativeTenant() {
-  return resolveTenantFor({
+  return resolveTenant({
     messages: {
       ...TENANT_MESSAGES,
       throttled: (retry) => `${TOO_MANY_DRAFTS} ${retry}.`,

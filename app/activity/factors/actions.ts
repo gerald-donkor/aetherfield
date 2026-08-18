@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import {
-  resolveTenant as resolveTenantFor,
+  resolveTenant,
   type TenantWriteMessages,
 } from "../../../lib/auth/tenant";
 import {
@@ -142,7 +142,7 @@ export async function createCustomFactor(
   // -- b. Session, tenant and role, then the rate limit --------------------
   /* See `setFactorMapping` in `app/activity/mappings/actions.ts` for how the
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
+  const resolved = await resolveTenant({
     messages: CUSTOM_FACTOR_MESSAGES,
     limiter: "factor-mapping",
   });
@@ -240,7 +240,7 @@ export async function importCustomFactors(
   /* The one of the five that spends the `"factor-import"` policy and says
      "imports" rather than "changes" — the two things prompt 98's extraction
      is parameterised by. */
-  const resolved = await resolveTenantFor({
+  const resolved = await resolveTenant({
     messages: CUSTOM_FACTOR_IMPORT_MESSAGES,
     limiter: "factor-import",
   });
@@ -450,7 +450,7 @@ export async function retireCustomFactor(
   // -- b. Session, tenant and role, then the rate limit --------------------
   /* See `setFactorMapping` in `app/activity/mappings/actions.ts` for how the
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
+  const resolved = await resolveTenant({
     messages: CUSTOM_FACTOR_MESSAGES,
     limiter: "factor-mapping",
   });
@@ -527,7 +527,7 @@ export async function editFactorSet(
   // -- b. Session, tenant and role, then the rate limit --------------------
   /* See `setFactorMapping` in `app/activity/mappings/actions.ts` for how the
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
+  const resolved = await resolveTenant({
     messages: CUSTOM_FACTOR_MESSAGES,
     limiter: "factor-mapping",
   });
@@ -613,7 +613,7 @@ export async function retireFactorSet(
   // -- b. Session, tenant and role, then the rate limit --------------------
   /* See `setFactorMapping` in `app/activity/mappings/actions.ts` for how the
      role and the lock are resolved (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
+  const resolved = await resolveTenant({
     messages: CUSTOM_FACTOR_MESSAGES,
     limiter: "factor-mapping",
   });

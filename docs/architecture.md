@@ -1333,3 +1333,251 @@ Candidate 6 was the last one. The landed table now reads 121 (candidate 1),
 fully remediated, and this file's build-record role for that review is done.
 A later session should treat every candidate above as closed rather than
 re-deriving this from the landed table by hand.
+
+---
+
+## A second review, over the remediation itself — 18 Aug 2026 (prompt 129)
+
+The 17 Aug 2026 review ran at `2337ab1`, which is the commit immediately
+*before* the remediation sequence began. Every one of the six candidates
+therefore landed **after** the only review this codebase had ever had. This
+prompt reviewed that surface on both `code-review` axes, then ran a
+`improve-codebase-architecture` deepening scan over the fixed tree.
+
+### The fixed point, verified before anything was spawned
+
+```
+$ git rev-parse 2337ab1
+2337ab15a0210c03e0f665a57b5b2e9d4da1c48b
+
+$ git log 2337ab1..HEAD --oneline
+e6eb810 Give the lifecycle projects a browser the WebKit image carries
+15de360 One workspace boundary shell for the eight loading/error copies
+af77a82 Twenty rate-limit wrappers become one policy table
+44f6666 Cut app/activity/actions.ts along its three routes
+557f6f1 Adopt the submit lifecycle module on the three marketing dialogs
+4be68c8 The submit lifecycle is a module, not a habit (workspace half)
+3ac8c64 Collapse the tenant resolve and the limiter into one gate
+622c6b2 Map a ZodError once, and record the remediation sequence
+
+$ git diff 2337ab1...HEAD --stat | tail -1
+ 71 files changed, 7310 insertions(+), 3112 deletions(-)
+```
+
+Three dots, so the comparison is against the merge-base. The same string was
+handed to both sub-agents; neither invented its own range.
+
+### Three adaptations, stated rather than applied silently
+
+Both skills assume files this repository does not have. Each substitution is a
+**stronger** source the repo actually carries, not a workaround.
+
+1. **The spec source.** `code-review` step 2 looks for issue references and
+   `docs/agents/issue-tracker.md`, then says to run `/setup-matt-pocock-skills`.
+   `docs/agents/` does not exist, there is no issue tracker, and the commits
+   carry no `#123` references. Its own step 2.3 allows "a spec file under
+   `docs/`", so the spec was: AGENTS.md §5.4's candidate table and its order
+   `1 → 3 → 2 → 4, 5, 6`; this file's lines 46–249; and `prompts/121`–`128`
+   individually, each matched to its commit.
+2. **`CONTEXT.md` and `docs/adr/` are both absent.** The domain glossary was
+   AGENTS.md §5 and §9 — *lead*, *subscriber*, *application*, *organisation*,
+   *member*, *activity record*, *emission factor*, *factor set*, *factor
+   mapping*, *target*, *report*, *alert*. The ADR equivalents not to be
+   re-litigated were §6.2, §6.3, §7.5, §9.2 and every landed record in this
+   file, plus three named specifically: prompt 104's allowlist limit,
+   `lib/validation/` deliberately not being `server-only`, and the eight
+   boundary files' line count not being the measure.
+3. **Three skills `improve-codebase-architecture` calls for are not
+   installed** — `codebase-design`, `grilling` and `domain-modeling` are absent
+   from `.agents/skills/`, `.claude/skills/` and `~/.claude/skills/`, checked
+   rather than assumed. The architecture vocabulary survives, because that
+   skill's own line 13 enumerates it, and it was used exactly. What does not
+   survive is `grilling`'s decision tree, so **this run stopped at the report
+   and its question** rather than improvising a substitute step 3.
+
+### Phase A — the two axes, kept separate
+
+Per the skill's step 5, the two axes are not merged and not reranked against
+each other. **7 Standards findings and 3 Spec findings.** The worst *within*
+Standards is the `lib/rate-limit/index.ts` fail-open cast; the worst *within*
+Spec is AGENTS.md §5.4's stale candidate-4 row. There is no single winner
+across axes, and the separation exists to prevent one being named.
+
+Both axes independently converged on the same two AGENTS.md staleness items,
+which is the strongest signal in the pass.
+
+#### Standards
+
+1. **AGENTS.md §2's `npm test` line was stale** — it still said the scope was
+   `lib/domain/` and nothing else, with `include: ["lib/domain/**/*.test.ts"]`.
+   Prompt 121 widened it to `lib/{domain,validation}` and documented the
+   reasoning in `vitest.config.mts`'s docblock, but never corrected AGENTS.md.
+   §12 rule 8.
+2. **AGENTS.md §5.4's candidate 4 and 5 rows were stale** — candidate 4 said
+   "moving `lib/validation/emissions.ts` with it" where prompt 125 deliberately
+   took the other branch, and candidate 5 said "18 wrappers" where prompt 126
+   recounted and found twenty. §5.4 is the section a session reads *first*.
+3. **`lib/auth/tenant.ts`'s `authorize` hook has one caller.** It exists so "a
+   non-owner probing a control must not consume the owner's budget", yet only
+   `app/account/actions.ts:579` uses it; nine other sites do the role check
+   inline at stage **d**, after the limiter is spent. Not a §10 rule 3 breach —
+   a→b→c is intact — but the hook is either under-adopted or Speculative
+   Generality. **Recorded, not fixed:** adopting it at nine sites is a redesign.
+4. **`lib/rate-limit/index.ts` cast `identifier as string`, twice.** Safe under
+   the overloads, but anything reaching that branch anyway keyed Redis with the
+   literal `"undefined"` — one shared bucket for every caller of that policy,
+   i.e. a limiter silently going **fail-open** on a §8.2 rule 2 path.
+5. **`app/_components/use-write.ts:213` exports `setMessage` / `setErrors`** —
+   Middle Man / leaky abstraction. The docblock at :198–212 argues it from
+   measured call sites. **Recorded, not fixed** — and Phase B's candidate 2
+   shows *why* the hatch exists, which is the better answer than closing it.
+6. **`apply-dialog.tsx` folds `checkCv`'s failure into a synthetic
+   `{ path: ["cv"], message }` issue** to pass as a `ZodError` — Primitive
+   Obsession. Honest and commented, but it fakes a foreign type. **Recorded.**
+7. **`resolveTenant as resolveTenantFor` in six action modules** — Mysterious
+   Name. Only `app/targets/actions.ts` declares a shadowing local; the other
+   five aliased for symmetry, and `resolveTenantFor` names nothing.
+
+Nothing found on: §8.1 prerender, §8.3 logging (no `console.*` added anywhere
+in the diff), §6.3 layering, §10 stage order, GSAP discipline, Duplicated Code.
+
+#### Spec
+
+1. **AGENTS.md:458 vs `prompts/125-…:80`** — the spec line
+   *"`lib/validation/emissions.ts` does **not** move — 'or not at all,' taken"*
+   against §5.4's uncorrected row. Same item as Standards 1's sibling, reached
+   independently from the prompt file rather than from the config.
+2. **AGENTS.md:459's "18"** against `lib/rate-limit/policies.ts:39–58`, which
+   declares 20 policies, and prompt 126's own correction.
+3. **Implemented but wrong, latent — `use-write.ts:189` does
+   `setMessage(fieldsMessage ?? "")`**, so a site giving `parse` without
+   `fieldsMessage` would announce nothing: a silent failure under §8.2 rule 4.
+   All nine current `parse:` sites pass one; the type allows one that does not.
+
+**No undeclared scope creep.** `use-write.ts` exceeds the review's
+`{ submit, pending, message, errors }` sketch, but every addition is argued from
+measured call sites. Prompt 128's `timeout: 60_000` and the
+`e2e/support/database.ts` Happy-Eyeballs fix sit outside its stated edit set,
+but its triage rule admits harness fixes and `docs/automation.md` records both.
+No application code, no JSX and no prerendered markup changed in that commit.
+
+### Fixed vs recorded — every finding is one or the other
+
+| # | axis | finding | outcome |
+| --- | --- | --- | --- |
+| S1 | Standards | AGENTS.md §2's `npm test` scope stale | **fixed** — §2 now states `lib/{domain,validation}` and why |
+| S2 / Sp1 / Sp2 | both | AGENTS.md §5.4 candidate 4 and 5 rows stale | **fixed** — both rows now record what actually landed |
+| S3 | Standards | `authorize` hook adopted at 1 of 10 sites | **recorded** — adopting it at nine sites is a redesign |
+| S4 | Standards | `identifier as string` fails open | **fixed** — fails closed, with the posture commented |
+| S5 | Standards | `use-write.ts` exports the raw setters | **recorded** — Phase B candidate 2 explains the cause |
+| S6 | Standards | `apply-dialog.tsx`'s synthetic issue | **recorded** — closing it changes the shared module's interface |
+| S7 | Standards | `resolveTenantFor` alias names nothing | **fixed** — dropped in the four modules with no shadow |
+| Sp3 | Spec | `fieldsMessage` optional where `parse` is given | **recorded** — see below |
+
+**Why Sp3 is recorded rather than fixed.** The obvious fix is a second inferred
+generic (`TMessage extends string | undefined`) making `parse?: never` when no
+`fieldsMessage` was passed. It does not work here: **every options-passing site
+supplies an explicit first type argument** (`useWrite<TargetField>({…})`, and
+eight more), and TypeScript does not infer a second type parameter once the
+first is given explicitly — all nine would silently fall to the default and
+lose `parse`. Closing it properly means reshaping the hook's public signature at
+every call site, which is a redesign and belongs in its own prompt.
+
+### What was fixed, exactly
+
+- **`AGENTS.md` §2** — the `npm test` row now states the real scope
+  (`lib/{domain,validation}/**/*.test.ts`), names prompt 121 as what widened it,
+  and gives the one-paragraph reason `vitest.config.mts` carries in full.
+- **`AGENTS.md` §5.4** — candidate 4 now records that the review offered "move
+  `lib/validation/emissions.ts` with it, or not at all" and that prompt 125 took
+  **not at all**; candidate 5 now reads 20 with the recount noted.
+- **`lib/rate-limit/index.ts`** — the two `identifier as string` casts are gone.
+  The key derivation branches explicitly, and an unkeyed call to a keyed policy
+  now **returns a refusal** instead of keying Redis with `"undefined"`.
+  `UNKEYED_REFUSAL_SECONDS = 60` is **a judgement, not a measurement** (§12
+  rule 4) — the branch is unreachable through the exported overloads, so no
+  window was fitted to it. Behaviour is unchanged for every defined identifier,
+  including the `hash` branch.
+- **`app/{activity,activity/factors,activity/mappings,reports}/actions.ts`** —
+  the `resolveTenant as resolveTenantFor` alias dropped; these four declare no
+  shadowing local. `app/targets/actions.ts` **keeps** it, because it genuinely
+  declares its own `resolveTenant`, and a docblock there now says so, so a later
+  pass does not "tidy" the one alias that is load-bearing.
+
+### Phase B — the deepening scan
+
+Ran over the fixed tree, not a stale one. One explore sub-agent, per the skill.
+Scope was decided by its step-1 YAGNI rule: the write path the six candidates
+rewrote. **Six candidates, and the deletion test says "concentrates" for all
+six** — a "merely moves" was not reported as a candidate.
+
+| # | candidate | strength | dependency |
+| --- | --- | --- | --- |
+| 1 | Concentrate the limiter spend | `Strong` | local-substitutable |
+| 2 | Collapse the arm-and-confirm control | `Strong` | in-process |
+| 3 | One CSV intake for the two upload paths | `Strong` | in-process |
+| 4 | The public write path still has no gate | `Worth exploring` | ports & adapters |
+| 5 | Let the submit lifecycle name the invocation | `Worth exploring` | local-substitutable |
+| 6 | The tenant sentence set, in two homes | `Worth exploring` | in-process |
+
+**Top recommendation: candidate 1.** Twelve sites outside `lib/auth/tenant.ts`
+restate `checkLimit → !allowed → formatRetry → catch`, and whether an
+unavailable limiter blocks the write or lets it through is carried by a comment
+above a `catch` rather than by anything a caller must state.
+`lib/auth/tenant.ts:15–19` already names this exact re-implementation as the
+finding prompt 122 was written to close — it closed it for the tenant-bearing
+half only.
+
+**Verified before reporting, and the scan's framing was tempered because of
+it:** the fail-open sites are deliberate and each carries its own written
+rationale — `app/api/newsletter/unsubscribe/route.ts:48–51` ("Refusing to honour
+an unsubscribe because Redis is unreachable is a compliance failure") and
+`app/api/cron/recalculate/route.ts:78–79` ("It exists so a leaked secret cannot
+drive repeated full-tenant sweeps"). The candidate is that the posture is
+*documented* rather than *expressed in the interface*, **not** that it is wrong.
+
+**Five of the six landed remediation modules were checked and judged deep** —
+`lib/rate-limit/*`, `lib/validation/result.ts`, `workspace-boundary.tsx`,
+`lib/db/tenant-scope.ts` and the three-way activity cut all earned their
+interface. Only `use-write.ts`'s **pend stage** did not, which is candidate 5.
+`app/account/actions.ts` was checked and is **not** a candidate despite being
+751 lines over three nouns: §6.3 colocates actions per *route*, and `/account`
+is one route, so splitting it would create three modules with no route locality.
+
+The report is a self-contained HTML file written **outside the repository**, at
+`/tmp/architecture-review-20260818-203621.html`. It is not committed, and
+`git status` was checked to confirm no `.html` file entered the tree. It uses
+Tailwind and Mermaid via CDN, which is the skill's own scaffold and not a §7.5
+"second design system" — the file never enters this repository.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **318 passed, 13 files** — unchanged from the prompt 124/127 baseline, before and after the fixes |
+| `npm run build` | exit 0. Route table matches §8.1 exactly: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, the workspace routes `ƒ` |
+| prerender diff | **not run, and the reason is the rule.** Every fix landed in `AGENTS.md`, `lib/rate-limit/` or a `"use server"` action module — no client leaf under `app/_components/` was touched, and no prerendered page renders any changed file. The prompt's own branch for this case is "run the build and confirm the route table", which is the row above |
+| `npm run test:e2e` | **Chromium + Firefox: 107 passed, 3 failed, 12 skipped** under the loaded four-worker matrix. All three failures were `page.waitForURL` timeouts, and all three are **flake, confirmed by re-running the two specs alone: 23 passed (2.6m)**. The same class of flake is recorded above at prompt 127 |
+| `npm run test:e2e:webkit` | **could not run in this session, and is reported rather than routed around** (§12 rule 9). The pinned rootless Podman container had no working outbound network: the first attempt failed at setup with `connect ETIMEDOUT …:5432` / `ECONNREFUSED` against Neon on both address families, the retry failed earlier still with `next/font: Failed to fetch 'Archivo' from Google Fonts` during the in-container build. Both are environment, not code — the *native* run hit the identical Google Fonts failure once and passed on retry, and `curl` to `fonts.googleapis.com` returned `200` from the host throughout. **Not evidence that WebKit is broken, and not evidence that it passes.** Because `test:e2e` is `test:e2e:local && test:e2e:webkit`, the three flaky Firefox failures also meant WebKit never ran in the combined command |
+| `git status` | no `.html` file in the tree |
+
+### Nothing was added to AGENTS.md
+
+Two lines in it were **corrected** — §2's test scope and §5.4's two candidate
+rows — which §12 rule 8 requires and which is a correction, not growth. No index
+row was needed, since `docs/architecture.md` is already indexed, and no new
+site-wide invariant met the front matter's cap rule.
+
+### Re-running this review
+
+```
+git rev-parse 2337ab1                      # the fixed point
+git diff 2337ab1...HEAD --stat             # three dots, against the merge-base
+```
+
+Then the `code-review` skill with `2337ab1` as the fixed point, substituting the
+spec source per adaptation 1 above, and `improve-codebase-architecture` for the
+deepening pass. A future review's fixed point is **this** prompt's `HEAD`, not
+`2337ab1` — that ground is now covered twice.

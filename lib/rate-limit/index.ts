@@ -91,6 +91,15 @@ async function consume(
 }
 
 /**
+ * What an unkeyed call to a keyed policy is told to wait. **A judgement, not a
+ * measurement** (AGENTS.md 12 rule 4): the branch it serves is unreachable
+ * through the exported overloads below, so no window was fitted to it. One
+ * minute is long enough that a caller looping on the bug backs off, short
+ * enough that a real person caught by it is not locked out.
+ */
+const UNKEYED_REFUSAL_SECONDS = 60;
+
+/**
  * Every policy but `"cron-sweep"` takes the caller's identifier — an IP or a
  * user id, never anything personal (AGENTS.md 8.3 rule 2 keeps addresses and
  * tokens out of every store that is not the table that owns them, which is why
@@ -116,12 +125,27 @@ export async function checkLimit(
   identifier?: string,
 ): Promise<RateLimitOutcome> {
   const definition = POLICIES[policy];
-  const key =
-    typeof definition.key === "object"
-      ? definition.key.constant
-      : definition.key === "hash"
-        ? createHash("sha256").update(identifier as string).digest("hex")
-        : (identifier as string);
+
+  /* **Fails closed, and the cast it replaces failed open.** The overloads above
+     make an unkeyed call to a keyed policy a compile error, so this is
+     unreachable from TypeScript — but the previous `identifier as string` meant
+     that anything reaching it anyway (a JS caller, a future overload widened
+     without thinking) keyed Redis with the literal string `"undefined"`, i.e.
+     one shared bucket for every caller of that policy. That is a limiter
+     silently going fail-open on an AGENTS.md 8.2 rule 2 path. A refusal is the
+     safe direction for a limiter whose key it cannot establish. */
+  let key: string;
+  if (typeof definition.key === "object") {
+    key = definition.key.constant;
+  } else {
+    if (identifier === undefined) {
+      return { allowed: false, retryAfterSeconds: UNKEYED_REFUSAL_SECONDS };
+    }
+    key =
+      definition.key === "hash"
+        ? createHash("sha256").update(identifier).digest("hex")
+        : identifier;
+  }
 
   for (const stage of definition.stages) {
     const outcome = await consume(stage.prefix, stage.limit, stage.window, key);

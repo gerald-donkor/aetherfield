@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import {
-  resolveTenant as resolveTenantFor,
+  resolveTenant,
   type TenantWriteMessages,
 } from "../../../lib/auth/tenant";
 import { recalculateOrganization } from "../../../lib/db/emission-queries";
@@ -124,7 +124,7 @@ export async function setFactorMapping(
      (AGENTS.md 11.2 rule 5). No argument is taken from the request, so no
      organisation id can be supplied. The deletion lock and the fail-closed
      limiter are the gate's, unchanged. */
-  const resolved = await resolveTenantFor({
+  const resolved = await resolveTenant({
     messages: FACTOR_MAPPING_MESSAGES,
     limiter: "factor-mapping",
   });

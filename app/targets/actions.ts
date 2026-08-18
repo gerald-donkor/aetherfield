@@ -45,6 +45,12 @@ const TOO_MANY_WRITES =
  *
  * Not exported. A `"use server"` module's runtime exports must all be async
  * entry points, and this is a helper.
+ *
+ * **The `resolveTenant as resolveTenantFor` import above is load-bearing here
+ * and only here** — this module declares its own `resolveTenant`, so the alias
+ * is what keeps the gate reachable rather than shadowed. The other five action
+ * modules aliased for symmetry alone and were renamed back to `resolveTenant`;
+ * do not restore the alias to them.
  */
 function resolveTenant() {
   return resolveTenantFor({
