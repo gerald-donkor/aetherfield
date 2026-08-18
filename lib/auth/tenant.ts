@@ -6,13 +6,17 @@ import { getCurrentAccount } from "./server";
 
 /**
  * Stages **b** and **d** of AGENTS.md 10, for every authenticated Server
- * Action: resolve the session, resolve the tenant, and hand back the two ids
- * everything else is scoped by.
+ * Action: resolve the session, resolve the tenant, enforce the deletion lock,
+ * run the caller's own authorisation, spend the caller's rate limit — and hand
+ * back the membership and the two ids everything else is scoped by.
  *
- * **Extracted from `app/activity/actions.ts` at build step 11**, behaviour
- * identical, because a second action file needing the same primitive is not a
- * reason to have two copies of an authorisation check. `app/targets/actions.ts`
- * is the second caller.
+ * **One gate, prompt 122** (architecture candidate 3, `docs/architecture.md`).
+ * It replaces `resolveTenant` and `resolveMembershipForWrite`, which were cut
+ * on *what they returned* rather than on *what they enforced*: the limiter half
+ * was the security-relevant, fail-closed half, and it was re-implemented at
+ * five sites outside the module that owns it. A hardening applied here now
+ * reaches all 21 authenticated writes rather than the ten that happened to pick
+ * the limiter-bearing sibling.
  *
  * ---
  *
@@ -33,18 +37,23 @@ import { getCurrentAccount } from "./server";
  * **Nothing is logged**, on no path and in no catch (AGENTS.md 8.3 rule 2).
  */
 
-export type TenantResolution =
-  | { ok: true; userId: string; organizationId: string }
+export type TenantGate =
+  | {
+      ok: true;
+      membership: CurrentMembership;
+      userId: string;
+      organizationId: string;
+    }
   | { ok: false; error: string };
 
 /**
- * The three sentences a caller owes its own user.
+ * The four sentences a caller owes its own user.
  *
  * They are a **parameter rather than constants here** because the copy is
  * flow-specific — "sign in again to import activity data" is the right sentence
  * on `/activity` and the wrong one on `/targets`. Passing them in is what let
- * this extraction be behaviour-identical for step 9's file: it passes the exact
- * strings it already had.
+ * every extraction into this module be behaviour-identical: each call site
+ * passes the exact strings it already had.
  */
 export type TenantMessages = {
   /** No session at all. */
@@ -59,109 +68,105 @@ export type TenantMessages = {
    * sentence tells the person to create an organisation and they have one; it
    * is being erased. Passed per-flow like the other three, so each surface says
    * what it means on that surface.
+   *
+   * Required even under `lock: "allow-locked"`, where it is unreachable: one
+   * sentence set is one type, and an optional-by-mode field would be a fifth
+   * shape in the union below for no behavioural gain.
    */
   organizationLocked: string;
-  /** The lookup itself failed. */
+  /** The lookup, the limiter, or either failing. */
   failure: string;
 };
 
 /**
- * A signed-out or organisation-less caller gets a handled `{ ok: false }` and
- * never a redirect and never a throw (AGENTS.md 10 rule 2). `proxy.ts`'s
- * redirect is optimistic and is not the enforcement (AGENTS.md 7.3, 11.2
- * rule 1); this is.
- */
-export async function resolveTenant(
-  messages: TenantMessages,
-): Promise<TenantResolution> {
-  let account: Awaited<ReturnType<typeof getCurrentAccount>>;
-  let membership: Awaited<ReturnType<typeof getCurrentMembership>>;
-  try {
-    account = await getCurrentAccount();
-    membership = account ? await getCurrentMembership() : null;
-  } catch {
-    return { ok: false, error: messages.failure };
-  }
-
-  /* Two states, told apart deliberately: a signed-out caller needs to sign in,
-     and a signed-in caller with no organisation needs to create one. Neither
-     message says anything about another tenant. */
-  if (!account) return { ok: false, error: messages.signedOut };
-  if (!membership) return { ok: false, error: messages.noOrganization };
-
-  /* The lock. Every authenticated action that resolves its tenant here refuses
-     while a deletion request is open, with no call-site edit beyond the fourth
-     sentence above. `/account`'s restore control deliberately does not go
-     through this path — it is the one thing a locked organisation may do. */
-  if (membership.pendingDeletion) {
-    return { ok: false, error: messages.organizationLocked };
-  }
-
-  return {
-    ok: true,
-    userId: membership.account.user.id,
-    organizationId: membership.organization.id,
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  The same stage b, for the actions that need the role as well as the ids    */
-/* -------------------------------------------------------------------------- */
-
-/**
- * `resolveTenant`'s sibling, for a write whose stage **d** reads the tenant
- * role: it resolves the same session and the same tenant, enforces the same
- * deletion lock, then **spends a rate limit** and hands back the whole
- * membership rather than two ids.
- *
- * **Extracted at prompt 98 from seven copies**, behaviour-identical — six in
- * `app/activity/actions.ts` (`setFactorMapping`, `createCustomFactor`,
- * `importCustomFactors`, `retireCustomFactor`, `editFactorSet`,
- * `retireFactorSet`) and one private copy in `app/account/actions.ts`. The
- * preambles were diffed against each other before they were collapsed and
- * varied in exactly two things, both now parameters: which limiter is spent,
- * and which sentences are returned. That was the finding — security-relevant
- * code in seven copies is code where a hardening applied to one silently leaves
- * six behind.
- *
- * **Why the limiter comes after the session and not before it.** The limit is
- * keyed by the user id, and there is no key without the session. That is the
- * one ordering difference from AGENTS.md 10's public-form stage order, and it
- * is the same one every authenticated action in this repository already makes.
- *
- * **It fails closed.** A limiter that throws returns `failure`, not a pass: an
- * unlimited write path is worse than a control that is briefly unavailable, and
- * AGENTS.md 8.2 rule 4 wants the failure visible rather than a silent success.
- *
- * **Nothing is logged** — not the user id, not the organisation id, not the
- * input, and not in either catch (AGENTS.md 8.3 rule 2).
- */
-export type MembershipResolution =
-  | { ok: true; membership: CurrentMembership }
-  | { ok: false; error: string };
-
-/**
- * `TenantMessages` plus the one sentence this path can produce and
- * `resolveTenant` cannot.
+ * `TenantMessages` plus the one sentence only a limiter-bearing call can
+ * produce.
  *
  * `throttled` is a builder rather than a string because the retry window is
- * only known here. **`formatRetry` is applied inside the helper**, so the
+ * only known here. **`formatRetry` is applied inside the gate**, so the
  * seconds-to-prose rule lives in one place and a call site can never format it
  * differently; the builder receives the finished phrase and decides only the
  * sentence around it ("too many changes" on a factor edit, "too many imports"
  * on a bulk upload).
  */
-export type MembershipWriteMessages = TenantMessages & {
+export type TenantWriteMessages = TenantMessages & {
   throttled: (retry: string) => string;
 };
 
-export async function resolveMembershipForWrite(
-  /** Passed as a function, not selected from a registry: the call site names
-      the limiter it has always spent, and the set of limiters stays in
-      `lib/rate-limit/`. */
-  limiter: (identifier: string) => Promise<RateLimitOutcome>,
-  messages: MembershipWriteMessages,
-): Promise<MembershipResolution> {
+type TenantGateShared = {
+  /**
+   * `"enforce"` (the default) refuses a pending-deletion organisation before
+   * the limiter is touched.
+   *
+   * `"allow-locked"` is `app/account/actions.ts`'s deletion pair and nothing
+   * else: restoring a locked organisation is the one thing a locked
+   * organisation may do, and without the exception the lock would be a state
+   * with no exit. It is **spelled at the call site** rather than hidden in a
+   * private helper, which is the point of making it a mode.
+   */
+  lock?: "enforce" | "allow-locked";
+  /**
+   * Stage **d**, run after the lock and **before** the limiter, so a refusal
+   * spends no token. Returns the refusal sentence, or `null` to proceed.
+   *
+   * A non-owner probing a control must not consume the owner's budget for it,
+   * which is why this hook exists rather than leaving the caller to check the
+   * role after the gate returns.
+   */
+  authorize?: (membership: CurrentMembership) => string | null;
+};
+
+/**
+ * **`throttled` is required exactly when `limiter` is passed, and the signature
+ * is what enforces it** — a limiter with no sentence is a compile error rather
+ * than a runtime surprise. `limiter?: undefined` on the first shape is what
+ * makes `if (options.limiter)` narrow to the second.
+ */
+export type TenantGateOptions =
+  | (TenantGateShared & {
+      messages: TenantMessages;
+      /** Omitted where the caller spends no token — today only the read-shaped
+          stage b of `generateNarrative`, which spends its limiter later. */
+      limiter?: undefined;
+    })
+  | (TenantGateShared & {
+      messages: TenantWriteMessages;
+      /** Passed as a function, not selected from a registry: the call site
+          names the limiter it has always spent, and the set of limiters stays
+          in `lib/rate-limit/`. Architecture candidate 5 changes that, and this
+          gate deliberately does not pre-empt it. */
+      limiter: (identifier: string) => Promise<RateLimitOutcome>;
+    });
+
+/**
+ * **The order is fixed here and cannot be got wrong at a call site:**
+ * session → tenant → lock → `authorize` → limiter.
+ *
+ * `@upstash/ratelimit`'s `limit()` spends a token on the call, so every cheap
+ * refusal precedes it. **Why the limiter comes after the session and not
+ * before it** is the one documented departure from AGENTS.md 10's public-form
+ * stage order: the limit is keyed by the user id, and there is no key without
+ * the session. Every authenticated action in this repository already makes it.
+ *
+ * **It fails closed.** A limiter that throws returns `failure`, not a pass: an
+ * unlimited write path is worse than a control that is briefly unavailable, and
+ * AGENTS.md 8.2 rule 4 wants the failure visible rather than a silent success.
+ *
+ * A signed-out or organisation-less caller gets a handled `{ ok: false }` and
+ * never a redirect and never a throw (AGENTS.md 10 rule 2). `proxy.ts`'s
+ * redirect is optimistic and is not the enforcement (AGENTS.md 7.3, 11.2
+ * rule 1); this is.
+ *
+ * **The membership and the two ids are both returned** because they are the
+ * same value at two widths — the ids *are* `membership.account.user.id` and
+ * `membership.organization.id`. Returning both costs nothing derived and leaves
+ * every existing call-site body untouched.
+ */
+export async function resolveTenant(
+  options: TenantGateOptions,
+): Promise<TenantGate> {
+  const { messages } = options;
+
   let membership: CurrentMembership | null;
   try {
     membership = await getCurrentMembership();
@@ -172,7 +177,9 @@ export async function resolveMembershipForWrite(
   if (!membership) {
     /* Two ordinary states, told apart so the message is honest: signed out, or
        signed in with no organisation. Neither says anything about another
-       tenant. */
+       tenant. `getCurrentMembership` resolves the account itself, so reaching
+       here means that lookup did not throw and this one will not either; the
+       catch is belt and braces. */
     const account = await getCurrentAccount().catch(() => null);
     return {
       ok: false,
@@ -180,26 +187,40 @@ export async function resolveMembershipForWrite(
     };
   }
 
-  /* The lock — prompt 73. These callers resolve their membership directly
-     because stage d needs the role, so they do not pass through
-     `resolveTenant`'s check and the marker is enforced here instead. It runs
-     **before** the limit: a locked organisation is refused without spending a
-     token. */
-  if (membership.pendingDeletion) {
+  /* The lock — prompt 73. Every authenticated action that resolves its tenant
+     here refuses while a deletion request is open, with no call-site edit
+     beyond the fourth sentence above. It runs **before** the limit: a locked
+     organisation is refused without spending a token. */
+  if ((options.lock ?? "enforce") === "enforce" && membership.pendingDeletion) {
     return { ok: false, error: messages.organizationLocked };
   }
 
-  try {
-    const limit = await limiter(membership.account.user.id);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: messages.throttled(formatRetry(limit.retryAfterSeconds)),
-      };
+  /* Stage d, where a caller has one. The role it reads was re-read from
+     Postgres by `getCurrentMembership` on this request rather than trusted from
+     the session payload (AGENTS.md 11.2 rule 5). */
+  const refusal = options.authorize?.(membership);
+  if (refusal) return { ok: false, error: refusal };
+
+  if (options.limiter) {
+    try {
+      const limit = await options.limiter(membership.account.user.id);
+      if (!limit.allowed) {
+        return {
+          ok: false,
+          error: options.messages.throttled(
+            formatRetry(limit.retryAfterSeconds),
+          ),
+        };
+      }
+    } catch {
+      return { ok: false, error: messages.failure };
     }
-  } catch {
-    return { ok: false, error: messages.failure };
   }
 
-  return { ok: true, membership };
+  return {
+    ok: true,
+    membership,
+    userId: membership.account.user.id,
+    organizationId: membership.organization.id,
+  };
 }

@@ -113,7 +113,7 @@ shrinks and the leaves absorb nothing.
 > standing mask on `/`, `/journal` and `/careers`. Take candidate 1 first, then
 > adopt this on the eight workspace leaves before the three marketing ones.
 
-### 3 · One tenant gate that also spends the limiter — *Strong · local-substitutable*
+### 3 · One tenant gate that also spends the limiter — *Strong · local-substitutable* — **implemented, prompt 122**
 
 `lib/auth/tenant.ts` · `app/{targets,reports,activity,account}/actions.ts`.
 
@@ -138,6 +138,11 @@ interface shrinks from 2 exports to 1.
 the seven copies were collapsed at prompt 98 — "security-relevant code in seven
 copies is code where a hardening applied to one silently leaves six behind".
 That argument covers the remaining four unchanged.
+
+*Three of the figures above are wrong, and the corrections are argued under
+**Prompt 122 — the record** at the foot of this file: there were **five**
+re-implementations and not four, the writes a hardening reaches number **21**
+and not 13, and `formatRetry` keeps **five** callers rather than one.*
 
 ### 4 · Cut `app/activity/actions.ts` along its three routes — *Worth exploring · in-process*
 
@@ -231,7 +236,7 @@ table below is appended to as prompts land, after the fact.
 | --- | --- | --- |
 | 1 · map a `ZodError` once | 121 | 18 Aug 2026 |
 | 2 · the submit lifecycle | — | — |
-| 3 · one tenant gate | — | — |
+| 3 · one tenant gate | 122 | 18 Aug 2026 |
 | 4 · cut `app/activity/actions.ts` | — | — |
 | 5 · `lib/rate-limit/` policies | — | — |
 | 6 · one workspace boundary shell | — | — |
@@ -332,3 +337,196 @@ no chunk was added or removed on a marketing route. So no markup, no copy and no
 script moved. This comparison is HTML, not pixels, so the standing
 `magick compare` mask warning on `/`, `/journal` and `/careers` does not apply to
 it.
+
+---
+
+## Prompt 122 — the record
+
+`resolveTenant(options)` in `lib/auth/tenant.ts` — one export where there were
+two. Its docblock carries the ordering argument and the interface decisions;
+this section carries the equivalence check, the measurements, and three
+corrections to the review above.
+
+### Three corrections to the review
+
+1. **There were five re-implementations of the limiter half, not four.** The
+   review named `app/targets/actions.ts`'s `consumeWriteLimit`,
+   `app/reports/actions.ts`'s `consumeLimit`, `app/activity/actions.ts`'s
+   `consumeCommitLimit` and `stageImport`'s inline block. It missed
+   `app/account/actions.ts`'s `resolveOwnerForDeletion` — 45 lines
+   re-implementing the session resolve, the signed-out / no-organisation split
+   *and* the fail-closed limiter block, because it must **not** enforce the
+   deletion lock. That constraint is real (restoring a locked organisation is
+   the one thing a locked organisation may do), and it is why the gate takes a
+   `lock` mode rather than hard-coding the lock.
+2. **A hardening now reaches 21 writes, not 13.** Counted from the call sites:
+   `resolveTenant` had 10 callers (targets 2, reports 3, activity 5) and
+   `resolveMembershipForWrite` had 11 (activity 6, account 5). With
+   `resolveOwnerForDeletion`'s two callers folded in, the gate has **23 call
+   sites** across the four action modules, reached by **24 calls** — see
+   `generateNarrative` below for the twenty-fourth.
+3. **`formatRetry` keeps five callers, not one**, and one of them is a file the
+   prompt expected to lose it. `app/_actions/{demo-request,newsletter,application}.ts`,
+   `app/submissions/actions.ts` and `app/invitation/[id]/actions.ts` have no
+   tenant to resolve and are untouched — but **`app/account/actions.ts` keeps
+   its import too**, for `createOrganization`, which spends
+   `checkOrganizationCreateLimit` against a session with no membership yet and
+   is listed in the prompt's own "deliberately unchanged" section. So three
+   tenant-path callers were removed (`targets`, `reports`, `activity`), not
+   four, and the prompt was internally inconsistent on this point.
+
+Measured, before and after:
+
+```
+before: app/{account,activity,invitation/[id],reports,submissions,targets}/actions.ts
+        app/_actions/{application,demo-request,newsletter}.ts
+        lib/{auth/tenant.ts,rate-limit/index.ts}
+after:  app/{account,invitation/[id],submissions}/actions.ts
+        app/_actions/{application,demo-request,newsletter}.ts
+        lib/{auth/tenant.ts,rate-limit/index.ts}
+```
+
+### The four interface decisions, and how each fared
+
+1. **The gate returns the membership *and* the two ids.** Survives as written.
+   They are the same value at two widths, so all 23 call-site bodies below the
+   preamble are untouched — the whole diff is in the preamble, which was the
+   point.
+2. **The limiter stays a function, not a policy key.** Survives. Candidate 5
+   replaces every limiter function with a policy key and would rewrite this
+   signature; nothing here pre-empts it.
+3. **`throttled` is required exactly when `limiter` is passed, enforced by the
+   signature.** Survives, and was **verified rather than asserted**: a probe
+   module passing a limiter with a `throttled`-less message set was compiled
+   and `tsc` rejected it with `TS2345 … Property 'throttled' is missing in type
+   … but required`, then the probe was deleted. The mechanism is a two-member
+   union with `limiter?: undefined` on the first member, which is also what
+   makes `if (options.limiter)` narrow to the second.
+4. **Order inside the gate: session → tenant → lock → `authorize` → limiter.**
+   Survives, and it is what makes `resolveOwnerForDeletion`'s owner check
+   collapse safely — see the equivalence table.
+
+One decision the prompt did not anticipate: **`organizationLocked` stays
+required even under `lock: "allow-locked"`, where it is unreachable.** Making it
+conditional on the lock mode would cross a second axis into the union and give
+four option shapes for no behavioural gain. The deletion pair passes
+`MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED` with a comment saying it cannot be
+reached.
+
+### Equivalence, per site
+
+Read off the before and after. **Every row is identical in all four columns.**
+The rows are grouped where the sites are literally the same call; the site count
+is given per row and totals 23.
+
+| sites | limiter spent | sentences | lock | `authorize` |
+| --- | --- | --- | --- | --- |
+| `targets`: `createTarget`, `retireTarget` (2) | `checkTargetWriteLimit` | 4 + `TOO_MANY_WRITES` prefix, verbatim | enforced | none |
+| `reports`: `createReport`, `deleteReport` (2) | `checkReportWriteLimit` | 4 + `TOO_MANY_WRITES` prefix, verbatim | enforced | none |
+| `reports`: `generateNarrative`, stage b (1) | **none** | 4 | enforced | none |
+| `reports`: `generateNarrative`, narrative spend (the 24th call) | `checkReportNarrativeLimit` | 4 + `TOO_MANY_DRAFTS` prefix, verbatim | enforced | none |
+| `activity`: `stageImport` (1) | `checkActivityImportLimit` | 4 + "too many uploads", verbatim | enforced | none |
+| `activity`: `updateImportMapping`, `commitImport`, `discardImport`, `recalculate` (4) | `checkActivityCommitLimit` | 4 + "too many requests", verbatim | enforced | none |
+| `activity`: `setFactorMapping` (1) | `checkFactorMappingLimit` | `FACTOR_MAPPING_MESSAGES`, unchanged | enforced | none — the role check stays at stage d in the action body, as before |
+| `activity`: `createCustomFactor`, `retireCustomFactor`, `editFactorSet`, `retireFactorSet` (4) | `checkFactorMappingLimit` | `CUSTOM_FACTOR_MESSAGES`, unchanged | enforced | none — role checks stay at stage d, as before |
+| `activity`: `importCustomFactors` (1) | `checkFactorImportLimit` | `CUSTOM_FACTOR_IMPORT_MESSAGES`, unchanged | enforced | none |
+| `account`: `inviteMember`, `cancelInvitation`, `removeMember`, `leaveOrganization` (4) | `checkInvitationWriteLimit` | `MEMBERSHIP_ERRORS` set, unchanged | enforced | none — role checks stay at stage d, as before |
+| `account`: `setAlertEmailPreference` (1) | `checkAlertPreferenceLimit` | `ALERT_PREFERENCE_ERRORS` set, unchanged | enforced | none |
+| `account`: `requestOrganizationDeletion`, `restoreOrganization` (2) | `checkOrganizationDeletionLimit` | `ORGANIZATION_DELETION_ERRORS` set + "too many attempts", verbatim | **not enforced — `allow-locked`** | **owner check, before the limiter** |
+
+**The last row is the one the prompt said to argue.** `resolveOwnerForDeletion`
+ran session → tenant → owner → limiter, and the gate runs session → tenant →
+lock (skipped) → `authorize` → limiter. The owner refusal therefore still
+precedes the token spend, which is the property that matters: a non-owner
+probing the control cannot consume the owner's deletion budget. It was preserved,
+so the prompt's fallback — leave that helper alone and say so — was not needed.
+
+**One behavioural nuance, stated rather than glossed.** The old
+`resolveTenant()` resolved the account first and the membership second; the old
+`resolveMembershipForWrite()` resolved the membership first and consulted the
+account only to tell signed-out from no-organisation apart. The gate keeps the
+second shape, and the two are equivalent because `getCurrentMembership()` itself
+calls `getCurrentAccount()`: a throwing session lookup throws out of the
+membership call and lands in the same `failure` catch either way, and the
+account is only re-read on a path where that lookup has already returned
+without throwing.
+
+**The one cost, and it is `generateNarrative`'s.** Its narrative limiter is
+deliberately spent *after* the report is known to exist and to be this tenant's,
+so a probe for a report that does not exist cannot consume the narrative budget.
+Routing that spend through the gate therefore means a second gate call, and the
+second call re-resolves the session and the membership — roughly three extra
+queries on that path. It is paid deliberately: the alternative is keeping a
+second inline fail-closed limiter block in `app/reports/actions.ts`, which is
+the thing this candidate exists to remove, and the path it sits on then makes a
+model call measured in seconds. Every sentence it can return is unchanged.
+
+### Measured line counts
+
+`wc -l`, before at `622c6b2` and after:
+
+| file | before | after | delta |
+| --- | --- | --- | --- |
+| `lib/auth/tenant.ts` | 205 | 226 | +21 |
+| `app/targets/actions.ts` | 189 | 182 | −7 |
+| `app/reports/actions.ts` | 289 | 304 | +15 |
+| `app/activity/actions.ts` | 1453 | 1428 | −25 |
+| `app/account/actions.ts` | 760 | 757 | −3 |
+| **total** | **2896** | **2897** | **+1** |
+
+**So this candidate is not a line-count win, and the review never claimed it as
+one.** Three helpers and one inline limiter block are gone; what replaced them
+is one gate with a docblock arguing its order, three documented builders in
+`app/reports/actions.ts` where there was one, and two more in
+`app/activity/actions.ts`. The win is the one the review named — *locality*: the
+fail-closed limiter exists once, and a hardening applied to it reaches all 21
+authenticated writes instead of the ten that happened to call the
+limiter-bearing sibling. Counting lines here would score the wrong thing.
+
+Also removed: `MembershipResolution`, `TenantResolution` and
+`resolveMembershipForWrite` from `lib/auth/tenant.ts`'s exports, and
+`MembershipWriteMessages` renamed to `TenantWriteMessages` — the module no
+longer has a "membership" function for the old name to refer to. Its one
+importer is `app/activity/actions.ts`.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **318 passed, 13 files**, unchanged from prompt 121 — nothing in scope is under `lib/{domain,validation}` |
+| `npm run build` | route table unchanged, both sides of the comparison below |
+| prerender diff | **21 of 21 prerendered HTML files byte-identical with only `.next/BUILD_ID` normalised** — see below |
+| `npm run test:e2e` | **110 passed, 12 skipped (3.7m)** across Chromium and Firefox. **WebKit did not run**: `scripts/playwright-webkit.sh` printed `Podman is required for WebKit on Arch Linux.` That is the standing environment gap, reported as a gap and not as a pass — the wrapper still exits 0, so the matrix's exit code is not evidence WebKit ran |
+
+**The prerender diff, and why it is the strongest form of pass.** Two-build
+method per `docs/automation.md`: a `tar` of the working tree excluding `.next`,
+`node_modules`, `.git`, `.agents` and `.claude` as the implementation side, and
+`git archive HEAD` as the base, both with `node_modules` hard-linked in, built
+under the same `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`. The untracked prompt file
+was copied into the base tree as well, since `prompts/` is inside Tailwind's
+scan root and its absence on one side would move the CSS on its own.
+
+The result needed **no chunk normalisation at all**, which is what the prompt
+predicted and what a change touching no client module should produce:
+
+- 21 HTML files each side, same set; **0 differ** with only `.next/BUILD_ID`
+  normalised.
+- One CSS chunk each side, **the same filename and the same 68,814 bytes**, and
+  a rule-level diff of **0 added, 0 removed** — run after this record was
+  written, per the standing trap that `docs/` is inside the scan root.
+- The JS chunk filename sets are **identical**; nothing was added, removed or
+  renamed.
+
+The route table is unchanged on both sides, `/ /_not-found /about /careers
+/design-system /forgot-password /journal /reset-password /sign-in /sign-up
+/verify-email` as `○` and `/article/[slug]` (6) and `/job-listing/[slug]` (3) as
+`●`. This comparison is HTML, not pixels, so the standing `magick compare` mask
+warning on `/`, `/journal` and `/careers` does not apply to it.
+
+**No unit test was added, and that is the decision.** `lib/auth/` sits outside
+`vitest.config.mts`'s `include` and is `server-only`; widening the scope to a
+module that reads a session and Redis is exactly what that scope exists to
+prevent. Equivalence here is established by inspection — the table above — and
+by the E2E matrix. Nothing proved it by test.

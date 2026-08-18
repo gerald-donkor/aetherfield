@@ -3,9 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import {
-  resolveMembershipForWrite,
   resolveTenant as resolveTenantFor,
-  type MembershipWriteMessages,
+  type TenantWriteMessages,
 } from "../../lib/auth/tenant";
 import {
   commitImport as commitImportRows,
@@ -66,7 +65,6 @@ import {
   checkActivityImportLimit,
   checkFactorImportLimit,
   checkFactorMappingLimit,
-  formatRetry,
 } from "../../lib/rate-limit";
 import {
   deleteActivityImport,
@@ -168,9 +166,8 @@ const CUSTOM_FACTOR_NO_ORGANIZATION =
 /* Prompt 73's fourth tenant state, per flow. Not a `NO_ORGANIZATION`: this
    account has an organisation and it is scheduled for deletion, so the honest
    sentence names the lock and the way out of it rather than telling somebody to
-   create what they already have. `resolveTenant` below carries the first;
-   the two factor paths resolve their membership directly (they need the role),
-   so they check the marker themselves. */
+   create what they already have. Since prompt 122 all five message sets below
+   go through the one gate, which enforces the marker for every one of them. */
 const ORGANIZATION_LOCKED =
   "This organisation is scheduled for deletion, so importing is locked. Restore it from your account page to make changes.";
 
@@ -199,49 +196,54 @@ const NOTHING_TO_CALCULATE =
 /* -------------------------------------------------------------------------- */
 
 /**
- * Stages **b** and **d** for all four actions: resolve the session, resolve the
- * tenant, and hand back the two ids everything else is scoped by.
+ * Stage **b** for all ten actions in this file, in `lib/auth/tenant.ts`'s one
+ * gate: session, tenant, deletion lock, then the limiter this flow spends.
  *
  * **The primitive moved to `lib/auth/tenant.ts` at build step 11**, when
  * `app/targets/actions.ts` needed the identical check — duplicating an
- * authorisation primitive across two action files is the worse outcome. The
- * extraction is behaviour-identical: the three sentences below are this file's
- * own, passed in verbatim, because the copy is flow-specific and the check is
- * not.
- */
-function resolveTenant() {
-  return resolveTenantFor({
-    signedOut: SIGNED_OUT,
-    noOrganization: NO_ORGANIZATION,
-    organizationLocked: ORGANIZATION_LOCKED,
-    failure: GENERIC_FAILURE,
-  });
-}
-
-/**
- * Stage **b** for the six actions below that need the role as well as the ids.
+ * authorisation primitive across two action files is the worse outcome.
+ * **Prompt 122 moved the limiter with it**: this file's `consumeCommitLimit`
+ * helper and `stageImport`'s inline limiter block are both gone, and the two
+ * message sets they used are the two below. Nothing about a sentence, a window
+ * or a key changed.
  *
- * `resolveTenant` above returns two ids and cannot serve them: each one reads
- * `membership.role` at stage **d**, so each resolved its membership directly —
- * and each carried its own ~35-line copy of the identical preamble until
- * prompt 98. The copies differed in exactly two things, and those two things
- * are the parameters below: the limiter, and these sentences.
- *
- * The strings are unchanged from the copies they replace. They stay here rather
- * than moving into `lib/auth/` for `resolveTenant`'s reason — the copy is
- * flow-specific, and "sign in again to change emission factors" is the right
+ * The strings stay here rather than moving into `lib/auth/` because the copy is
+ * flow-specific — "sign in again to change emission factors" is the right
  * sentence on this surface and the wrong one everywhere else.
  */
 const tooManyChanges = (retry: string) =>
   `That's a few too many changes. Try again in ${retry}.`;
 
 /** The bulk upload's own noun. `importCustomFactors` is the only one of the six
-    that says "imports", and it is the only one that spends
+    factor actions that says "imports", and it is the only one that spends
     `checkFactorImportLimit`. */
 const tooManyImports = (retry: string) =>
   `That's a few too many imports. Try again in ${retry}.`;
 
-const FACTOR_MAPPING_MESSAGES: MembershipWriteMessages = {
+/** The upload's own noun, kept verbatim from `stageImport`'s deleted inline
+    block. */
+const tooManyUploads = (retry: string) =>
+  `That's a few too many uploads. Try again in ${retry}.`;
+
+/** The three already-staged-import actions' noun, and `recalculate`'s, kept
+    verbatim from the deleted `consumeCommitLimit`. */
+const tooManyRequests = (retry: string) =>
+  `That's a few too many requests. Try again in ${retry}.`;
+
+const IMPORT_MESSAGES: TenantWriteMessages = {
+  signedOut: SIGNED_OUT,
+  noOrganization: NO_ORGANIZATION,
+  organizationLocked: ORGANIZATION_LOCKED,
+  failure: GENERIC_FAILURE,
+  throttled: tooManyUploads,
+};
+
+const COMMIT_MESSAGES: TenantWriteMessages = {
+  ...IMPORT_MESSAGES,
+  throttled: tooManyRequests,
+};
+
+const FACTOR_MAPPING_MESSAGES: TenantWriteMessages = {
   signedOut: FACTOR_MAPPING_SIGNED_OUT,
   noOrganization: FACTOR_MAPPING_NO_ORGANIZATION,
   organizationLocked: FACTOR_MAPPING_ORGANIZATION_LOCKED,
@@ -249,7 +251,7 @@ const FACTOR_MAPPING_MESSAGES: MembershipWriteMessages = {
   throttled: tooManyChanges,
 };
 
-const CUSTOM_FACTOR_MESSAGES: MembershipWriteMessages = {
+const CUSTOM_FACTOR_MESSAGES: TenantWriteMessages = {
   signedOut: CUSTOM_FACTOR_SIGNED_OUT,
   noOrganization: CUSTOM_FACTOR_NO_ORGANIZATION,
   organizationLocked: CUSTOM_FACTOR_ORGANIZATION_LOCKED,
@@ -257,10 +259,28 @@ const CUSTOM_FACTOR_MESSAGES: MembershipWriteMessages = {
   throttled: tooManyChanges,
 };
 
-const CUSTOM_FACTOR_IMPORT_MESSAGES: MembershipWriteMessages = {
+const CUSTOM_FACTOR_IMPORT_MESSAGES: TenantWriteMessages = {
   ...CUSTOM_FACTOR_MESSAGES,
   throttled: tooManyImports,
 };
+
+/** The upload's gate. Not exported: a `"use server"` module's runtime exports
+    must all be async entry points. */
+function resolveImportTenant() {
+  return resolveTenantFor({
+    messages: IMPORT_MESSAGES,
+    limiter: checkActivityImportLimit,
+  });
+}
+
+/** The gate for the four actions that act on an already-staged import, and for
+    `recalculate`. */
+function resolveCommitTenant() {
+  return resolveTenantFor({
+    messages: COMMIT_MESSAGES,
+    limiter: checkActivityCommitLimit,
+  });
+}
 
 /* -------------------------------------------------------------------------- */
 /*  stageImport                                                                */
@@ -292,25 +312,12 @@ export async function stageImport(
      than pass. Recorded in `docs/backend.md`, step 9. */
 
   // -- b. Session and tenant, then the rate limit -------------------------
-  const tenant = await resolveTenant();
+  /* The gate fails closed on a limiter error, as every path here does: an
+     unlimited upload path is a worse outcome than a form that is briefly
+     unavailable, and 8.2 rule 4 requires the failure be visible rather than a
+     silent success. */
+  const tenant = await resolveImportTenant();
   if (!tenant.ok) return tenant;
-
-  try {
-    const limit = await checkActivityImportLimit(tenant.userId);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many uploads. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    /* Fails closed, as every earlier path does: an unlimited upload path is a
-       worse outcome than a form that is briefly unavailable, and 8.2 rule 4
-       requires the failure be visible rather than a silent success. */
-    return { ok: false, error: GENERIC_FAILURE };
-  }
 
   // -- c. The file, checked server-side ------------------------------------
   /* Cheapest first: presence, then size, then the bytes.
@@ -418,11 +425,8 @@ export async function updateImportMapping(
   rawImportId: unknown,
   rawMapping: unknown,
 ): Promise<ActivityMappingResult> {
-  const tenant = await resolveTenant();
+  const tenant = await resolveCommitTenant();
   if (!tenant.ok) return tenant;
-
-  const limited = await consumeCommitLimit(tenant.userId);
-  if (limited) return limited;
 
   const id = importIdSchema.safeParse(rawImportId);
   if (!id.success) return { ok: false, error: NOT_FOUND };
@@ -507,11 +511,8 @@ export async function updateImportMapping(
 export async function commitImport(
   rawImportId: unknown,
 ): Promise<ActivityImportActionResult> {
-  const tenant = await resolveTenant();
+  const tenant = await resolveCommitTenant();
   if (!tenant.ok) return tenant;
-
-  const limited = await consumeCommitLimit(tenant.userId);
-  if (limited) return limited;
 
   const id = importIdSchema.safeParse(rawImportId);
   if (!id.success) return { ok: false, error: NOT_FOUND };
@@ -558,11 +559,8 @@ export async function commitImport(
 export async function discardImport(
   rawImportId: unknown,
 ): Promise<ActivityImportActionResult> {
-  const tenant = await resolveTenant();
+  const tenant = await resolveCommitTenant();
   if (!tenant.ok) return tenant;
-
-  const limited = await consumeCommitLimit(tenant.userId);
-  if (limited) return limited;
 
   const id = importIdSchema.safeParse(rawImportId);
   if (!id.success) return { ok: false, error: NOT_FOUND };
@@ -621,11 +619,8 @@ export async function recalculate(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. ------
 
   // -- b. Session and tenant, then the rate limit ------------------------
-  const tenant = await resolveTenant();
+  const tenant = await resolveCommitTenant();
   if (!tenant.ok) return tenant;
-
-  const limited = await consumeCommitLimit(tenant.userId);
-  if (limited) return limited;
 
   // -- c. Parse, with the shared schema ----------------------------------
   const parsed = recalculateInputSchema.safeParse({
@@ -702,16 +697,16 @@ export async function setFactorMapping(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* `resolveMembershipForWrite` rather than `resolveTenant()`, which returns
-     ids only: stage d needs the role, and the role is re-read from Postgres on
-     every call rather than trusted from the session payload (AGENTS.md 11.2
-     rule 5). No argument is taken from the request, so no organisation id can
-     be supplied. The deletion lock and the fail-closed limiter are the
-     helper's, unchanged. */
-  const resolved = await resolveMembershipForWrite(
-    checkFactorMappingLimit,
-    FACTOR_MAPPING_MESSAGES,
-  );
+  /* The same gate the import paths use, with this flow's own messages and
+     limiter: stage d below needs the role, and the role is re-read from
+     Postgres on every call rather than trusted from the session payload
+     (AGENTS.md 11.2 rule 5). No argument is taken from the request, so no
+     organisation id can be supplied. The deletion lock and the fail-closed
+     limiter are the gate's, unchanged. */
+  const resolved = await resolveTenantFor({
+    messages: FACTOR_MAPPING_MESSAGES,
+    limiter: checkFactorMappingLimit,
+  });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -877,12 +872,12 @@ export async function createCustomFactor(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for why the role is resolved here rather than
-     through `resolveTenant` (prompt 73, prompt 98). */
-  const resolved = await resolveMembershipForWrite(
-    checkFactorMappingLimit,
-    CUSTOM_FACTOR_MESSAGES,
-  );
+  /* See `setFactorMapping` for how the role and the lock are resolved
+     (prompt 73, prompt 98, prompt 122). */
+  const resolved = await resolveTenantFor({
+    messages: CUSTOM_FACTOR_MESSAGES,
+    limiter: checkFactorMappingLimit,
+  });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -976,10 +971,10 @@ export async function importCustomFactors(
   /* The one of the six that spends `checkFactorImportLimit` and says "imports"
      rather than "changes" — the two things prompt 98's extraction is
      parameterised by. */
-  const resolved = await resolveMembershipForWrite(
-    checkFactorImportLimit,
-    CUSTOM_FACTOR_IMPORT_MESSAGES,
-  );
+  const resolved = await resolveTenantFor({
+    messages: CUSTOM_FACTOR_IMPORT_MESSAGES,
+    limiter: checkFactorImportLimit,
+  });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -1182,12 +1177,12 @@ export async function retireCustomFactor(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for why the role is resolved here rather than
-     through `resolveTenant` (prompt 73, prompt 98). */
-  const resolved = await resolveMembershipForWrite(
-    checkFactorMappingLimit,
-    CUSTOM_FACTOR_MESSAGES,
-  );
+  /* See `setFactorMapping` for how the role and the lock are resolved
+     (prompt 73, prompt 98, prompt 122). */
+  const resolved = await resolveTenantFor({
+    messages: CUSTOM_FACTOR_MESSAGES,
+    limiter: checkFactorMappingLimit,
+  });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -1258,12 +1253,12 @@ export async function editFactorSet(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for why the role is resolved here rather than
-     through `resolveTenant` (prompt 73, prompt 98). */
-  const resolved = await resolveMembershipForWrite(
-    checkFactorMappingLimit,
-    CUSTOM_FACTOR_MESSAGES,
-  );
+  /* See `setFactorMapping` for how the role and the lock are resolved
+     (prompt 73, prompt 98, prompt 122). */
+  const resolved = await resolveTenantFor({
+    messages: CUSTOM_FACTOR_MESSAGES,
+    limiter: checkFactorMappingLimit,
+  });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -1343,12 +1338,12 @@ export async function retireFactorSet(
   // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
 
   // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for why the role is resolved here rather than
-     through `resolveTenant` (prompt 73, prompt 98). */
-  const resolved = await resolveMembershipForWrite(
-    checkFactorMappingLimit,
-    CUSTOM_FACTOR_MESSAGES,
-  );
+  /* See `setFactorMapping` for how the role and the lock are resolved
+     (prompt 73, prompt 98, prompt 122). */
+  const resolved = await resolveTenantFor({
+    messages: CUSTOM_FACTOR_MESSAGES,
+    limiter: checkFactorMappingLimit,
+  });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -1404,26 +1399,6 @@ export async function retireFactorSet(
 /* -------------------------------------------------------------------------- */
 /*  Shared helpers                                                             */
 /* -------------------------------------------------------------------------- */
-
-/** Stage b for the three actions that act on an already-staged import.
-    Returns the rejection, or `null` when the caller may proceed. */
-async function consumeCommitLimit(
-  userId: string,
-): Promise<{ ok: false; error: string } | null> {
-  try {
-    const limit = await checkActivityCommitLimit(userId);
-    if (limit.allowed) return null;
-    return {
-      ok: false,
-      error: `That's a few too many requests. Try again in ${formatRetry(
-        limit.retryAfterSeconds,
-      )}.`,
-    };
-  } catch {
-    // Fails closed, as every path beside it does.
-    return { ok: false, error: GENERIC_FAILURE };
-  }
-}
 
 /** Coerces every parsed record under one mapping. Pure apart from its call
     into `lib/domain/`, which is itself pure. */

@@ -19,8 +19,6 @@ import {
 import {
   checkReportNarrativeLimit,
   checkReportWriteLimit,
-  formatRetry,
-  type RateLimitOutcome,
 } from "../../lib/rate-limit";
 import { draftNarrative } from "../../lib/reporting/narrative";
 import {
@@ -53,31 +51,64 @@ import { fieldErrorsFrom } from "../../lib/validation/result";
 const TOO_MANY_WRITES = "That's a few too many report changes. Try again in";
 const TOO_MANY_DRAFTS = "That's a few too many narrative drafts. Try again in";
 
-function resolveTenant() {
+/**
+ * The four sentences all three mutations owe their user, shared by the three
+ * gate builders below.
+ */
+const TENANT_MESSAGES = {
+  signedOut: REPORT_ERRORS.signedOut,
+  noOrganization: REPORT_ERRORS.noOrganization,
+  organizationLocked: REPORT_ERRORS.organizationLocked,
+  failure: REPORT_ERRORS.failure,
+};
+
+/**
+ * Stage **b** for `createReport` and `deleteReport`: session, tenant, deletion
+ * lock, then the report write limiter, in `lib/auth/tenant.ts`'s one gate.
+ *
+ * **Prompt 122 deleted the local `consumeLimit` these used to call.** The gate
+ * fails closed on a limiter error exactly as it did.
+ */
+function resolveWriteTenant() {
   return resolveTenantFor({
-    signedOut: REPORT_ERRORS.signedOut,
-    noOrganization: REPORT_ERRORS.noOrganization,
-    organizationLocked: REPORT_ERRORS.organizationLocked,
-    failure: REPORT_ERRORS.failure,
+    messages: {
+      ...TENANT_MESSAGES,
+      throttled: (retry) => `${TOO_MANY_WRITES} ${retry}.`,
+    },
+    limiter: checkReportWriteLimit,
   });
 }
 
-async function consumeLimit(
-  check: (userId: string) => Promise<RateLimitOutcome>,
-  userId: string,
-  prefix: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const limit = await check(userId);
-    if (limit.allowed) return { ok: true };
-    return {
-      ok: false,
-      error: `${prefix} ${formatRetry(limit.retryAfterSeconds)}.`,
-    };
-  } catch {
-    // Fail closed: an unavailable limiter must not create an unlimited path.
-    return { ok: false, error: REPORT_ERRORS.failure };
-  }
+/**
+ * Stage **b** for `generateNarrative`, which spends **no** token here.
+ *
+ * Its limiter is deliberately spent later — after the report is known to exist
+ * and to be this tenant's — so a probe for a report that does not exist cannot
+ * consume the narrative budget. That ordering is behaviour, not tidiness, so
+ * this is the one gate call in the four action modules that passes no limiter.
+ */
+function resolveReadTenant() {
+  return resolveTenantFor({ messages: TENANT_MESSAGES });
+}
+
+/**
+ * The narrative limiter, spent at the point in `generateNarrative` where it has
+ * always been spent.
+ *
+ * **The cost of routing it through the gate is one extra session and membership
+ * resolution on that path**, since stage b already resolved the tenant. It is
+ * paid deliberately: the alternative is a second inline fail-closed limiter
+ * block in this file, which is the thing prompt 122 exists to remove, and the
+ * path it sits on then makes a model call.
+ */
+function resolveNarrativeTenant() {
+  return resolveTenantFor({
+    messages: {
+      ...TENANT_MESSAGES,
+      throttled: (retry) => `${TOO_MANY_DRAFTS} ${retry}.`,
+    },
+    limiter: checkReportNarrativeLimit,
+  });
 }
 
 /**
@@ -95,14 +126,8 @@ export async function createReport(input: unknown): Promise<CreateReportResult> 
      membership; AGENTS.md §8.2's BotID rule governs public write paths. */
 
   // -- b. Session, tenant, then user-keyed rate limit ----------------------
-  const tenant = await resolveTenant();
+  const tenant = await resolveWriteTenant();
   if (!tenant.ok) return tenant;
-  const limit = await consumeLimit(
-    checkReportWriteLimit,
-    tenant.userId,
-    TOO_MANY_WRITES,
-  );
-  if (!limit.ok) return limit;
 
   // -- c. The shared schema is the server-side check -----------------------
   const parsed = createReportSchema.safeParse(input);
@@ -179,7 +204,7 @@ export async function generateNarrative(
 ): Promise<GenerateNarrativeResult> {
   // -- a. BotID deliberately absent; see createReport ----------------------
   // -- b. Session, tenant, then user-keyed rate limit ----------------------
-  const tenant = await resolveTenant();
+  const tenant = await resolveReadTenant();
   if (!tenant.ok) return tenant;
 
   // -- c. Validate the only value that crossed -----------------------------
@@ -204,12 +229,8 @@ export async function generateNarrative(
 
   /* The narrative limiter is consumed here — after the report is known to exist
      and to be this tenant's, and before a single token is paid for. */
-  const limit = await consumeLimit(
-    checkReportNarrativeLimit,
-    tenant.userId,
-    TOO_MANY_DRAFTS,
-  );
-  if (!limit.ok) return limit;
+  const limit = await resolveNarrativeTenant();
+  if (!limit.ok) return { ok: false, error: limit.error };
 
   // -- e-bis. The model call, over the deterministic snapshot only ---------
   const draft = await draftNarrative(evidence);
@@ -259,14 +280,8 @@ export async function generateNarrative(
 export async function deleteReport(id: unknown): Promise<DeleteReportResult> {
   // -- a. BotID deliberately absent; see createReport ----------------------
   // -- b. Session, tenant, then user-keyed rate limit ----------------------
-  const tenant = await resolveTenant();
+  const tenant = await resolveWriteTenant();
   if (!tenant.ok) return tenant;
-  const limit = await consumeLimit(
-    checkReportWriteLimit,
-    tenant.userId,
-    TOO_MANY_WRITES,
-  );
-  if (!limit.ok) return limit;
 
   // -- c. Validate the only value that crossed -----------------------------
   const parsed = reportIdSchema.safeParse(id);

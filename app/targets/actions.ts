@@ -19,10 +19,7 @@ import {
   tonnesToKg,
   totalsForCoverage,
 } from "../../lib/domain/targets";
-import {
-  checkTargetWriteLimit,
-  formatRetry,
-} from "../../lib/rate-limit";
+import { checkTargetWriteLimit } from "../../lib/rate-limit";
 import { fieldErrorsFrom } from "../../lib/validation/result";
 import {
   createTargetSchema,
@@ -38,29 +35,29 @@ import {
 const TOO_MANY_WRITES =
   "That's a few too many target changes. Try again in";
 
+/**
+ * Stage **b** for both mutations: session, tenant, the deletion lock and the
+ * write limiter, in that order, inside `lib/auth/tenant.ts`'s one gate.
+ *
+ * **Prompt 122 deleted the local `consumeWriteLimit` this used to sit beside.**
+ * What is left here is the part that was ever local: the limiter this flow
+ * spends, and the four sentences it owes its own user. The gate fails closed on
+ * a limiter error exactly as the deleted helper did.
+ *
+ * Not exported. A `"use server"` module's runtime exports must all be async
+ * entry points, and this is a helper.
+ */
 function resolveTenant() {
   return resolveTenantFor({
-    signedOut: TARGET_ERRORS.signedOut,
-    noOrganization: TARGET_ERRORS.noOrganization,
-    organizationLocked: TARGET_ERRORS.organizationLocked,
-    failure: TARGET_ERRORS.failure,
+    messages: {
+      signedOut: TARGET_ERRORS.signedOut,
+      noOrganization: TARGET_ERRORS.noOrganization,
+      organizationLocked: TARGET_ERRORS.organizationLocked,
+      failure: TARGET_ERRORS.failure,
+      throttled: (retry) => `${TOO_MANY_WRITES} ${retry}.`,
+    },
+    limiter: checkTargetWriteLimit,
   });
-}
-
-async function consumeWriteLimit(
-  userId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const limit = await checkTargetWriteLimit(userId);
-    if (limit.allowed) return { ok: true };
-    return {
-      ok: false,
-      error: `${TOO_MANY_WRITES} ${formatRetry(limit.retryAfterSeconds)}.`,
-    };
-  } catch {
-    // Fail closed: an unavailable limiter must not create an unlimited path.
-    return { ok: false, error: TARGET_ERRORS.failure };
-  }
 }
 
 export async function createTarget(input: unknown): Promise<CreateTargetResult> {
@@ -71,8 +68,6 @@ export async function createTarget(input: unknown): Promise<CreateTargetResult> 
   // -- b. Session, tenant, then user-keyed rate limit ----------------------
   const tenant = await resolveTenant();
   if (!tenant.ok) return tenant;
-  const limit = await consumeWriteLimit(tenant.userId);
-  if (!limit.ok) return limit;
 
   // -- c. The shared schema is the server-side check -----------------------
   const parsed = createTargetSchema.safeParse(input);
@@ -162,8 +157,6 @@ export async function retireTarget(id: unknown): Promise<RetireTargetResult> {
   // -- b. Session, tenant, then user-keyed rate limit ----------------------
   const tenant = await resolveTenant();
   if (!tenant.ok) return tenant;
-  const limit = await consumeWriteLimit(tenant.userId);
-  if (!limit.ok) return limit;
 
   // -- c. Validate the only value that crossed -----------------------------
   const parsed = targetIdSchema.safeParse(id);

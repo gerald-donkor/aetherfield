@@ -4,12 +4,8 @@ import { isAPIError } from "better-auth/api";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
-import {
-  type CurrentMembership,
-  getCurrentMembership,
-} from "../../lib/auth/organization";
 import { getAuth, getCurrentAccount } from "../../lib/auth/server";
-import { resolveMembershipForWrite as resolveMembershipForWriteFor } from "../../lib/auth/tenant";
+import { resolveTenant } from "../../lib/auth/tenant";
 import { setAlertPreference } from "../../lib/db/alert-queries";
 import {
   cancelDeletionRequest,
@@ -217,12 +213,16 @@ export async function createOrganization(
  * functions, and this is a helper rather than an entry point.
  */
 async function resolveMembershipForWrite() {
-  return resolveMembershipForWriteFor(checkInvitationWriteLimit, {
-    signedOut: MEMBERSHIP_ERRORS.SIGNED_OUT,
-    noOrganization: MEMBERSHIP_ERRORS.NO_ORGANIZATION,
-    organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
-    failure: MEMBERSHIP_ERRORS.GENERIC,
-    throttled: (retry) => `That's a few too many changes. Try again in ${retry}.`,
+  return resolveTenant({
+    messages: {
+      signedOut: MEMBERSHIP_ERRORS.SIGNED_OUT,
+      noOrganization: MEMBERSHIP_ERRORS.NO_ORGANIZATION,
+      organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
+      failure: MEMBERSHIP_ERRORS.GENERIC,
+      throttled: (retry) =>
+        `That's a few too many changes. Try again in ${retry}.`,
+    },
+    limiter: checkInvitationWriteLimit,
   });
 }
 
@@ -472,6 +472,28 @@ export async function leaveOrganization(): Promise<SubmitResult> {
 }
 
 /**
+ * `setAlertEmailPreference`'s stage **b**, in the same one-gate shape the four
+ * membership actions above use — prompt 122 moved its options out of the call
+ * body so every gate call in this file reads the same way.
+ *
+ * Its sentences are the alert flow's own; only `organizationLocked` is borrowed
+ * from `MEMBERSHIP_ERRORS`, unchanged.
+ */
+async function resolveAlertPreferenceTenant() {
+  return resolveTenant({
+    messages: {
+      signedOut: ALERT_PREFERENCE_ERRORS.SIGNED_OUT,
+      noOrganization: ALERT_PREFERENCE_ERRORS.NO_ORGANIZATION,
+      organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
+      failure: ALERT_PREFERENCE_ERRORS.GENERIC,
+      throttled: (retry) =>
+        `That's a few too many changes. Try again in ${retry}.`,
+    },
+    limiter: checkAlertPreferenceLimit,
+  });
+}
+
+/**
  * Turn alert email on or off for this account, in its current organisation —
  * build step 14.
  *
@@ -500,17 +522,7 @@ export async function setAlertEmailPreference(
      workspace being erased raises no alerts (the sweep skips it,
      `listAllOrganizationIds`), so there is no preference to express about it
      until it is restored. */
-  const resolved = await resolveMembershipForWriteFor(
-    checkAlertPreferenceLimit,
-    {
-      signedOut: ALERT_PREFERENCE_ERRORS.SIGNED_OUT,
-      noOrganization: ALERT_PREFERENCE_ERRORS.NO_ORGANIZATION,
-      organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
-      failure: ALERT_PREFERENCE_ERRORS.GENERIC,
-      throttled: (retry) =>
-        `That's a few too many changes. Try again in ${retry}.`,
-    },
-  );
+  const resolved = await resolveAlertPreferenceTenant();
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const { membership } = resolved;
 
@@ -542,63 +554,48 @@ export async function setAlertEmailPreference(
 /**
  * Stage **b** for the two deletion actions, in one place.
  *
- * **Deliberately not `resolveMembershipForWrite` above**, and the difference is
- * the whole design: that helper refuses a locked organisation, and `restore` is
- * the one thing a locked organisation must still be able to do. Sharing it
- * would make the reversal unreachable the moment the lock is set — a state with
- * no exit.
+ * **The same gate every other action here calls, in its `allow-locked` mode**,
+ * and that mode is the whole design: every other caller refuses a locked
+ * organisation, and `restore` is the one thing a locked organisation must still
+ * be able to do. Enforcing the lock here would make the reversal unreachable
+ * the moment it is set — a state with no exit.
  *
- * It resolves the session and the tenant, then spends the deletion limiter,
- * failing closed on a limiter error as every authenticated path here does
- * (AGENTS.md 8.2 rule 4 — the failure must be visible, never a silent success).
+ * **Prompt 122 collapsed 45 lines into this call.** The gate resolves the
+ * session and the tenant, skips the lock, runs the owner check, then spends the
+ * deletion limiter — in that order, and failing closed on a limiter error as
+ * every authenticated path here does (AGENTS.md 8.2 rule 4 — the failure must
+ * be visible, never a silent success).
  *
  * Not exported: a `"use server"` module's runtime exports must all be async
  * functions, and this is a helper rather than an entry point.
  */
-async function resolveOwnerForDeletion(): Promise<
-  { ok: true; membership: CurrentMembership } | { ok: false; error: string }
-> {
-  let membership: CurrentMembership | null;
-  try {
-    membership = await getCurrentMembership();
-  } catch {
-    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.GENERIC };
-  }
-  if (!membership) {
-    const account = await getCurrentAccount().catch(() => null);
-    return {
-      ok: false,
-      error: account
-        ? ORGANIZATION_DELETION_ERRORS.NO_ORGANIZATION
-        : ORGANIZATION_DELETION_ERRORS.SIGNED_OUT,
-    };
-  }
-
-  /* **Owner-only, checked here.** Hiding the control on `/account` is
-     presentation and is never the check (AGENTS.md 11.2 rule 2), and the role
-     was re-read from Postgres by `getCurrentMembership` on this request rather
-     than trusted from the session payload (11.2 rule 5). */
-  if (membership.role !== "owner") {
-    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.NOT_OWNER };
-  }
-
-  try {
-    const limit = await checkOrganizationDeletionLimit(
-      membership.account.user.id,
-    );
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many attempts. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
-    return { ok: false, error: ORGANIZATION_DELETION_ERRORS.GENERIC };
-  }
-
-  return { ok: true, membership };
+async function resolveOwnerForDeletion() {
+  return resolveTenant({
+    /* **The one place in the codebase that spells this**, which is the point of
+       making it a mode rather than leaving the exception implicit in a private
+       45-line helper (prompt 122). `organizationLocked` below is unreachable
+       under it, and is present because one sentence set is one type. */
+    lock: "allow-locked",
+    /* **Owner-only, and it runs before the limiter.** Hiding the control on
+       `/account` is presentation and is never the check (AGENTS.md 11.2
+       rule 2); the role was re-read from Postgres by `getCurrentMembership` on
+       this request rather than trusted from the session payload (11.2 rule 5).
+       The order matters: a non-owner probing the control must not spend the
+       owner's deletion budget. */
+    authorize: (membership) =>
+      membership.role === "owner"
+        ? null
+        : ORGANIZATION_DELETION_ERRORS.NOT_OWNER,
+    messages: {
+      signedOut: ORGANIZATION_DELETION_ERRORS.SIGNED_OUT,
+      noOrganization: ORGANIZATION_DELETION_ERRORS.NO_ORGANIZATION,
+      organizationLocked: MEMBERSHIP_ERRORS.ORGANIZATION_LOCKED,
+      failure: ORGANIZATION_DELETION_ERRORS.GENERIC,
+      throttled: (retry) =>
+        `That's a few too many attempts. Try again in ${retry}.`,
+    },
+    limiter: checkOrganizationDeletionLimit,
+  });
 }
 
 /**
