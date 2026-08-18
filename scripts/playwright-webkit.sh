@@ -34,6 +34,12 @@ if ! podman image exists "$image"; then
     "$repo_root/tools/playwright-webkit"
 fi
 
+# `E2E_LIFECYCLE_BROWSER` — the lifecycle projects launch WebKit, the only engine
+# this image carries (prompt 128; see the comment in playwright.config.ts).
+#
+# The container's Neon handshake budget is not set here: it is the same problem
+# on both legs of the matrix, and it is fixed once, in `e2e/support/database.ts`
+# and `playwright.config.ts`'s `webServer.env`.
 exec podman run \
   --rm \
   --ipc=host \
@@ -41,6 +47,7 @@ exec podman run \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
   --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+  --env E2E_LIFECYCLE_BROWSER=webkit \
   --volume "$repo_root:/work" \
   --workdir /work \
   "$image" \

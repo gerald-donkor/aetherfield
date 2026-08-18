@@ -17,6 +17,39 @@ const AUTH_LIFECYCLE = /auth\.(setup|teardown)\.ts$/;
 export const SETUP_PROJECT = "setup";
 export const TEARDOWN_PROJECT = "teardown";
 
+/**
+ * The engine the two lifecycle projects launch — prompt 128.
+ *
+ * They declared no `use` at all, so they fell to Playwright's default
+ * `chromium`, and the WebKit run resolves `setup` as a dependency inside an
+ * image that carries **only** WebKit (`tools/playwright-webkit/Containerfile`).
+ * Every WebKit run since prompt 74 died on `browserType.launch: Executable
+ * doesn't exist at /ms-playwright/chromium_headless_shell-*`.
+ *
+ * `scripts/playwright-webkit.sh` sets this to `webkit`; unset means `chromium`,
+ * so the native `test:e2e:local` run is unchanged. An unrecognised value is a
+ * hard error rather than a silent default — a typo that quietly restored the
+ * breakage is the failure mode this exists to end.
+ */
+const LIFECYCLE_BROWSERS = ["chromium", "firefox", "webkit"] as const;
+type LifecycleBrowser = (typeof LIFECYCLE_BROWSERS)[number];
+
+function resolveLifecycleBrowser(): LifecycleBrowser {
+  const requested = process.env.E2E_LIFECYCLE_BROWSER;
+
+  if (!requested) return "chromium";
+
+  if (!(LIFECYCLE_BROWSERS as readonly string[]).includes(requested)) {
+    throw new Error(
+      `E2E_LIFECYCLE_BROWSER must be one of ${LIFECYCLE_BROWSERS.join(", ")}; received "${requested}".`,
+    );
+  }
+
+  return requested as LifecycleBrowser;
+}
+
+const LIFECYCLE_BROWSER = resolveLifecycleBrowser();
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -24,6 +57,23 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: "html",
+  /**
+   * Raised ceilings, not relaxed assertions — prompt 128.
+   *
+   * WebKit runs inside the rootless container, where every server render and
+   * every Server Action pays a userspace-networked round trip to Neon, and four
+   * workers pay it concurrently. Three cases went over Playwright's 5 s `expect`
+   * default on one run and passed on the next, each with the work visibly still
+   * in flight rather than wrong — a button reading `Updating...` and a
+   * `/account` navigation still resolving.
+   *
+   * A ceiling only bounds how long a *true* assertion may take to become true;
+   * a false one still fails, just later. Nothing about what the suite proves
+   * changes, and the native leg — which settles far inside the old 5 s — keeps
+   * the same results it had at 110 passed, 12 skipped.
+   */
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   use: {
     baseURL,
     trace: "on-first-retry",
@@ -37,10 +87,12 @@ export default defineConfig({
       name: SETUP_PROJECT,
       testMatch: /auth\.setup\.ts$/,
       teardown: TEARDOWN_PROJECT,
+      use: { browserName: LIFECYCLE_BROWSER },
     },
     {
       name: TEARDOWN_PROJECT,
       testMatch: /auth\.teardown\.ts$/,
+      use: { browserName: LIFECYCLE_BROWSER },
     },
     {
       name: "chromium",
@@ -94,6 +146,15 @@ export default defineConfig({
     env: {
       BETTER_AUTH_URL: baseURL,
       RESEND_API_KEY: "",
+      /* The application's own Neon handshake races the same Happy Eyeballs
+         attempt budget `e2e/support/database.ts` documents. Appended, never
+         replacing, so a caller's own `NODE_OPTIONS` survives. */
+      NODE_OPTIONS: [
+        process.env.NODE_OPTIONS,
+        "--network-family-autoselection-attempt-timeout=5000",
+      ]
+        .filter(Boolean)
+        .join(" "),
     },
   },
 });

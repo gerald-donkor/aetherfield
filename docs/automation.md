@@ -110,6 +110,114 @@ isolated parent-versus-prompt build used one unprinted, unwritten Server Actions
 encryption key: both sides produced the same 21 `app/**/*.html` paths and,
 after replacing only each side's `.next/BUILD_ID`, **0 files differed**.
 
+### The WebKit leg was dark for fourteen prompts — prompt 128 (18 Aug 2026)
+
+**The four standing-gap lines in `docs/architecture.md` (722, 847, 1180, 1326)
+are closed.** WebKit had not run since prompt 74 (`b0717a1`, 14 Aug 2026), and
+prompts 122, 123/124, 125 and 127 each recorded the same failure as a gap they
+did not own:
+
+```
+Error: browserType.launch: Executable doesn't exist at
+  /ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell
+```
+
+Reproduced once on the unmodified tree before any edit, so this is an
+observation and not a quotation: `2 failed, 60 did not run`, `setup` first, then
+`teardown` failing on `No fixture or cleanup record was written`.
+
+**The cause was two files apart.** Prompt 74's `setup` and `teardown` projects
+declared no `use` at all, so they fell to Playwright's default
+`browserName: "chromium"` — verified as the default at
+`node_modules/playwright/types/test.d.ts:6741`,
+`type BrowserName = 'chromium' | 'firefox' | 'webkit'`. The `webkit` project
+declares `dependencies: ["setup"]`, and `tools/playwright-webkit/Containerfile`
+installs **only** WebKit (`podman run … ls /ms-playwright` reports `ffmpeg-1011`
+and `webkit-2336`). So every WebKit run resolved a dependency that asked the
+image for a browser it does not carry. The version pin was never the problem —
+project and Containerfile both report `1.62.1`, and the runner's mismatch guard
+passes.
+
+**The fix is `E2E_LIFECYCLE_BROWSER`.** `playwright.config.ts` gives both
+lifecycle projects `use: { browserName }` from that one variable, validated
+against Playwright's three engine names and **throwing** on anything else;
+unset means `chromium`, so the native leg is the run it always was.
+`scripts/playwright-webkit.sh` passes `--env E2E_LIFECYCLE_BROWSER=webkit`
+(flag confirmed against `podman run --help`).
+
+**Why not add Chromium to the image.** It is the smaller diff and it was
+rejected: it grows a shared 1.2 GB image, and rebuilds it for every contributor
+who has one cached, purely to run a fixture that writes engine-neutral JSON.
+Cross-engine `storageState` is already how this suite works — the native run
+provisions under Chromium and `firefox` reuses that state — so provisioning
+under WebKit inside a WebKit-only image is the same arrangement, not a new
+assumption. Recorded here so the rejected option is not re-derived.
+
+### Neon's AAAA records lose a race with Node's Happy Eyeballs
+
+**Found on both legs, not just in the container**, once the browser-launch
+failure was out of the way. `pg` fails the setup project with a bare
+`AggregateError` at `e2e/support/database.ts:186`, whose members read
+`connect ETIMEDOUT <ipv4>:5432` and `connect ECONNREFUSED <ipv6>:5432` in the
+container, `ENETUNREACH` natively.
+
+Measured, not inferred. Neon's endpoint resolves to three A and three AAAA
+records. From inside the rootless container every AAAA address fails instantly
+and all three IPv4 addresses connect — so the addresses are reachable and the
+DNS is fine. The TCP handshake to `us-east-1` measures **502 ms, 258 ms and
+251 ms** on three consecutive attempts, against
+`net.getDefaultAutoSelectFamilyAttemptTimeout()` of **250 ms** on the
+container's Node 22 and **500 ms** on the workstation's Node 26. Happy Eyeballs
+gives each address its own budget, so a handshake landing either side of the
+default fails the whole connect.
+
+Fixed by raising that budget to 5 s — the fixture pool sets it in
+`e2e/support/database.ts` where the pool is constructed, and the application
+under test gets it through `NODE_OPTIONS` in `playwright.config.ts`'s
+`webServer.env`, **appended** so a caller's own `NODE_OPTIONS` survives. No
+shipped code reads any of this, and the container needs no flag of its own.
+
+### Raised ceilings on `expect` and the test timeout
+
+Three cases went over Playwright's 5 s `expect` default on one WebKit run and
+passed on the next, each with the work visibly **still in flight** rather than
+wrong: `submissions.spec.ts`'s admin staff-grant with its button reading
+`"Updating..." [disabled]`, and two of `authenticated.spec.ts`'s no-organisation
+redirects with the `/account` navigation still resolving. That staff-grant case
+is the same load flake prompts 125 and 127 already recorded natively.
+
+`timeout: 60_000` and `expect: { timeout: 15_000 }` now sit in
+`playwright.config.ts`. A ceiling bounds only how long a **true** assertion may
+take to become true; a false one still fails, just later — nothing the suite
+proves changed, and the native leg still settles far inside the old 5 s.
+
+### What prompt 128 measured
+
+Every figure below is quoted from the run that produced it. Neon was **warm** —
+the matrix ran repeatedly within the hour, so no scale-to-zero cold start is in
+these numbers, and no claim is made about a cold one.
+
+| check | result |
+| --- | --- |
+| `sh -n scripts/playwright-webkit.sh` | exit 0 |
+| `npm run lint`, `npm run typecheck` | exit 0, no diagnostics |
+| `npm test` | **318 passed, 13 files**, 1.20s — unchanged |
+| `npm run build` | route table as expected: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, every workspace and API route `ƒ` |
+| prerender diff | **21 of 21 byte-identical**, and the CSS chunk byte-identical at 68,814 bytes (same `sha256`). `git archive HEAD` as base against a working-tree copy, both excluding `.claude`/`.agents`, one shared `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, normalising `BUILD_ID`, content-hashed chunk names and Server Action ids. Run **again after the docs were written**, because `docs/` sits inside Tailwind v4's auto-scanned root and trap 11 is exactly this file's prose becoming CSS |
+| `npm run test:e2e:webkit` | **50 passed, 12 skipped, 3.0m** — against prompt 55's 16.5 s, which was a three-case suite before prompt 74 |
+| `npm run test:e2e` | **exit 0.** Chromium + Firefox **110 passed, 12 skipped (5.4m)** — the standing figure exactly — then WebKit **50 passed, 12 skipped (3.0m)** |
+
+**One transient, recorded rather than re-run into silence (§12 rule 4).** A
+matrix run failed in `webServer` before any test, on
+`Turbopack build failed with 14 errors: Module not found: Can't resolve
+'@vercel/turbopack-next/internal/font/google/font'` out of `next/font/google` in
+`app/layout.tsx`. A standalone `npm run build` immediately after succeeded with
+the full route table, and the next matrix run built and passed. It is a
+build-time font fetch, unrelated to anything in this prompt's edit set.
+
+**No product defect was found.** WebKit executed 50 cases it had never
+executed and every one of them passes.
+
 **Screenshotting the render** — import from `@playwright/test` or the installed
 `playwright` package rather than resolving `playwright-core` from npm's transient
 cache. Keep the established `deviceScaleFactor: 1`, `fullPage: true`, and 375 /

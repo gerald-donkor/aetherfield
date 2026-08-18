@@ -1,3 +1,4 @@
+import net from "node:net";
 import path from "node:path";
 
 import { del } from "@vercel/blob";
@@ -55,8 +56,27 @@ function connectionString(): string {
   return url;
 }
 
+/**
+ * Neon publishes both A and AAAA records, so every connection here goes through
+ * Node's Happy Eyeballs, which gives **each** address its own short attempt
+ * budget. That budget defaults to 250 ms on the container's Node 22 and 500 ms
+ * on the workstation's Node 26; the measured TCP handshake to Neon's us-east-1
+ * endpoint is 251-502 ms from inside the rootless container, and the AAAA
+ * addresses fail instantly (`ECONNREFUSED` in the container, `ENETUNREACH`
+ * natively) so every attempt falls through to IPv4. A handshake either side of
+ * the default surfaces as an `AggregateError` of `ETIMEDOUT` out of `pg` and
+ * fails the setup project — observed on both legs of the matrix at prompt 128.
+ *
+ * The raised budget covers the real handshake instead of racing it. It is set
+ * on the **runner's** process, which is this fixture's pool alone; the
+ * application under test gets the same budget through `NODE_OPTIONS` in
+ * `playwright.config.ts`'s `webServer.env`, and shipped code is untouched.
+ */
 function getPool(): Pool {
-  pool ??= new Pool({ connectionString: connectionString(), max: 2 });
+  if (!pool) {
+    net.setDefaultAutoSelectFamilyAttemptTimeout(5_000);
+    pool = new Pool({ connectionString: connectionString(), max: 2 });
+  }
   return pool;
 }
 
