@@ -194,7 +194,7 @@ interface shrinks 18 → 1; testable as a pure table.
 > limiter it has always spent" — so candidate 3's gate would need to accept a
 > policy instead. **Sequence this after 3, or the two fight.**
 
-### 6 · One workspace boundary shell — *Worth exploring · in-process*
+### 6 · One workspace boundary shell — *Worth exploring · in-process* — **implemented, prompt 127**
 
 `app/{dashboard,targets,reports,submissions}/loading.tsx` and the four matching
 `error.tsx`.
@@ -230,7 +230,7 @@ server code, no schema and no prerendered markup."
 | **3 before 5** | they disagree about the limiter's interface. Candidate 3's gate takes a limiter *function*; candidate 5 replaces every limiter function with a *policy key*. Whichever lands second rewrites the other's signature |
 | **3 before 4** | candidate 3 removes about 100 lines of preamble from `app/activity/actions.ts` and may change how the three parts want to divide |
 | **4 moves `lib/validation/emissions.ts` with it, or not at all** | it splits along the same three lines |
-| **6 needs a design answer from the user first** | whether `WorkspaceNav` should persist through a `loading.tsx` — today it does in `app/dashboard/loading.tsx` and in none of `targets`, `reports` or `submissions`. **This question is open.** Ask it before writing candidate 6's prompt; do not answer it inside a refactor |
+| **6 needed a design answer from the user first** | whether `WorkspaceNav` should persist through a `loading.tsx` — today it did in `app/dashboard/loading.tsx` and in none of `targets`, `reports` or `submissions`. **Answered 18 Aug 2026: yes, on `dashboard`, `targets` and `reports`; `submissions` gets neither.** See **Prompt 127 — the record** |
 
 **This is a plan. Nothing in it is ticked here** — which candidate is built is
 resolved from `git log` and the repository (`AGENTS.md` §12 rule 5), and the
@@ -243,7 +243,7 @@ table below is appended to as prompts land, after the fact.
 | 3 · one tenant gate | 122 | 18 Aug 2026 |
 | 4 · cut `app/activity/actions.ts` | 125 | 18 Aug 2026 |
 | 5 · `lib/rate-limit/` policies | 126 | 18 Aug 2026 |
-| 6 · one workspace boundary shell | — | — |
+| 6 · one workspace boundary shell | 127 | 18 Aug 2026 |
 
 ---
 
@@ -1185,3 +1185,151 @@ The landed table's candidate-5 row is filled with `126` and today's date. Five
 of six candidates are now landed — 1, 2, 3, 4 and 5. **Candidate 6 remains the
 only open one**, still waiting on the user's `WorkspaceNav`/`loading.tsx`
 design answer recorded at line 229; nothing in this prompt bears on it.
+
+---
+
+## Prompt 127 — the record
+
+`WorkspaceBoundary` in `app/_components/workspace-boundary.tsx` — one shell for
+the eight `loading.tsx` / `error.tsx` copies across `dashboard`, `targets`,
+`reports` and `submissions`.
+
+### The design answer, closed this session
+
+`WorkspaceNav` persists through both the loading and error states of the three
+routes that already render it on their settled page (`dashboard`, `targets`,
+`reports`); `submissions` gets neither, since its own settled `page.tsx`
+renders no `WorkspaceNav` either and it is staff-only, not one of
+`WorkspaceNav`'s four items (`AGENTS.md` §11.1). This resolves the drift the
+review named: `dashboard/loading.tsx` was the one file of the eight that
+already rendered it, with no comment saying why.
+
+### The two decisions the prompt left open, and how each fell
+
+1. **The error heading is passed explicitly by every `error.tsx` caller, not
+   absorbed into the shell as a fixed string.** The reason is a real markup
+   divergence the prompt's own sketch did not carry: `loading.tsx`'s heading is
+   `max-w-[880px]`, `error.tsx`'s is `max-w-[760px]` — a genuine pixel
+   difference across all eight files, confirmed by reading them before writing
+   the shell. `WorkspaceBoundary` therefore takes an optional
+   `headingClassName`, defaulting to the loading width; every `error.tsx` call
+   site overrides it to the narrower one alongside the identical heading
+   string. Passing both explicitly, even though the text repeats four times,
+   was simpler than adding a `variant` discriminant to the shell purely to
+   select an implicit text/width pairing.
+2. **The status line folds into the shell as a `status` prop**, not as one
+   line of `children` per `loading.tsx`. Its markup
+   (`<div className="mt-12 border-y border-border py-14 font-serif text-p2
+   text-muted" role="status">`) was confirmed identical across all four
+   `loading.tsx` files before this call was made, and only the sentence
+   varies — the same shape `eyebrow` already has. Folding it into a `status`
+   prop leaves every `loading.tsx` as pure data (four props, zero JSX);
+   keeping it as `children` would have left one near-identical line duplicated
+   in every file, which is what the shell exists to remove. `children` stays
+   for `error.tsx`'s body paragraph and `Button`, which do vary in structure
+   (element, not just text) and are not shared with `loading.tsx` at all.
+
+`app/reports/error.tsx`'s docblock survives verbatim, immediately above the
+`ReportsError` function — it is a product invariant about disclosures, not a
+shell concern, exactly as the prompt specified.
+
+`WorkspaceBoundary` carries no directive. Verified against the `nextjs` skill
+rather than assumed: `error.tsx` must be a Client Component
+(`.agents/skills/nextjs/references/error-handling.md`), `loading.tsx` carries
+no such requirement, and a plain component with neither directive is already
+how this codebase composes both — every `loading.tsx` already imported
+`SiteNav`/`SiteFooter` from `chrome.tsx` (`"use client"`) directly, and every
+`error.tsx` already imported the undirected `WorkspaceNav`. `WorkspaceBoundary`
+does the same on both sides: a Server Component (`loading.tsx`) rendering it
+composes normally, and a Client Component (`error.tsx`) importing it pulls it
+into that client bundle, exactly as it already pulled in `SiteNav` and
+`Button`.
+
+### Equivalence, per route
+
+| route | eyebrow | heading (loading) | heading (error) | `current` | varying middle |
+| --- | --- | --- | --- | --- | --- |
+| `dashboard` | `OVERVIEW` | `Loading current evidence.` | `This view isn't available just now.` | `"dashboard"` | loading: `Checking access and reading the reporting window...`; error: `No activity, emissions, energy or target figures were displayed. Try the request again.` |
+| `targets` | `TARGETS` | `Loading targets.` | `This view isn't available just now.` | `"targets"` | loading: `Checking access and reading the current commitments...`; error: `No target or emissions figures were displayed. Try the request again.` |
+| `reports` | `REPORTS` | `Loading reports.` | `This view isn't available just now.` (docblock retained above the function) | `"reports"` | loading: `Checking access and reading the stored snapshots...`; error: `No report, figure or narrative was displayed, and nothing was changed. Try the request again.` |
+| `submissions` | `OPERATIONS` | `Loading submissions.` | `This view isn't available just now.` | *(omitted)* | loading: `Checking access and reading the current view...`; error: `No submission details were displayed. Try the request again.` |
+
+Every cell above is unchanged verbatim from the pre-collapse files — no wording
+changed, only where each string lives.
+
+### Measured line counts
+
+```
+before: app/{dashboard,targets,reports}/loading.tsx        24 + 19 + 22 = 65
+        app/submissions/loading.tsx                        19
+        app/{dashboard,targets,reports}/error.tsx           26 + 23 + 33 = 82
+        app/submissions/error.tsx                           23
+        total (eight files)                                189
+
+after:  app/{dashboard,targets,reports,submissions}/loading.tsx   12+12+12+11 = 47
+        app/{dashboard,targets,reports,submissions}/error.tsx     23+22+30+21 = 96
+        app/_components/workspace-boundary.tsx                    46
+        total (eight files + shell)                               189
+```
+
+**The total did not fall** — it landed at exactly 189, the same figure the
+eight files carried before. This is reported as measured, not adjusted to
+match the review's own "~40" judgement (`AGENTS.md` §12 rule 7): the shell
+itself is 46 lines because it carries real branching (`current`, `status`,
+`headingClassName`) that the review's three-string sketch under-counted, and
+every `error.tsx` still carries its own body paragraph and `Button` as
+`children`, which is real per-route markup, not boilerplate. What did
+collapse is the *duplication* — the `<SiteNav>` / `<main>` / conditional
+`WorkspaceNav` / eyebrow-`<p>` / heading-`<h1>` skeleton existed eight times
+before and exists once now.
+
+### `WorkspaceNav` and `current`, confirmed after the change
+
+The prompt's own §11 check (`grep -rn "WorkspaceNav"
+app/{dashboard,targets,reports,submissions}/{loading,error}.tsx` → four
+matches) does not hold under this design, and is corrected here rather than
+left to mislead a later session (§12 rule 8): with `WorkspaceNav`'s rendering
+moved inside the shell, **none** of the eight call-site files reference
+`WorkspaceNav` by name any more — only `workspace-boundary.tsx` does. The
+equivalent check is the `current` prop:
+
+```
+$ grep -n 'current=' app/{dashboard,targets,reports,submissions}/{loading,error}.tsx
+app/dashboard/loading.tsx:      current="dashboard"
+app/dashboard/error.tsx:        current="dashboard"
+app/targets/loading.tsx:        current="targets"
+app/targets/error.tsx:          current="targets"
+app/reports/loading.tsx:        current="reports"
+app/reports/error.tsx:          current="reports"
+$ grep -rln "WorkspaceNav" app/dashboard app/targets app/reports app/submissions app/_components/workspace-boundary.tsx
+app/dashboard/page.tsx
+app/targets/page.tsx
+app/reports/page.tsx
+app/reports/[reportId]/page.tsx
+app/_components/workspace-boundary.tsx
+```
+
+Six matches on `current=` — `dashboard`, `targets`, `reports`, both files
+each — and zero in either `submissions` file, which is the same shape the
+prompt's check intended, reached through the shell instead of through a
+per-file import.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | 318 passed, 13 files — unchanged; nothing in scope is under `lib/domain/` |
+| `npm run build` | route table unchanged: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, `dashboard`/`targets`/`reports`/`submissions` all `ƒ` as before |
+| prerender diff | **all 21 prerendered HTML files byte-identical**, and the CSS chunk byte-identical with zero rule-level additions or removals (rule-set diff, not just byte count). Two-build method: `git archive HEAD` as the base against a working-tree copy, both excluding `.claude`/`.agents`, normalising `BUILD_ID` and both chunk-name patterns before comparing `.next/server/app` |
+| `npm run test:e2e` | one run recorded a single flaky failure on `submissions.spec.ts`'s admin staff-grant test under the full four-worker matrix; confirmed unrelated by running it alone (passed, 17.4s) and by `git status` showing `e2e/submissions.spec.ts` untouched by this change. A clean re-run passed Chromium + Firefox fully, then hit the same pinned-container WebKit gap prompts 122–126 already recorded (`browserType.launch: Executable doesn't exist at /ms-playwright/chromium_headless_shell-1234/…`), not investigated further here |
+
+### All six candidates are landed
+
+Candidate 6 was the last one. The landed table now reads 121 (candidate 1),
+123 and 124 (candidate 2), 122 (candidate 3), 125 (candidate 4), 126
+(candidate 5), 127 (candidate 6) — the architecture review of 17 Aug 2026 is
+fully remediated, and this file's build-record role for that review is done.
+A later session should treat every candidate above as closed rather than
+re-deriving this from the landed table by hand.
