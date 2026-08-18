@@ -1,7 +1,6 @@
 "use client";
 
 import { type FormEvent, useRef, useState } from "react";
-import * as z from "zod";
 
 import { createTarget } from "../../targets/actions";
 import {
@@ -9,6 +8,7 @@ import {
   TARGET_BASELINE_SOURCE_LABELS,
   TARGET_COVERAGE_LABELS,
   TARGET_COVERAGES,
+  TARGET_FIELDS,
   TARGET_MAX_YEAR,
   TARGET_MIN_YEAR,
   type TargetCoverage,
@@ -16,7 +16,7 @@ import {
 } from "../../../lib/validation/targets";
 import { Button, Field, SelectField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 export function CreateTargetForm({
   suggestions,
@@ -58,14 +58,7 @@ export function CreateTargetForm({
 
     const checked = createTargetSchema.safeParse(input);
     if (!checked.success) {
-      const flattened = z.flattenError(checked.error);
-      setErrors(
-        Object.fromEntries(
-          Object.entries(flattened.fieldErrors)
-            .filter(([, values]) => values?.[0])
-            .map(([field, values]) => [field, values![0]]),
-        ) as TargetFieldErrors,
-      );
+      setErrors(fieldErrorsFrom(checked.error, TARGET_FIELDS));
       setMessage("Check the marked fields and try again.");
       return;
     }

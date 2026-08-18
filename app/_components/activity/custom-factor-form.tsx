@@ -6,6 +6,7 @@ import { createCustomFactor } from "../../activity/actions";
 import {
   CH4_VARIANTS,
   CUSTOM_FACTOR_ERRORS,
+  CUSTOM_FACTOR_FIELDS,
   EMISSION_SCOPE_LABELS,
   EMISSION_SCOPES,
   FACTOR_ACTIVITY_UNITS,
@@ -22,7 +23,7 @@ import {
 } from "../../../lib/validation/emissions";
 import { Button, Field, SelectField, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * Adds one customer-supplied factor row — prompt 66, corrected by prompt 67.
@@ -81,20 +82,6 @@ const GAS_BASIS_LABEL = {
    Local to this form on purpose: `FieldFrame` is shared with nine prerendered
    routes (AGENTS.md 8.1) and `/activity/factors` is the only dynamic one. */
 const FIELD_ALIGN = "md:flex md:flex-col md:justify-end";
-
-function fieldErrorsFromIssues(error: {
-  issues: { path: PropertyKey[]; message: string }[];
-}) {
-  const errors: Partial<Record<CustomFactorField, string>> = {};
-  for (const issue of error.issues) {
-    if (issue.path.length < 2) continue;
-    const field = `${String(issue.path[0])}.${String(
-      issue.path[1],
-    )}` as CustomFactorField;
-    errors[field] ??= issue.message;
-  }
-  return errors;
-}
 
 function optionLabel(value: string): string {
   return value.replaceAll("_", " ");
@@ -188,7 +175,7 @@ export function CustomFactorForm({
 
     const checked = createCustomFactorSchema.safeParse(input);
     if (!checked.success) {
-      setErrors(fieldErrorsFromIssues(checked.error));
+      setErrors(fieldErrorsFrom(checked.error, CUSTOM_FACTOR_FIELDS));
       setMessage(CUSTOM_FACTOR_ERRORS.invalid);
       return;
     }

@@ -3,7 +3,6 @@
 import { ipAddress, waitUntil } from "@vercel/functions";
 import { checkBotId } from "botid/server";
 import { headers } from "next/headers";
-import * as z from "zod";
 
 import { getJob } from "../_content/jobs";
 import { insertApplication } from "../../lib/db/application-queries";
@@ -15,8 +14,10 @@ import {
   CV_ACCEPT,
   CV_ERRORS,
   CV_MAX_BYTES,
+  NO_FIELD_ERRORS,
   type ApplicationSubmitResult,
 } from "../../lib/validation/application";
+import { fieldErrorsFrom } from "../../lib/validation/result";
 
 /**
  * Job applications — build step 5.
@@ -124,15 +125,10 @@ export async function submitApplication(
     message: formData.get("message") ?? undefined,
   });
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: FIELD_FAILURE,
-      fieldErrors: {
-        name: fieldErrors.name?.[0],
-        email: fieldErrors.email?.[0],
-        message: fieldErrors.message?.[0],
-      },
+      fieldErrors: fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS),
     };
   }
 

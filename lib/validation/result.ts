@@ -54,3 +54,79 @@ export type SubmitResult<TField extends string = never> =
  */
 export const NETWORK_ERROR =
   "We couldn't reach the server. Check your connection and try again.";
+
+/**
+ * The issue shape this module reads, and the only part of a `ZodError` it
+ * touches.
+ *
+ * **Structural rather than `import type { ZodError } from "zod"`, and that is a
+ * decision rather than a limitation.** The type-only import provably costs
+ * nothing at runtime — `isolatedModules` is on and TypeScript elides an
+ * `import type` unconditionally — so erasure was never the argument. Two things
+ * decided it: this module's stated property is that it *imports nothing*, which
+ * is what lets three leaves inside prerendered marketing routes (AGENTS.md 8.1)
+ * import it without reasoning about what comes with it; and the narrow shape is
+ * the enforcement of AGENTS.md 8.3 rule 2 in the type system. A Zod issue can
+ * carry an `input` value on some codes — a submitted email address, a CV
+ * filename — and a parameter that cannot see `input` cannot leak it.
+ */
+type FieldIssues = {
+  readonly issues: readonly {
+    readonly path: readonly PropertyKey[];
+    readonly message: string;
+  }[];
+};
+
+/**
+ * Maps a validation failure onto the fields a form renders — **once, for both
+ * sides of the seam**.
+ *
+ * Prompt 121 collapsed 23 hand-rolled copies of this into this function, across
+ * 17 modules: six distinct shapes over ten client leaves, ten `z.flattenError`
+ * call sites hand-keying their fields one by one, and four named local adapters
+ * — two of which implemented character-for-character the same rule for the same
+ * field type on opposite sides of the seam (`fieldErrorsFromIssues` in
+ * `app/_components/activity/custom-factor-form.tsx` and
+ * `customFactorFieldErrors` in `app/activity/actions.ts`). `z.flattenError` has
+ * no caller left in the repository.
+ *
+ * The three rules, which every one of those copies already agreed on:
+ *
+ * 1. **A field is its issue path joined with `"."`** — a top-level issue keys
+ *    `"name"`, a nested one keys `"factor.value"`.
+ * 2. **The longest declared prefix wins**, so an issue landing deeper than the
+ *    field that owns it — `["factor", "supersedes", "source"]` against a
+ *    declared `factor.supersedes` — still reaches that field.
+ * 3. **The first issue to claim a field wins.** Later issues on the same field
+ *    are dropped, because a control shows one message.
+ *
+ * An issue with an empty path belongs to no field and is dropped; it is the
+ * caller's `error` sentence that carries it, exactly as `z.flattenError`'s
+ * `formErrors` did.
+ *
+ * @param fields the fields the caller renders — either the list itself, or any
+ * record keyed by them, so a form holding a `NO_FIELD_ERRORS` constant can pass
+ * that rather than restating its field names. **Declaring them is what makes
+ * rule 2 possible** and what keeps a schema-only field, which no control
+ * renders, from producing an error nothing can show.
+ */
+export function fieldErrorsFrom<TField extends string>(
+  error: FieldIssues,
+  fields: readonly TField[] | Readonly<Record<TField, unknown>>,
+): Partial<Record<TField, string>> {
+  const declared: readonly TField[] = Array.isArray(fields)
+    ? (fields as readonly TField[])
+    : (Object.keys(fields) as TField[]);
+
+  const fieldErrors: Partial<Record<TField, string>> = {};
+  for (const issue of error.issues) {
+    const segments = issue.path.map(String);
+    for (let depth = segments.length; depth > 0; depth -= 1) {
+      const field = segments.slice(0, depth).join(".") as TField;
+      if (!declared.includes(field)) continue;
+      fieldErrors[field] ??= issue.message;
+      break;
+    }
+  }
+  return fieldErrors;
+}

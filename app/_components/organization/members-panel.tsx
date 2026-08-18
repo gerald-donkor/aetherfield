@@ -16,7 +16,7 @@ import {
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The organisation's members surface — prompt 63, closing what build step 8
@@ -256,14 +256,10 @@ function InviteForm() {
 
     const parsed = inviteMemberSchema.safeParse({ email, role });
     if (!parsed.success) {
-      const next = { ...NO_INVITE_FIELD_ERRORS };
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (typeof field === "string" && field in next) {
-          next[field as keyof InviteMemberFieldErrors] ||= issue.message;
-        }
-      }
-      setErrors(next);
+      setErrors({
+        ...NO_INVITE_FIELD_ERRORS,
+        ...fieldErrorsFrom(parsed.error, NO_INVITE_FIELD_ERRORS),
+      });
       setMessage("Check the marked fields and try again.");
       return;
     }

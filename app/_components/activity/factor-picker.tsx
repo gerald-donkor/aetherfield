@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react";
 import { setFactorMapping } from "../../activity/actions";
 import {
   FACTOR_MAPPING_ERRORS,
+  FACTOR_MAPPING_FIELDS,
   factorMappingSchema,
   type ActivityCategory,
   type ActivityUnit,
@@ -13,7 +14,7 @@ import {
 import type { Scope2MarketBasis } from "../../../lib/validation/emissions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 type SearchFactor = {
   id: string;
@@ -91,22 +92,7 @@ export function FactorPicker({
     const checked = factorMappingSchema.safeParse(input);
     if (!checked.success) {
       setMessage(FACTOR_MAPPING_ERRORS.invalid);
-      setErrors({
-        category: checked.error.issues.find((issue) =>
-          issue.path.includes("category"),
-        )?.message,
-        unit: checked.error.issues.find((issue) => issue.path.includes("unit"))
-          ?.message,
-        factorId: checked.error.issues.find((issue) =>
-          issue.path.includes("factorId"),
-        )?.message,
-        scope2Method: checked.error.issues.find((issue) =>
-          issue.path.includes("scope2Method"),
-        )?.message,
-        scope2MarketBasis: checked.error.issues.find((issue) =>
-          issue.path.includes("scope2MarketBasis"),
-        )?.message,
-      });
+      setErrors(fieldErrorsFrom(checked.error, FACTOR_MAPPING_FIELDS));
       return;
     }
 

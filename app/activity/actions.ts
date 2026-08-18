@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import * as z from "zod";
 
 import {
   resolveMembershipForWrite,
@@ -42,20 +41,20 @@ import {
   createCustomFactorSchema,
   customFactorSchema,
   CUSTOM_FACTOR_ERRORS,
+  CUSTOM_FACTOR_FIELDS,
   editFactorSetSchema,
-  type EditFactorSetField,
+  EDIT_FACTOR_SET_FIELDS,
   type EditFactorSetResult,
   retireFactorSetSchema,
   type RetireFactorSetResult,
   FACTOR_IMPORT_ERRORS,
+  FACTOR_IMPORT_FIELDS,
   FACTOR_IMPORT_MAX_ROW_ERRORS,
   formatFactorImportRowFailure,
   importCustomFactorsSchema,
   retireCustomFactorSchema,
   type CreateCustomFactorInput,
-  type CustomFactorField,
   type CustomFactorResult,
-  type FactorImportField,
   type FactorImportRowError,
   type ImportCustomFactorsResult,
   recalculateInputSchema,
@@ -78,6 +77,7 @@ import {
   activityMappingSchema,
   ACTIVITY_FIELDS,
   FACTOR_MAPPING_ERRORS,
+  FACTOR_MAPPING_FIELDS,
   type ActivityImportActionResult,
   type ActivityMapping,
   type ActivityMappingResult,
@@ -89,6 +89,7 @@ import {
   importIdSchema,
   type StageImportResult,
 } from "../../lib/validation/activity";
+import { fieldErrorsFrom } from "../../lib/validation/result";
 
 /**
  * Activity-data ingestion's four mutations — build step 9.
@@ -428,13 +429,10 @@ export async function updateImportMapping(
 
   const mappingResult = activityMappingSchema.safeParse(rawMapping);
   if (!mappingResult.success) {
-    const { fieldErrors } = z.flattenError(mappingResult.error);
     return {
       ok: false,
       error: FIELD_FAILURE,
-      fieldErrors: Object.fromEntries(
-        ACTIVITY_FIELDS.map((field) => [field, fieldErrors[field]?.[0]]),
-      ),
+      fieldErrors: fieldErrorsFrom(mappingResult.error, ACTIVITY_FIELDS),
     };
   }
   const mapping: ActivityMapping = mappingResult.data;
@@ -723,17 +721,10 @@ export async function setFactorMapping(
   // -- c. Parse, with the same schema the leaf ran -------------------------
   const parsed = factorMappingSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: FACTOR_MAPPING_ERRORS.invalid,
-      fieldErrors: {
-        category: fieldErrors.category?.[0],
-        unit: fieldErrors.unit?.[0],
-        factorId: fieldErrors.factorId?.[0],
-        scope2Method: fieldErrors.scope2Method?.[0],
-        scope2MarketBasis: fieldErrors.scope2MarketBasis?.[0],
-      },
+      fieldErrors: fieldErrorsFrom(parsed.error, FACTOR_MAPPING_FIELDS),
     };
   }
   const {
@@ -903,7 +894,7 @@ export async function createCustomFactor(
     return {
       ok: false,
       error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: customFactorFieldErrors(parsed.error),
+      fieldErrors: fieldErrorsFrom(parsed.error, CUSTOM_FACTOR_FIELDS),
     };
   }
 
@@ -1002,7 +993,7 @@ export async function importCustomFactors(
     return {
       ok: false,
       error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: factorImportFieldErrors(choice.error),
+      fieldErrors: fieldErrorsFrom(choice.error, FACTOR_IMPORT_FIELDS),
     };
   }
 
@@ -1174,21 +1165,6 @@ function setChoiceFrom(formData: FormData): unknown {
   };
 }
 
-/** The set chooser's field errors, on the two-segment paths the factor form's
-    mapping already reads. */
-function factorImportFieldErrors(
-  error: z.ZodError,
-): Partial<Record<FactorImportField, string>> {
-  const fieldErrors: Partial<Record<FactorImportField, string>> = {};
-  for (const issue of error.issues) {
-    if (issue.path.length < 2) continue;
-    if (String(issue.path[0]) !== "set") continue;
-    const field = `set.${String(issue.path[1])}` as FactorImportField;
-    fieldErrors[field] ??= issue.message;
-  }
-  return fieldErrors;
-}
-
 /* -------------------------------------------------------------------------- */
 /*  retireCustomFactor                                                        */
 /* -------------------------------------------------------------------------- */
@@ -1299,7 +1275,7 @@ export async function editFactorSet(
     return {
       ok: false,
       error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: editFactorSetFieldErrors(parsed.error),
+      fieldErrors: fieldErrorsFrom(parsed.error, EDIT_FACTOR_SET_FIELDS),
     };
   }
 
@@ -1428,41 +1404,6 @@ export async function retireFactorSet(
 /* -------------------------------------------------------------------------- */
 /*  Shared helpers                                                             */
 /* -------------------------------------------------------------------------- */
-
-/**
- * The set-edit form's field errors.
- *
- * **Single-segment paths, which is why this exists** rather than reusing
- * `customFactorFieldErrors`: that one skips any issue with `path.length < 2`,
- * because its form nests every field under `set` or `factor`. This form has no
- * wrapper, so its issue paths are one segment and that reader would drop all of
- * them.
- */
-function editFactorSetFieldErrors(
-  error: z.ZodError,
-): Partial<Record<EditFactorSetField, string>> {
-  const fieldErrors: Partial<Record<EditFactorSetField, string>> = {};
-  for (const issue of error.issues) {
-    if (issue.path.length !== 1) continue;
-    const field = String(issue.path[0]) as EditFactorSetField;
-    fieldErrors[field] ??= issue.message;
-  }
-  return fieldErrors;
-}
-
-function customFactorFieldErrors(
-  error: z.ZodError,
-): Partial<Record<CustomFactorField, string>> {
-  const fieldErrors: Partial<Record<CustomFactorField, string>> = {};
-  for (const issue of error.issues) {
-    if (issue.path.length < 2) continue;
-    const field = `${String(issue.path[0])}.${String(
-      issue.path[1],
-    )}` as CustomFactorField;
-    fieldErrors[field] ??= issue.message;
-  }
-  return fieldErrors;
-}
 
 /** Stage b for the three actions that act on an already-staged import.
     Returns the rejection, or `null` when the caller may proceed. */

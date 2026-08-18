@@ -10,7 +10,7 @@ import {
 } from "../../../lib/validation/newsletter";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The newsletter's client leaf — build step 4, and a copy of
@@ -114,14 +114,10 @@ export function NewsletterSubscribeDialog({
 
     const parsed = newsletterFieldsSchema.safeParse(raw);
     if (!parsed.success) {
-      const next = { ...NO_FIELD_ERRORS };
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (typeof field === "string" && field in next) {
-          next[field as keyof NewsletterFieldErrors] ||= issue.message;
-        }
-      }
-      setErrors(next);
+      setErrors({
+        ...NO_FIELD_ERRORS,
+        ...fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS),
+      });
       setMessage("Check the marked field and try again.");
       return;
     }

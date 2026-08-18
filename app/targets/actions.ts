@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import * as z from "zod";
 
 import { resolveTenant as resolveTenantFor } from "../../lib/auth/tenant";
 import {
@@ -24,10 +23,12 @@ import {
   checkTargetWriteLimit,
   formatRetry,
 } from "../../lib/rate-limit";
+import { fieldErrorsFrom } from "../../lib/validation/result";
 import {
   createTargetSchema,
   targetIdSchema,
   TARGET_ERRORS,
+  TARGET_FIELDS,
   type CreateTargetResult,
   type RetireTargetResult,
 } from "../../lib/validation/targets";
@@ -76,18 +77,10 @@ export async function createTarget(input: unknown): Promise<CreateTargetResult> 
   // -- c. The shared schema is the server-side check -----------------------
   const parsed = createTargetSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: TARGET_ERRORS.fields,
-      fieldErrors: {
-        name: fieldErrors.name?.[0],
-        coverage: fieldErrors.coverage?.[0],
-        baseYear: fieldErrors.baseYear?.[0],
-        targetYear: fieldErrors.targetYear?.[0],
-        reductionPercent: fieldErrors.reductionPercent?.[0],
-        baseline: fieldErrors.baseline?.[0],
-      },
+      fieldErrors: fieldErrorsFrom(parsed.error, TARGET_FIELDS),
     };
   }
 

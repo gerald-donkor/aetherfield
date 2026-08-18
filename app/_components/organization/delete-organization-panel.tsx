@@ -15,7 +15,7 @@ import {
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The organisation's deletion surface — prompt 73.
@@ -92,9 +92,16 @@ function DeleteForm({
 
     const parsed = deleteOrganizationSchema.safeParse({ confirmSlug });
     if (!parsed.success) {
+      /* The fallback is kept, not inherited by accident: an issue with an empty
+         path belongs to no field, and this form has one control to say it
+         against. `deleteOrganizationSchema` emits no such issue today. */
+      const fieldErrors = fieldErrorsFrom(
+        parsed.error,
+        NO_DELETE_ORGANIZATION_FIELD_ERRORS,
+      );
       setErrors({
         confirmSlug:
-          parsed.error.issues[0]?.message ?? "Type the identifier to confirm.",
+          fieldErrors.confirmSlug ?? "Type the identifier to confirm.",
       });
       setMessage("Check the marked field and try again.");
       return;

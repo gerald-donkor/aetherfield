@@ -3,7 +3,6 @@
 import { isAPIError } from "better-auth/api";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import * as z from "zod";
 
 import {
   type CurrentMembership,
@@ -42,11 +41,17 @@ import {
   type InviteMemberField,
   inviteMemberSchema,
   MEMBERSHIP_ERRORS,
+  NO_DELETE_ORGANIZATION_FIELD_ERRORS,
+  NO_INVITE_FIELD_ERRORS,
+  NO_ORGANIZATION_FIELD_ERRORS,
   ORGANIZATION_DELETION_ERRORS,
   ORGANIZATION_DELETION_WINDOW_DAYS,
   removeMemberSchema,
 } from "../../lib/validation/organization";
-import type { SubmitResult } from "../../lib/validation/result";
+import {
+  fieldErrorsFrom,
+  type SubmitResult,
+} from "../../lib/validation/result";
 
 /**
  * Create an organisation — build step 8, and the first mutation on this site
@@ -130,14 +135,10 @@ export async function createOrganization(
   // -- c. Parse, with the same schema the leaf ran -------------------------
   const parsed = createOrganizationSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: "Check the marked fields and try again.",
-      fieldErrors: {
-        name: fieldErrors.name?.[0],
-        slug: fieldErrors.slug?.[0],
-      },
+      fieldErrors: fieldErrorsFrom(parsed.error, NO_ORGANIZATION_FIELD_ERRORS),
     };
   }
   const { name, slug } = parsed.data;
@@ -301,14 +302,10 @@ export async function inviteMember(
   // -- c. Parse, with the same schema the leaf ran --------------------------
   const parsed = inviteMemberSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: MEMBERSHIP_ERRORS.INVALID,
-      fieldErrors: {
-        email: fieldErrors.email?.[0],
-        role: fieldErrors.role?.[0],
-      },
+      fieldErrors: fieldErrorsFrom(parsed.error, NO_INVITE_FIELD_ERRORS),
     };
   }
 
@@ -635,11 +632,13 @@ export async function requestOrganizationDeletion(
   // -- c. Parse, with the same schema the leaf ran --------------------------
   const parsed = deleteOrganizationSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: MEMBERSHIP_ERRORS.INVALID,
-      fieldErrors: { confirmSlug: fieldErrors.confirmSlug?.[0] },
+      fieldErrors: fieldErrorsFrom(
+        parsed.error,
+        NO_DELETE_ORGANIZATION_FIELD_ERRORS,
+      ),
     };
   }
 

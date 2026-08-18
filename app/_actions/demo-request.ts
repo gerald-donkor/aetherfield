@@ -11,8 +11,10 @@ import { leadSource } from "../../lib/db/schema";
 import { checkDemoRequestLimit, formatRetry } from "../../lib/rate-limit";
 import {
   demoRequestFieldsSchema,
+  NO_FIELD_ERRORS,
   type SubmitResult,
 } from "../../lib/validation/lead";
+import { fieldErrorsFrom } from "../../lib/validation/result";
 
 /**
  * Demo-request capture — build step 2, and the write path AGENTS.md 10
@@ -86,16 +88,10 @@ export async function submitDemoRequest(
   // -- c. Parse, with the same schema the leaf ran -------------------------
   const parsed = demoRequestSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: "Check the marked fields and try again.",
-      fieldErrors: {
-        name: fieldErrors.name?.[0],
-        email: fieldErrors.email?.[0],
-        company: fieldErrors.company?.[0],
-        message: fieldErrors.message?.[0],
-      },
+      fieldErrors: fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS),
     };
   }
 

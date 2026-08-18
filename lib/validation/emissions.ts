@@ -666,6 +666,14 @@ export type EditFactorSetInput = z.infer<typeof editFactorSetSchema>;
     named here that the schema does not carry. */
 export type EditFactorSetField = keyof EditFactorSetInput & string;
 
+/** The same list at runtime, read off the same schema, for
+    {@link fieldErrorsFrom}. Every one of these paths is single-segment — this
+    form has no `set` wrapper — which is the whole difference between it and
+    {@link CUSTOM_FACTOR_FIELDS}. */
+export const EDIT_FACTOR_SET_FIELDS = Object.keys(
+  editFactorSetSchema.shape,
+) as readonly EditFactorSetField[];
+
 export type EditFactorSetResult = SubmitResult<EditFactorSetField>;
 
 export const retireFactorSetSchema = z.object({
@@ -702,6 +710,53 @@ export type CustomFactorField =
   | `factor.${keyof z.infer<typeof customFactorSchema> & string}`;
 
 export type CustomFactorResult = SubmitResult<CustomFactorField | "factorId">;
+
+/**
+ * The three factor forms' field lists, at runtime — what
+ * {@link fieldErrorsFrom} needs to decide which prefix of an issue path is a
+ * field (prompt 121).
+ *
+ * **Read off the schemas, never restated**, exactly as the types above are: a
+ * field added to `customFactorSchema` or to a set choice is a field these lists
+ * carry on the next build, with nothing to remember. `.shape` survives
+ * `.superRefine()` in Zod 4.4.3 — verified against the installed package before
+ * this was written, because the v3 wrapper would have hidden it.
+ */
+const setChoiceKeys = [
+  ...new Set([
+    ...(Object.keys(newFactorSetSchema.shape) as (keyof z.infer<
+      typeof newFactorSetSchema
+    > &
+      string)[]),
+    ...(Object.keys(existingFactorSetSchema.shape) as (keyof z.infer<
+      typeof existingFactorSetSchema
+    > &
+      string)[]),
+  ]),
+];
+
+export const CUSTOM_FACTOR_FIELDS: readonly CustomFactorField[] = [
+  ...setChoiceKeys.map((key) => `set.${key}` as CustomFactorField),
+  ...(
+    Object.keys(customFactorSchema.shape) as (keyof z.infer<
+      typeof customFactorSchema
+    > &
+      string)[]
+  ).map((key) => `factor.${key}` as CustomFactorField),
+];
+
+/** The import form renders the set chooser and the file input, and nothing
+    else — so it declares the `set.*` half of {@link CUSTOM_FACTOR_FIELDS} plus
+    `file`. `importCustomFactorsSchema` carries no `file` field (the parse is
+    that check), so no issue ever keys it; it is here because the form renders
+    an error against it. */
+export const FACTOR_IMPORT_FIELDS: readonly FactorImportField[] = [
+  ...CUSTOM_FACTOR_FIELDS.filter(
+    (field): field is Extract<CustomFactorField, `set.${string}`> =>
+      field.startsWith("set."),
+  ),
+  "file",
+];
 
 /**
  * Retirement answers with the consequence it caused — the number of active

@@ -11,7 +11,7 @@ import {
 import { EASE, gsap, useGSAP } from "../motion/register";
 import { Button, Field, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The demo-request dialog — build step 2's client leaf, and the shape steps 4
@@ -419,14 +419,10 @@ export function DemoRequestDialog({
 
     const parsed = demoRequestFieldsSchema.safeParse(raw);
     if (!parsed.success) {
-      const next = { ...NO_FIELD_ERRORS };
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (typeof field === "string" && field in next) {
-          next[field as keyof DemoRequestFieldErrors] ||= issue.message;
-        }
-      }
-      setErrors(next);
+      setErrors({
+        ...NO_FIELD_ERRORS,
+        ...fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS),
+      });
       setMessage("Check the marked fields and try again.");
       return;
     }

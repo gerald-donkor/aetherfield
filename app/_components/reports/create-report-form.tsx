@@ -7,10 +7,11 @@ import { Button, Field } from "../primitives";
 import {
   createReportSchema,
   REPORT_ERRORS,
+  REPORT_FIELDS,
   type ReportField,
 } from "../../../lib/validation/reports";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The create-report leaf — build step 13.
@@ -43,8 +44,7 @@ export function CreateReportForm() {
 
     const parsed = createReportSchema.safeParse({ title });
     if (!parsed.success) {
-      const issue = parsed.error.issues.find((i) => i.path[0] === "title");
-      setFieldErrors({ title: issue?.message });
+      setFieldErrors(fieldErrorsFrom(parsed.error, REPORT_FIELDS));
       setMessage(REPORT_ERRORS.fields);
       return;
     }

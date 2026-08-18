@@ -21,7 +21,7 @@ import {
   type ApplicationFieldErrors,
 } from "../../../lib/validation/application";
 import { Button, Field, FileField, Seal, TextareaField } from "../primitives";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The apply dialog — build step 5's client leaf, and a copy of
@@ -210,16 +210,13 @@ export function ApplyDialog({
        `CV_ERRORS.missing` for a null file — and is there so the narrowing below
        is the compiler's rather than a cast's. */
     if (!parsed.success || cvError || !file) {
-      const next = { ...NO_FIELD_ERRORS, cv: cvError };
-      if (!parsed.success) {
-        for (const issue of parsed.error.issues) {
-          const field = issue.path[0];
-          if (typeof field === "string" && field in next) {
-            next[field as keyof ApplicationFieldErrors] ||= issue.message;
-          }
-        }
-      }
-      setErrors(next);
+      setErrors({
+        ...NO_FIELD_ERRORS,
+        ...(parsed.success
+          ? {}
+          : fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS)),
+        cv: cvError,
+      });
       setMessage("Check the marked fields and try again.");
       return;
     }

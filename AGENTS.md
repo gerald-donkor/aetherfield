@@ -46,6 +46,7 @@ skips the read will re-derive it by hand or silently break it.
 | `docs/site-affordances.md` | the pointer cursor on buttons |
 | `docs/backend.md` | the backend build record — the Neon resource, the connection split, `lib/db/`, the phase-one schema's column types and enums, the migrations, `.env.example` |
 | `docs/skills.md` | the installed agent skills, where each came from, what was deliberately excluded and why, and how to sync the two authored doc snapshots |
+| `docs/architecture.md` | the architecture review of 17 Aug 2026, its six candidates, their order and their dependencies |
 | `docs/automation.md` | **read before measuring anything** — comp geometry, crop fitting, `magick` recipes, screenshotting, reading reference recordings, build diffing, GSAP source traps, port and worktree gotchas |
 
 # Invariants
@@ -441,6 +442,29 @@ enough that anything written in this file would go stale (§12 rule 7).
 
 **Nothing before step 13's sanctioned surfaces may call a model**, and §5.3's
 hard rule binds every one that does.
+
+## 5.4 Architecture remediation sequence
+
+An architecture review taken on 17 Aug 2026 against `2337ab1` found six
+candidates, all in the write path §10 describes and no module owns. Its
+recommended order is **1 → 3 → 2 → 4, 5, 6**, and one prompt covers one
+candidate.
+
+| # | candidate | depends on |
+| --- | --- | --- |
+| 1 | **Map a `ZodError` once** — one adapter in `lib/validation/result.ts` for every site turning a validation failure into `fieldErrors` | — |
+| 3 | **One tenant gate that also spends the limiter** — collapse `resolveTenant` and `resolveMembershipForWrite` in `lib/auth/tenant.ts` | — |
+| 2 | **The submit lifecycle is a module** — one client-side module owning the six stages 24 leaves copy | 1 |
+| 4 | **Cut `app/activity/actions.ts` along its three routes**, moving `lib/validation/emissions.ts` with it | 3 |
+| 5 | **`lib/rate-limit/` — 18 wrappers become one policy table** | 3 |
+| 6 | **One workspace boundary shell** for the eight `loading.tsx` / `error.tsx` copies | a design answer from the user |
+
+**This is a plan, and nothing in it is ticked.** Which candidate is built is
+resolved from the repository and `git log` (§12 rule 5), never from this table.
+**The detail lives in `docs/architecture.md`** — each candidate's problem,
+solution, stated cost, the reason behind every dependency above, and the record
+of what each prompt actually changed. Read it before writing a candidate's
+prompt file.
 
 ---
 

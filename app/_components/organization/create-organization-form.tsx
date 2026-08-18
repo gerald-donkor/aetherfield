@@ -11,7 +11,7 @@ import {
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The create-organisation client leaf — build step 8, and a copy of
@@ -88,14 +88,10 @@ export function CreateOrganizationForm({
 
     const parsed = createOrganizationSchema.safeParse({ name, slug });
     if (!parsed.success) {
-      const next = { ...NO_ORGANIZATION_FIELD_ERRORS };
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (typeof field === "string" && field in next) {
-          next[field as keyof CreateOrganizationFieldErrors] ||= issue.message;
-        }
-      }
-      setErrors(next);
+      setErrors({
+        ...NO_ORGANIZATION_FIELD_ERRORS,
+        ...fieldErrorsFrom(parsed.error, NO_ORGANIZATION_FIELD_ERRORS),
+      });
       setMessage("Check the marked fields and try again.");
       return;
     }

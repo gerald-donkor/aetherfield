@@ -22,9 +22,11 @@ import {
 } from "../../lib/rate-limit";
 import {
   newsletterFieldsSchema,
+  NO_FIELD_ERRORS,
   type NewsletterSubmitResult,
   type NewsletterTokenResult,
 } from "../../lib/validation/newsletter";
+import { fieldErrorsFrom } from "../../lib/validation/result";
 
 /**
  * Newsletter signup, double opt-in — build step 4.
@@ -98,11 +100,10 @@ export async function subscribeToNewsletter(
   // -- c. Parse, with the same schema the leaf ran -------------------------
   const parsed = newsletterFieldsSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: "Check the marked field and try again.",
-      fieldErrors: { email: fieldErrors.email?.[0] },
+      fieldErrors: fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS),
     };
   }
   const { email } = parsed.data;

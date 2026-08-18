@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import * as z from "zod";
 
 import { resolveTenant as resolveTenantFor } from "../../lib/auth/tenant";
 import { readReportEvidence } from "../../lib/db/report-evidence";
@@ -30,11 +29,13 @@ import {
   reportIdSchema,
   NARRATIVE_MAX_CHARS,
   REPORT_ERRORS,
+  REPORT_FIELDS,
   REPORT_FORMAT_VERSION,
   type CreateReportResult,
   type DeleteReportResult,
   type GenerateNarrativeResult,
 } from "../../lib/validation/reports";
+import { fieldErrorsFrom } from "../../lib/validation/result";
 
 /**
  * The report workspace's three mutations — build step 13, in AGENTS.md §10's
@@ -106,11 +107,10 @@ export async function createReport(input: unknown): Promise<CreateReportResult> 
   // -- c. The shared schema is the server-side check -----------------------
   const parsed = createReportSchema.safeParse(input);
   if (!parsed.success) {
-    const { fieldErrors } = z.flattenError(parsed.error);
     return {
       ok: false,
       error: REPORT_ERRORS.fields,
-      fieldErrors: { title: fieldErrors.title?.[0] },
+      fieldErrors: fieldErrorsFrom(parsed.error, REPORT_FIELDS),
     };
   }
 

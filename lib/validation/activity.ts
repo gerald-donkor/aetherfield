@@ -353,6 +353,13 @@ export type FactorMappingInput = z.infer<typeof factorMappingSchema>;
 
 export type FactorMappingField = keyof FactorMappingInput;
 
+/** The same field names at runtime, read off the same schema, for
+    `fieldErrorsFrom` in `./result` (prompt 121). Both the picker and the action
+    used to spell these five out by hand, in two different shapes. */
+export const FACTOR_MAPPING_FIELDS = Object.keys(
+  factorMappingSchema.shape,
+) as readonly FactorMappingField[];
+
 export type FactorMappingResult = SubmitResult<FactorMappingField>;
 
 /**
