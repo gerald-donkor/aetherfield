@@ -2,7 +2,7 @@
 
 import { type FormEvent, useRef, useState } from "react";
 
-import { importCustomFactors } from "../../activity/actions";
+import { importCustomFactors } from "../../activity/factors/actions";
 import { FACTOR_IMPORT_HEADER } from "../../../lib/domain/factor-import";
 import {
   CSV_ACCEPT_ATTR,

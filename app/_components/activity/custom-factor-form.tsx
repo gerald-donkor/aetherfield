@@ -2,7 +2,7 @@
 
 import { type FormEvent, useRef, useState } from "react";
 
-import { createCustomFactor } from "../../activity/actions";
+import { createCustomFactor } from "../../activity/factors/actions";
 import {
   CH4_VARIANTS,
   CUSTOM_FACTOR_ERRORS,

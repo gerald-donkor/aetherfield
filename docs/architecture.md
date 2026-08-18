@@ -237,7 +237,7 @@ table below is appended to as prompts land, after the fact.
 | 1 · map a `ZodError` once | 121 | 18 Aug 2026 |
 | 2 · the submit lifecycle | 123, 124 | 18 Aug 2026 |
 | 3 · one tenant gate | 122 | 18 Aug 2026 |
-| 4 · cut `app/activity/actions.ts` | — | — |
+| 4 · cut `app/activity/actions.ts` | 125 | 18 Aug 2026 |
 | 5 · `lib/rate-limit/` policies | — | — |
 | 6 · one workspace boundary shell | — | — |
 
@@ -846,3 +846,144 @@ across all 24 write-path leaves now, not 21.
 
 The landed table's candidate-2 row now reads `123, 124` with today's date, and
 the "workspace half only" qualifier is dropped — **candidate 2 is complete**.
+
+---
+
+## Prompt 125 — the record
+
+`app/activity/actions.ts`'s eleven exports, split along the three route trees
+that owned them: the import flow kept the original file, and two new
+`"use server"` modules — `app/activity/mappings/actions.ts` and
+`app/activity/factors/actions.ts` — took `setFactorMapping` and the five
+factor-management actions respectively.
+
+### One correction to the prompt itself
+
+The prompt file named `setChoiceFrom` **and** `stageRows` as the two private
+helpers moving to `app/activity/factors/actions.ts`. Read from the file rather
+than assumed, per the prompt's own instruction to confirm before moving
+anything: `grep -n "stageRows\|setChoiceFrom" app/activity/actions.ts` showed
+`stageRows` called only at the import flow's two sites — `stageImport` (was
+line 373) and `updateImportMapping` (was line 477) — and never inside
+`createCustomFactor`, `importCustomFactors`, `retireCustomFactor`,
+`editFactorSet` or `retireFactorSet`. `setChoiceFrom` is called only inside
+`importCustomFactors`. **`stageRows` stayed in `app/activity/actions.ts`**
+with the import flow it actually serves; only `setChoiceFrom` moved to
+`app/activity/factors/actions.ts`. The prompt's own warning — "a wrong guess
+here is a silent behaviour change" — is exactly what this correction avoids:
+following the prompt's literal text would have made `stageImport` and
+`updateImportMapping` import a helper from a sibling route's action file for
+no reason, and split it from the domain call (`coerceRow`) it wraps.
+
+### A second, smaller correction: `lib/validation/emissions.ts`'s importer count
+
+The prompt cited **25 importers**, measured at the 17 Aug 2026 review. Re-run
+today (`grep -rl "validation/emissions" --include="*.ts" --include="*.tsx" .`,
+excluding `node_modules`) returns **28**, of which **27** predate this prompt —
+the review's figure had already drifted by two intervening prompts that added
+`lib/domain/reports.ts` and `lib/validation/targets.ts` as importers, neither
+part of this change. This prompt adds exactly **one**:
+`app/activity/factors/actions.ts`, which needs the six factor-management
+schemas and result types. `app/activity/mappings/actions.ts` is **not** an
+importer of `emissions.ts` — `setFactorMapping` and its messages live entirely
+on `lib/validation/activity.ts`'s `factorMappingSchema` /
+`FACTOR_MAPPING_ERRORS` / `FACTOR_MAPPING_FIELDS`. `lib/validation/emissions.ts`
+itself is untouched, confirming the "not touched" half of the prompt's
+decision independent of the exact count.
+
+### Per-export equivalence
+
+All 11 original exports, their new file, and confirmation that every message
+string, limiter and `revalidatePath` target is copied verbatim.
+
+| export | new file | limiter | messages | `revalidatePath` targets |
+| --- | --- | --- | --- | --- |
+| `stageImport` | `app/activity/actions.ts` (unchanged) | `checkActivityImportLimit` | `IMPORT_MESSAGES`, verbatim | `/activity` |
+| `updateImportMapping` | `app/activity/actions.ts` (unchanged) | `checkActivityCommitLimit` | `COMMIT_MESSAGES`, verbatim | `/activity/${id}` |
+| `commitImport` | `app/activity/actions.ts` (unchanged) | `checkActivityCommitLimit` | `COMMIT_MESSAGES`, verbatim | `/activity`, `/activity/${id}` |
+| `discardImport` | `app/activity/actions.ts` (unchanged) | `checkActivityCommitLimit` | `COMMIT_MESSAGES`, verbatim | `/activity`, `/activity/${id}` |
+| `recalculate` | `app/activity/actions.ts` (unchanged) | `checkActivityCommitLimit` | `COMMIT_MESSAGES`, verbatim | `/activity`, `/activity/${importId}` (conditional) |
+| `setFactorMapping` | `app/activity/mappings/actions.ts` (new) | `checkFactorMappingLimit` | `FACTOR_MAPPING_MESSAGES`, verbatim | `/activity`, `/activity/mappings` |
+| `createCustomFactor` | `app/activity/factors/actions.ts` (new) | `checkFactorMappingLimit` | `CUSTOM_FACTOR_MESSAGES`, verbatim | `/activity/factors`, `/activity/mappings`, `/activity` |
+| `importCustomFactors` | `app/activity/factors/actions.ts` (new) | `checkFactorImportLimit` | `CUSTOM_FACTOR_IMPORT_MESSAGES`, verbatim | `/activity/factors`, `/activity/mappings`, `/activity` |
+| `retireCustomFactor` | `app/activity/factors/actions.ts` (new) | `checkFactorMappingLimit` | `CUSTOM_FACTOR_MESSAGES`, verbatim | `/activity/factors`, `/activity/mappings`, `/activity` |
+| `editFactorSet` | `app/activity/factors/actions.ts` (new) | `checkFactorMappingLimit` | `CUSTOM_FACTOR_MESSAGES`, verbatim | `/activity/factors`, `/activity/mappings`, `/activity` |
+| `retireFactorSet` | `app/activity/factors/actions.ts` (new) | `checkFactorMappingLimit` | `CUSTOM_FACTOR_MESSAGES`, verbatim | `/activity/factors`, `/activity/mappings`, `/activity` |
+
+`tooManyChanges` is the one string duplicated across two files rather than
+shared — `FACTOR_MAPPING_MESSAGES` (mappings) and `CUSTOM_FACTOR_MESSAGES`
+(factors) both throttle on it, and the prompt's "no shared helper module for
+three files this small" rule means each file restates the identical function
+rather than importing it from the other.
+
+### Measured line counts
+
+```
+before: app/activity/actions.ts                    1428 lines (1 file)
+after:  app/activity/actions.ts                      595 lines
+        app/activity/mappings/actions.ts              277 lines
+        app/activity/factors/actions.ts               674 lines
+                                                total 1546 lines (3 files)
+```
+
+The total grew by 118 lines even though nothing was rewritten — each new file
+carries its own docblock, its own "BotID: absent" comment repeated at five
+call sites (three in `factors/actions.ts`, one in `mappings/actions.ts`), and
+its own copy of `tooManyChanges`. Per the prompt: no numeric target was set
+beyond equivalence, and line count is not the measure here, matching prompts
+121–124's own note on the same point.
+
+### Call sites, confirmed after the change
+
+```
+$ grep -rl "activity/actions" app/_components/
+app/_components/activity/mapping-form.tsx
+app/_components/activity/upload-form.tsx
+app/_components/activity/import-controls.tsx
+app/_components/activity/recalculate-control.tsx
+```
+
+The four import-flow components — the ones the prompt said stay unchanged —
+are the only remaining importers of the old path.
+
+```
+$ grep -rl "activity/mappings/actions\|activity/factors/actions" app/_components/
+app/_components/activity/retire-set-button.tsx
+app/_components/activity/factor-set-form.tsx
+app/_components/activity/factor-import-form.tsx
+app/_components/activity/custom-factor-form.tsx
+app/_components/activity/factor-picker.tsx
+app/_components/activity/retire-factor-button.tsx
+```
+
+All six moved call sites resolved to the correct new file — `factor-picker.tsx`
+to `mappings/actions.ts`, the other five to `factors/actions.ts`.
+
+### Deliberately unchanged, verified rather than assumed
+
+- `app/activity/mappings/page.tsx` and `app/activity/factors/page.tsx` — neither
+  imports `actions.ts` (or either new file) directly; both read through
+  `lib/db/` as Server Components. Confirmed empty `grep` result.
+- `app/api/cron/recalculate/sweep.ts`'s comment naming
+  `app/activity/actions.ts` — still accurate: `recalculate` and
+  `recalculateOrganization`'s other in-request caller both stayed in that file.
+- `lib/validation/emissions.ts` — untouched; see the importer-count correction
+  above.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | 318 passed, 13 files — unchanged from prompt 124's baseline, nothing in scope is under `lib/{domain,validation}` |
+| `npm run build` | route table unchanged: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, `/activity`, `/activity/[importId]`, `/activity/mappings`, `/activity/factors` all `ƒ` as before |
+| prerender diff | **all five static marketing pages, all six article pages and all three job-listing pages byte-identical** after normalising only `.next/BUILD_ID` (two-build method: `git stash push` the eight changed/new files, rebuild, snapshot, `git stash pop`, rebuild, diff). No JS-chunk-name substitution was even needed — unlike prompts 121–124, which touched shared client leaves reached from marketing routes, nothing under `app/activity/` is imported by any prerendered page's bundle, so the normalised HTML matched exactly with no further substitution |
+| `npm run test:e2e:local` | Chromium + Firefox: **110 passed, 12 skipped (3.8m)**, including `reaches /activity`, `/activity/mappings`, `/activity/factors` and the factor-picker/factor-import/factor-set-lifecycle/market-based-scope-2/scope-2-grid-average-fallback specs that exercise all eleven moved actions end to end. **WebKit did not run** — the standing Podman/Playwright fixture gap prompts 122–124 already recorded, not investigated further here |
+
+### Where this leaves candidate 4
+
+The landed table's candidate-4 row now reads `125` with today's date.
+Candidates 5 and 6 remain open — 5 depends only on candidate 3 (done) and is
+unblocked; 6 is still waiting on the user's `WorkspaceNav`/`loading.tsx`
+design answer recorded at line 229.

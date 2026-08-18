@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { retireFactorSet } from "../../activity/actions";
+import { retireFactorSet } from "../../activity/factors/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
 import { useWrite } from "../use-write";

@@ -2,7 +2,7 @@
 
 import { type FormEvent } from "react";
 
-import { editFactorSet } from "../../activity/actions";
+import { editFactorSet } from "../../activity/factors/actions";
 import type { EditFactorSetField } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";

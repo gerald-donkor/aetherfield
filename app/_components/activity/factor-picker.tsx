@@ -2,7 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 
-import { setFactorMapping } from "../../activity/actions";
+import { setFactorMapping } from "../../activity/mappings/actions";
 import {
   FACTOR_MAPPING_ERRORS,
   FACTOR_MAPPING_FIELDS,

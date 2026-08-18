@@ -16,55 +16,15 @@ import {
   type StagedRow,
 } from "../../lib/db/activity-queries";
 import { recalculateOrganization } from "../../lib/db/emission-queries";
-import { setFactorMapping as setFactorMappingRow } from "../../lib/db/factor-mapping-queries";
-import {
-  createTenantFactor,
-  importTenantFactors,
-  retireTenantFactor,
-} from "../../lib/db/factor-queries";
-import { getVisibleFactor } from "../../lib/db/factor-search-queries";
-import {
-  retireTenantFactorSet,
-  updateTenantFactorSet,
-} from "../../lib/db/factor-set-queries";
 import { coerceRow, proposeMapping } from "../../lib/domain/activity-import";
 import { decodeUtf8, parseCsv } from "../../lib/domain/csv";
-import { factorEligibility } from "../../lib/domain/emissions";
 import {
-  describeRowIssue,
-  duplicateRowErrors,
-  mixedGasBasisError,
-  readFactorImport,
-} from "../../lib/domain/factor-import";
-import {
-  createCustomFactorSchema,
-  customFactorSchema,
-  CUSTOM_FACTOR_ERRORS,
-  CUSTOM_FACTOR_FIELDS,
-  editFactorSetSchema,
-  EDIT_FACTOR_SET_FIELDS,
-  type EditFactorSetResult,
-  retireFactorSetSchema,
-  type RetireFactorSetResult,
-  FACTOR_IMPORT_ERRORS,
-  FACTOR_IMPORT_FIELDS,
-  FACTOR_IMPORT_MAX_ROW_ERRORS,
-  formatFactorImportRowFailure,
-  importCustomFactorsSchema,
-  retireCustomFactorSchema,
-  type CreateCustomFactorInput,
-  type CustomFactorResult,
-  type FactorImportRowError,
-  type ImportCustomFactorsResult,
   recalculateInputSchema,
   type RecalculateResult,
-  type RetireCustomFactorResult,
 } from "../../lib/validation/emissions";
 import {
   checkActivityCommitLimit,
   checkActivityImportLimit,
-  checkFactorImportLimit,
-  checkFactorMappingLimit,
 } from "../../lib/rate-limit";
 import {
   deleteActivityImport,
@@ -74,23 +34,20 @@ import {
 import {
   activityMappingSchema,
   ACTIVITY_FIELDS,
-  FACTOR_MAPPING_ERRORS,
-  FACTOR_MAPPING_FIELDS,
   type ActivityImportActionResult,
   type ActivityMapping,
   type ActivityMappingResult,
   CSV_ERRORS,
   CSV_MAX_BYTES,
   CSV_MAX_ROWS,
-  type FactorMappingResult,
-  factorMappingSchema,
   importIdSchema,
   type StageImportResult,
 } from "../../lib/validation/activity";
 import { fieldErrorsFrom } from "../../lib/validation/result";
 
 /**
- * Activity-data ingestion's four mutations — build step 9.
+ * The import flow's own mutations — build steps 9 and 10 — for `/activity`
+ * and its nested `/activity/[importId]`.
  *
  * **The shape is step 2's, copied rather than invented.** Every stage below
  * carries AGENTS.md 10's own letters in 10's own order, exactly as
@@ -100,18 +57,18 @@ import { fieldErrorsFrom } from "../../lib/validation/result";
  * is resolved *before* the limit because the limit needs the id, and stage d
  * does real work.
  *
- * Colocated at `app/activity/actions.ts` rather than in `app/_actions/`
- * because 6.3's colocation rule assumes one owning route and this area is the
- * single owner — unlike the apply dialog, which has four trigger sites across
- * two route trees.
+ * Colocated at `app/activity/actions.ts` because this flow — `/activity` and
+ * its nested `/activity/[importId]` — is a single owning route tree; the
+ * factor-mapping and factor-management flows were split out to their own
+ * routes' `actions.ts` at prompt 125, per `docs/architecture.md` candidate 4.
  *
  * ---
  *
  * **The organisation id never crosses the trust boundary.** It is resolved
- * server-side from the session's membership row on every one of the four calls,
- * and there is no form field carrying one anywhere in this change. A tenant id
- * accepted from a browser would be the whole multi-tenancy failure in a single
- * line.
+ * server-side from the session's membership row on every one of the five
+ * calls, and there is no form field carrying one anywhere in this change. A
+ * tenant id accepted from a browser would be the whole multi-tenancy failure
+ * in a single line.
  *
  * `getCurrentMembership()` is the primitive rather than
  * `authorizeOrganization(organizationId)` — the latter takes an id, and the
@@ -139,43 +96,19 @@ import { fieldErrorsFrom } from "../../lib/validation/result";
 const GENERIC_FAILURE =
   "We couldn't process that import just now. Please try again in a moment.";
 
-const FACTOR_MAPPING_FAILURE =
-  "We couldn't change that factor just now. Please try again in a moment.";
-
-const CUSTOM_FACTOR_FAILURE =
-  "We couldn't save that customer-supplied factor just now. Please try again in a moment.";
-
 const SIGNED_OUT =
   "Your session has expired. Sign in again to import activity data.";
-
-const FACTOR_MAPPING_SIGNED_OUT =
-  "Your session has expired. Sign in again to change emission factors.";
-
-const CUSTOM_FACTOR_SIGNED_OUT =
-  "Your session has expired. Sign in again to manage customer-supplied factors.";
 
 const NO_ORGANIZATION =
   "This account belongs to no organisation. Create one before importing data.";
 
-const FACTOR_MAPPING_NO_ORGANIZATION =
-  "This account belongs to no organisation. Create one before changing emission factors.";
-
-const CUSTOM_FACTOR_NO_ORGANIZATION =
-  "This account belongs to no organisation. Create one before adding customer-supplied factors.";
-
-/* Prompt 73's fourth tenant state, per flow. Not a `NO_ORGANIZATION`: this
-   account has an organisation and it is scheduled for deletion, so the honest
-   sentence names the lock and the way out of it rather than telling somebody to
-   create what they already have. Since prompt 122 all five message sets below
-   go through the one gate, which enforces the marker for every one of them. */
+/* Prompt 73's fourth tenant state. Not a `NO_ORGANIZATION`: this account has
+   an organisation and it is scheduled for deletion, so the honest sentence
+   names the lock and the way out of it rather than telling somebody to create
+   what they already have. Since prompt 122 this goes through the one gate,
+   which enforces the marker. */
 const ORGANIZATION_LOCKED =
   "This organisation is scheduled for deletion, so importing is locked. Restore it from your account page to make changes.";
-
-const FACTOR_MAPPING_ORGANIZATION_LOCKED =
-  "This organisation is scheduled for deletion, so its emission factors are locked. Restore it from your account page to make changes.";
-
-const CUSTOM_FACTOR_ORGANIZATION_LOCKED =
-  "This organisation is scheduled for deletion, so customer-supplied factors are locked. Restore it from your account page to make changes.";
 
 const NOT_FOUND =
   "That import is not available. It may have been discarded or removed.";
@@ -196,7 +129,7 @@ const NOTHING_TO_CALCULATE =
 /* -------------------------------------------------------------------------- */
 
 /**
- * Stage **b** for all ten actions in this file, in `lib/auth/tenant.ts`'s one
+ * Stage **b** for all five actions in this file, in `lib/auth/tenant.ts`'s one
  * gate: session, tenant, deletion lock, then the limiter this flow spends.
  *
  * **The primitive moved to `lib/auth/tenant.ts` at build step 11**, when
@@ -208,20 +141,9 @@ const NOTHING_TO_CALCULATE =
  * or a key changed.
  *
  * The strings stay here rather than moving into `lib/auth/` because the copy is
- * flow-specific — "sign in again to change emission factors" is the right
- * sentence on this surface and the wrong one everywhere else.
+ * flow-specific — the wording below is the right sentence on this surface and
+ * the wrong one everywhere else.
  */
-const tooManyChanges = (retry: string) =>
-  `That's a few too many changes. Try again in ${retry}.`;
-
-/** The bulk upload's own noun. `importCustomFactors` is the only one of the six
-    factor actions that says "imports", and it is the only one that spends
-    `checkFactorImportLimit`. */
-const tooManyImports = (retry: string) =>
-  `That's a few too many imports. Try again in ${retry}.`;
-
-/** The upload's own noun, kept verbatim from `stageImport`'s deleted inline
-    block. */
 const tooManyUploads = (retry: string) =>
   `That's a few too many uploads. Try again in ${retry}.`;
 
@@ -241,27 +163,6 @@ const IMPORT_MESSAGES: TenantWriteMessages = {
 const COMMIT_MESSAGES: TenantWriteMessages = {
   ...IMPORT_MESSAGES,
   throttled: tooManyRequests,
-};
-
-const FACTOR_MAPPING_MESSAGES: TenantWriteMessages = {
-  signedOut: FACTOR_MAPPING_SIGNED_OUT,
-  noOrganization: FACTOR_MAPPING_NO_ORGANIZATION,
-  organizationLocked: FACTOR_MAPPING_ORGANIZATION_LOCKED,
-  failure: FACTOR_MAPPING_FAILURE,
-  throttled: tooManyChanges,
-};
-
-const CUSTOM_FACTOR_MESSAGES: TenantWriteMessages = {
-  signedOut: CUSTOM_FACTOR_SIGNED_OUT,
-  noOrganization: CUSTOM_FACTOR_NO_ORGANIZATION,
-  organizationLocked: CUSTOM_FACTOR_ORGANIZATION_LOCKED,
-  failure: CUSTOM_FACTOR_FAILURE,
-  throttled: tooManyChanges,
-};
-
-const CUSTOM_FACTOR_IMPORT_MESSAGES: TenantWriteMessages = {
-  ...CUSTOM_FACTOR_MESSAGES,
-  throttled: tooManyImports,
 };
 
 /** The upload's gate. Not exported: a `"use server"` module's runtime exports
@@ -612,6 +513,10 @@ export async function discardImport(
  * was removed loses its emission rather than keeping a stale one — see
  * `replaceEmissions`. The coverage figure the surface renders is derived from
  * the same run, which is why a caller cannot obtain a total without it.
+ *
+ * `setFactorMapping` in `app/activity/mappings/actions.ts` is
+ * `recalculateOrganization`'s other in-request caller — it is stated once, in
+ * `lib/db/`, and both share it.
  */
 export async function recalculate(
   rawImportId: unknown,
@@ -656,744 +561,6 @@ export async function recalculate(
   revalidatePath("/activity");
   if (importId) revalidatePath(`/activity/${importId}`);
   return { ok: true };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  setFactorMapping                                                           */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Choose the emission factor for one `(category, unit)` pair — prompt 65, and
- * the action that closes the loop `EmissionsSummary`'s coverage line opens.
- *
- * **The same stage order as every action above it**, in AGENTS.md 10's letters,
- * with two differences from its neighbours and both are named where they happen:
- * stage **d** refuses a non-owner, and stage **f** recalculates.
- *
- * **Owner-only, and this is where it is enforced.** Hiding the picker from a
- * member is presentation and never enforcement (AGENTS.md 6.2, 11.2 rule 2). The
- * choice is owner-only because a factor moves every figure in a disclosure,
- * which puts it with `inviteMember` rather than with importing data —
- * `app/account/actions.ts` performs the identical check at the identical stage.
- * Aetherfield's own `staff` and `admin` grant nothing here (AGENTS.md 11.1).
- *
- * **A factor id from the browser is a claim, not a capability.** Stage e
- * re-resolves it under the tenant's own visibility and re-asks the engine's
- * eligibility rule; one belonging to another tenant's private set answers
- * exactly as one that does not exist. No existence oracle.
- *
- * **It recalculates inline rather than leaving a "your figures are stale"
- * notice.** The alternative leaves an already-calculated record showing a figure
- * derived from a factor that is no longer mapped, with nothing on screen saying
- * so — and a stale disclosure figure that looks current is the failure this
- * whole area is shaped against. The cost is a slower action on a large tenant;
- * it is bounded by `checkFactorMappingLimit` and by the platform's function
- * timeout. `recalculateOrganization` is called rather than restated: it is **the
- * one definition of what a recalculation is**, and this is now its third caller.
- */
-export async function setFactorMapping(
-  input: unknown,
-): Promise<FactorMappingResult> {
-  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
-
-  // -- b. Session, tenant and role, then the rate limit --------------------
-  /* The same gate the import paths use, with this flow's own messages and
-     limiter: stage d below needs the role, and the role is re-read from
-     Postgres on every call rather than trusted from the session payload
-     (AGENTS.md 11.2 rule 5). No argument is taken from the request, so no
-     organisation id can be supplied. The deletion lock and the fail-closed
-     limiter are the gate's, unchanged. */
-  const resolved = await resolveTenantFor({
-    messages: FACTOR_MAPPING_MESSAGES,
-    limiter: checkFactorMappingLimit,
-  });
-  if (!resolved.ok) return { ok: false, error: resolved.error };
-  const { membership } = resolved;
-
-  const userId = membership.account.user.id;
-  const organizationId = membership.organization.id;
-
-  // -- c. Parse, with the same schema the leaf ran -------------------------
-  const parsed = factorMappingSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: FACTOR_MAPPING_ERRORS.invalid,
-      fieldErrors: fieldErrorsFrom(parsed.error, FACTOR_MAPPING_FIELDS),
-    };
-  }
-  const {
-    category,
-    unit,
-    factorId,
-    scope2Method: lane,
-    scope2MarketBasis: basis,
-  } = parsed.data;
-
-  // -- d. Authorise --------------------------------------------------------
-  if (membership.role !== "owner") {
-    return { ok: false, error: FACTOR_MAPPING_ERRORS.notOwner };
-  }
-
-  // -- e. Re-resolve the factor, re-check the engine's rule, then write ----
-  try {
-    const factor = await getVisibleFactor(organizationId, factorId);
-    if (!factor) {
-      return {
-        ok: false,
-        error: FACTOR_MAPPING_ERRORS.invalid,
-        fieldErrors: { factorId: FACTOR_MAPPING_ERRORS.notFound },
-      };
-    }
-
-    /* The picker only offers eligible rows, and this asks again anyway: the
-       list the browser rendered is a claim about what was offered, not a check.
-       The refusal is the engine's own sentence, so a person is told the same
-       thing here that the coverage surface would have told them later. */
-    const eligibility = factorEligibility(factor, unit);
-    if (!eligibility.ok) {
-      return {
-        ok: false,
-        error: FACTOR_MAPPING_ERRORS.invalid,
-        fieldErrors: { factorId: eligibility.reason },
-      };
-    }
-
-    /* **The lane, the basis and the factor's own method have to agree** —
-       prompt 85, widened by prompt 86 into a three-case matrix. This is the
-       check that decides whether a grid average may reach a market-based
-       disclosure figure, and the answer is now "only on the basis the reporter
-       chose, and labelled as that basis":
-
-       | lane    | basis                  | the factor must be              |
-       | ------- | ---------------------- | ------------------------------- |
-       | default | absent (schema)        | *not* a market-based row        |
-       | market  | contractual_instrument | a scope 2 `market_based` row    |
-       | market  | grid_average           | a scope 2 row that is *not*     |
-
-       The default row is prompt 85's, unchanged, and its reason is unchanged:
-       `totalsOf` partitions market-based figures out of `scope2` and `total`,
-       so a market-based row on that lane would make the pair's contribution
-       vanish from the location-based reading.
-
-       The third row is the substitution prompt 85 refused. It is the Scope 2
-       Guidance's rung 5 — "Other grid-average emission factors (subnational or
-       national) — see location-based data", Table 6.3, "Market-based scope 2
-       data hierarchy examples", quoted in `docs/backend.md` — and the Guidance
-       permits it where "no other market-based method data are available". What
-       this product refuses is making that assertion *for* the reporter; the
-       basis is what records that they made it.
-
-       The picker's list is narrowed the same way, and that narrowing is a
-       courtesy: this is the check. */
-    const factorIsMarketBased =
-      factor.scope === "scope_2" && factor.scope2Method === "market_based";
-    const factorIsGridAverage =
-      factor.scope === "scope_2" && factor.scope2Method !== "market_based";
-
-    if (lane !== "market_based") {
-      if (factorIsMarketBased) {
-        return {
-          ok: false,
-          error: FACTOR_MAPPING_ERRORS.invalid,
-          fieldErrors: {
-            factorId: FACTOR_MAPPING_ERRORS.marketBasedOnDefaultLane,
-          },
-        };
-      }
-    } else if (basis === "grid_average") {
-      if (!factorIsGridAverage) {
-        return {
-          ok: false,
-          error: FACTOR_MAPPING_ERRORS.invalid,
-          fieldErrors: { factorId: FACTOR_MAPPING_ERRORS.notGridAverage },
-        };
-      }
-    } else if (!factorIsMarketBased) {
-      return {
-        ok: false,
-        error: FACTOR_MAPPING_ERRORS.invalid,
-        fieldErrors: { factorId: FACTOR_MAPPING_ERRORS.notMarketBased },
-      };
-    }
-
-    await setFactorMappingRow({
-      organizationId,
-      category,
-      unit,
-      factorId: factor.id,
-      lane,
-      marketBasis: basis,
-      userId,
-    });
-  } catch {
-    return { ok: false, error: FACTOR_MAPPING_FAILURE };
-  }
-
-  // -- f. No email. Recalculate, so no stale figure survives the change. ---
-  try {
-    await recalculateOrganization(organizationId, null);
-  } catch {
-    /* **The mapping is already written and stays written.** A failed
-       recalculation is the same shape as AGENTS.md 10 rule 4's failed email:
-       the durable write succeeded, and reporting the whole thing as a failure
-       would invite a retry of a change that already landed. The figures are
-       stale until the next run, and the sentence below says so rather than
-       claiming a clean success. Nothing is logged (8.3 rule 2). */
-    revalidatePath("/activity");
-    revalidatePath("/activity/mappings");
-    return {
-      ok: false,
-      error:
-        "The factor was saved, but the figures could not be recalculated just now. Run a recalculation from the activity page.",
-    };
-  }
-
-  revalidatePath("/activity");
-  revalidatePath("/activity/mappings");
-  return { ok: true };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  createCustomFactor                                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Creates one tenant-owned factor row inside one tenant-owned factor set —
- * prompt 66.
- *
- * It deliberately does **not** map the new factor or recalculate. A
- * customer-supplied value becomes visible to `/activity/mappings`, where the
- * owner makes the explicit pair-level choice that already recalculates.
- */
-export async function createCustomFactor(
-  input: unknown,
-): Promise<CustomFactorResult> {
-  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
-
-  // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for how the role and the lock are resolved
-     (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
-    messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
-  });
-  if (!resolved.ok) return { ok: false, error: resolved.error };
-  const { membership } = resolved;
-
-  const organizationId = membership.organization.id;
-
-  // -- c. Parse, with the shared schema -----------------------------------
-  const parsed = createCustomFactorSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: fieldErrorsFrom(parsed.error, CUSTOM_FACTOR_FIELDS),
-    };
-  }
-
-  // -- d. Authorise --------------------------------------------------------
-  if (membership.role !== "owner") {
-    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwner };
-  }
-
-  // -- e. Write ------------------------------------------------------------
-  /* The three refusals below are expected outcomes, not exceptions. A throw
-     from `createTenantFactor` is now a bug, and keeps the generic failure. */
-  let outcome: Awaited<ReturnType<typeof createTenantFactor>>;
-  try {
-    outcome = await createTenantFactor({ organizationId, data: parsed.data });
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-
-  if (!outcome.ok) {
-    if (outcome.reason === "set_exists") {
-      return {
-        ok: false,
-        error: CUSTOM_FACTOR_ERRORS.invalid,
-        fieldErrors: { "set.datasetVersion": CUSTOM_FACTOR_ERRORS.setExists },
-      };
-    }
-    if (outcome.reason === "set_not_found") {
-      return {
-        ok: false,
-        error: CUSTOM_FACTOR_ERRORS.invalid,
-        fieldErrors: { "set.setId": CUSTOM_FACTOR_ERRORS.setNotFound },
-      };
-    }
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: {
-        "factor.gas":
-          outcome.setGasBasis === "combined_co2e"
-            ? CUSTOM_FACTOR_ERRORS.gasBasisCombined
-            : CUSTOM_FACTOR_ERRORS.gasBasisPerGas,
-      },
-    };
-  }
-
-  // -- f. No email. Make the row visible on factor surfaces. ---------------
-  revalidatePath("/activity/factors");
-  revalidatePath("/activity/mappings");
-  revalidatePath("/activity");
-  return { ok: true };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  importCustomFactors                                                       */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Imports many customer-supplied factor rows from one CSV — prompt 82.
- *
- * **Atomic: all rows or none.** A file whose rows all pass is written in one
- * transaction; a file with any failing row writes nothing and comes back with
- * the failing lines. The alternative — step 9's staged review — is right for
- * activity data, where a partial commit is still a usable dataset, and wrong
- * here: a partly-imported set is a set whose licence and provenance describe
- * rows that are not all present, and that provenance is rendered as disclosure
- * evidence.
- *
- * Like `createCustomFactor`, it **maps nothing and recalculates nothing**
- * (prompt 66's decision). An imported row changes no figure until an owner maps
- * a `(category, unit)` pair to it at `/activity/mappings`, which is the surface
- * that already recalculates.
- */
-export async function importCustomFactors(
-  formData: FormData,
-): Promise<ImportCustomFactorsResult> {
-  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
-
-  // -- b. Session, tenant and role, then the rate limit --------------------
-  /* The one of the six that spends `checkFactorImportLimit` and says "imports"
-     rather than "changes" — the two things prompt 98's extraction is
-     parameterised by. */
-  const resolved = await resolveTenantFor({
-    messages: CUSTOM_FACTOR_IMPORT_MESSAGES,
-    limiter: checkFactorImportLimit,
-  });
-  if (!resolved.ok) return { ok: false, error: resolved.error };
-  const { membership } = resolved;
-
-  const organizationId = membership.organization.id;
-
-  // -- c. The set choice, then the file, then the rows ---------------------
-  const choice = importCustomFactorsSchema.safeParse({
-    set: setChoiceFrom(formData),
-  });
-  if (!choice.success) {
-    return {
-      ok: false,
-      error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: fieldErrorsFrom(choice.error, FACTOR_IMPORT_FIELDS),
-    };
-  }
-
-  /* The declared `type` is deliberately not a gate — see `stageImport` for
-     why. The parse below is the real check (AGENTS.md 8.2 rule 3). */
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return {
-      ok: false,
-      error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: { file: FACTOR_IMPORT_ERRORS.file },
-    };
-  }
-  if (file.size > CSV_MAX_BYTES) {
-    return {
-      ok: false,
-      error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: { file: CSV_ERRORS.size },
-    };
-  }
-
-  let bytes: ArrayBuffer;
-  try {
-    bytes = await file.arrayBuffer();
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-
-  const decoded = decodeUtf8(bytes);
-  if (!decoded.ok) {
-    return {
-      ok: false,
-      error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: { file: decoded.error },
-    };
-  }
-
-  const parsed = parseCsv(decoded.text, CSV_MAX_ROWS);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: { file: parsed.error },
-    };
-  }
-
-  /* Whole-file failures first — a mis-typed header is one legible sentence,
-     never ten thousand row errors. */
-  const read = readFactorImport(parsed.header, parsed.records);
-  if (!read.ok) {
-    return {
-      ok: false,
-      error: FACTOR_IMPORT_ERRORS.invalid,
-      fieldErrors: { file: read.error },
-    };
-  }
-
-  /* **The same schema the single-row form runs**, per row (AGENTS.md 10
-     rule 1). The rules exist once and run twice; nothing about a row is
-     restated for the bulk path. */
-  const rowErrors: FactorImportRowError[] = [...read.rowErrors];
-  const factors: { line: number; factor: CreateCustomFactorInput["factor"] }[] =
-    [];
-  for (const row of read.rows) {
-    const checked = customFactorSchema.safeParse(row.input);
-    if (checked.success) {
-      factors.push({ line: row.line, factor: checked.data });
-      continue;
-    }
-    const issue = checked.error.issues[0];
-    rowErrors.push({
-      line: row.line,
-      message: describeRowIssue(issue.path.join("."), issue.message),
-    });
-  }
-
-  if (rowErrors.length === 0) {
-    /* Two rows that would become one row in the set, and a file with no honest
-       destination. Both are cross-row and neither can exist on the single-row
-       path, which is why they live in `lib/domain/` rather than in the
-       schema. */
-    rowErrors.push(...duplicateRowErrors(factors));
-    const mixed = mixedGasBasisError(factors);
-    if (mixed) rowErrors.push(mixed);
-  }
-
-  if (rowErrors.length > 0) {
-    rowErrors.sort((a, b) => a.line - b.line);
-    return {
-      ok: false,
-      error: formatFactorImportRowFailure(rowErrors.length),
-      rowErrors: rowErrors.slice(0, FACTOR_IMPORT_MAX_ROW_ERRORS),
-    };
-  }
-
-  // -- d. Authorise --------------------------------------------------------
-  /* A factor moves every figure in a disclosure, so AGENTS.md 11.2 rule 2 puts
-     the check here rather than in the component that renders the control. */
-  if (membership.role !== "owner") {
-    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwner };
-  }
-
-  // -- e. Write ------------------------------------------------------------
-  let outcome: Awaited<ReturnType<typeof importTenantFactors>>;
-  try {
-    outcome = await importTenantFactors({
-      organizationId,
-      set: choice.data.set,
-      factors: factors.map((row) => row.factor),
-    });
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-
-  if (!outcome.ok) {
-    if (outcome.reason === "set_exists") {
-      return {
-        ok: false,
-        error: FACTOR_IMPORT_ERRORS.invalid,
-        fieldErrors: { "set.datasetVersion": CUSTOM_FACTOR_ERRORS.setExists },
-      };
-    }
-    if (outcome.reason === "set_not_found") {
-      return {
-        ok: false,
-        error: FACTOR_IMPORT_ERRORS.invalid,
-        fieldErrors: { "set.setId": CUSTOM_FACTOR_ERRORS.setNotFound },
-      };
-    }
-    if (outcome.reason === "mixed_gas_basis") {
-      /* Refused above, so this is a bug rather than a submission. */
-      return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-    }
-    return {
-      ok: false,
-      error:
-        outcome.setGasBasis === "combined_co2e"
-          ? CUSTOM_FACTOR_ERRORS.gasBasisCombined
-          : CUSTOM_FACTOR_ERRORS.gasBasisPerGas,
-    };
-  }
-
-  // -- f. No email. Make the rows visible on the factor surfaces. ----------
-  revalidatePath("/activity/factors");
-  revalidatePath("/activity/mappings");
-  revalidatePath("/activity");
-  return { ok: true, imported: outcome.imported, skipped: outcome.skipped };
-}
-
-/** The set chooser's fields, as they cross from the browser. Shaped for
-    `factorSetChoiceSchema` and judged by it — nothing here decides anything. */
-function setChoiceFrom(formData: FormData): unknown {
-  const text = (name: string) => String(formData.get(name) ?? "");
-  if (text("mode") !== "new") {
-    return { mode: "existing", setId: text("setId") };
-  }
-  return {
-    mode: "new",
-    source: text("source"),
-    datasetVersion: text("datasetVersion"),
-    publicationYear: Number(formData.get("publicationYear")),
-    effectiveFrom: text("effectiveFrom"),
-    effectiveTo: text("effectiveTo"),
-    licence: text("licence"),
-    licenceUrl: text("licenceUrl"),
-    sourceUrl: text("sourceUrl"),
-    sourceReference: text("sourceReference"),
-    notes: text("notes"),
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  retireCustomFactor                                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Soft-retires one tenant-owned factor row, and answers with the consequence:
- * how many active `(category, unit)` mappings pointed at it and are now
- * unmapped. The count comes from the server's own read inside the retiring
- * transaction, so the announced number is the number that was true at the
- * write.
- */
-export async function retireCustomFactor(
-  input: unknown,
-): Promise<RetireCustomFactorResult> {
-  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
-
-  // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for how the role and the lock are resolved
-     (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
-    messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
-  });
-  if (!resolved.ok) return { ok: false, error: resolved.error };
-  const { membership } = resolved;
-
-  const organizationId = membership.organization.id;
-
-  // -- c. Parse, with the shared schema -----------------------------------
-  const parsed = retireCustomFactorSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: { factorId: "Choose a customer-supplied factor." },
-    };
-  }
-
-  // -- d. Authorise --------------------------------------------------------
-  if (membership.role !== "owner") {
-    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwner };
-  }
-
-  // -- e. Tenant-owned soft retirement ------------------------------------
-  let outcome: Awaited<ReturnType<typeof retireTenantFactor>>;
-  try {
-    outcome = await retireTenantFactor({
-      organizationId,
-      factorId: parsed.data.factorId,
-    });
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-
-  if (!outcome.retired) {
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: { factorId: CUSTOM_FACTOR_ERRORS.notFound },
-    };
-  }
-
-  // -- f. No email. Existing calculated emissions remain reproducible. -----
-  revalidatePath("/activity/factors");
-  revalidatePath("/activity/mappings");
-  revalidatePath("/activity");
-  return { ok: true, mappingCount: outcome.mappingCount };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  editFactorSet                                                             */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Corrects one tenant-owned factor set's provenance and applicability —
- * prompt 84.
- *
- * **The correction is the whole point.** `licence`, `sourceUrl` and
- * `sourceReference` are rendered as disclosure evidence beside every figure the
- * set's rows produce, and before this the only way out of a typo was to create a
- * second set and import every row into it again.
- *
- * It **recalculates nothing** (prompt 66's decision, prompt 70's refusal, both
- * unchanged). A corrected effective window changes which factor applies at the
- * next recalculation and nothing before it, and it changes no filed report:
- * `report.evidence` is an immutable stored snapshot. The surface says both.
- */
-export async function editFactorSet(
-  input: unknown,
-): Promise<EditFactorSetResult> {
-  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
-
-  // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for how the role and the lock are resolved
-     (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
-    messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
-  });
-  if (!resolved.ok) return { ok: false, error: resolved.error };
-  const { membership } = resolved;
-
-  const organizationId = membership.organization.id;
-
-  // -- c. Parse, with the shared schema -----------------------------------
-  const parsed = editFactorSetSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: fieldErrorsFrom(parsed.error, EDIT_FACTOR_SET_FIELDS),
-    };
-  }
-
-  // -- d. Authorise --------------------------------------------------------
-  if (membership.role !== "owner") {
-    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwnerSet };
-  }
-
-  // -- e. Write ------------------------------------------------------------
-  let outcome: Awaited<ReturnType<typeof updateTenantFactorSet>>;
-  try {
-    outcome = await updateTenantFactorSet({
-      organizationId,
-      data: parsed.data,
-    });
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-
-  if (!outcome.ok) {
-    if (outcome.reason === "set_exists") {
-      return {
-        ok: false,
-        error: CUSTOM_FACTOR_ERRORS.invalid,
-        fieldErrors: { datasetVersion: CUSTOM_FACTOR_ERRORS.setRenameExists },
-      };
-    }
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: { setId: CUSTOM_FACTOR_ERRORS.setNotFound },
-    };
-  }
-
-  // -- f. No email. Make the correction visible on the factor surfaces. -----
-  /* The same three `retireCustomFactor` revalidates. **`/reports` is not a
-     fourth**, and that is checked rather than assumed: `app/reports/page.tsx`
-     renders `listReports`, which reads stored report rows, and a filed report's
-     provenance is the immutable `report.evidence` snapshot it was built with.
-     The live read of the set — `listPeriodFactorSets` in
-     `lib/db/report-evidence.ts` — runs at generation time, so the next report
-     built picks the correction up with no cached page to invalidate. */
-  revalidatePath("/activity/factors");
-  revalidatePath("/activity/mappings");
-  revalidatePath("/activity");
-  return { ok: true };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  retireFactorSet                                                           */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Soft-retires one tenant-owned factor set, and answers with what it cost: the
- * live rows it takes out of use, and the active `(category, unit)` mappings that
- * pointed at them. Both counts are the server's own, read inside the retiring
- * transaction.
- *
- * **`emission_factor_set.deleted_at` had nine readers and no writer** before
- * this. Retirement was designed for, filtered for, and unreachable.
- */
-export async function retireFactorSet(
-  input: unknown,
-): Promise<RetireFactorSetResult> {
-  // -- a. BotID: absent on an authenticated path. See `stageImport`. --------
-
-  // -- b. Session, tenant and role, then the rate limit --------------------
-  /* See `setFactorMapping` for how the role and the lock are resolved
-     (prompt 73, prompt 98, prompt 122). */
-  const resolved = await resolveTenantFor({
-    messages: CUSTOM_FACTOR_MESSAGES,
-    limiter: checkFactorMappingLimit,
-  });
-  if (!resolved.ok) return { ok: false, error: resolved.error };
-  const { membership } = resolved;
-
-  const organizationId = membership.organization.id;
-
-  // -- c. Parse, with the shared schema -----------------------------------
-  const parsed = retireFactorSetSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: { setId: "Choose a factor set." },
-    };
-  }
-
-  // -- d. Authorise --------------------------------------------------------
-  if (membership.role !== "owner") {
-    return { ok: false, error: CUSTOM_FACTOR_ERRORS.notOwnerSet };
-  }
-
-  // -- e. Tenant-owned soft retirement ------------------------------------
-  let outcome: Awaited<ReturnType<typeof retireTenantFactorSet>>;
-  try {
-    outcome = await retireTenantFactorSet({
-      organizationId,
-      setId: parsed.data.setId,
-    });
-  } catch {
-    return { ok: false, error: CUSTOM_FACTOR_FAILURE };
-  }
-
-  if (!outcome.retired) {
-    return {
-      ok: false,
-      error: CUSTOM_FACTOR_ERRORS.invalid,
-      fieldErrors: { setId: CUSTOM_FACTOR_ERRORS.setNotFound },
-    };
-  }
-
-  // -- f. No email. Existing calculated emissions remain reproducible. -----
-  /* `/reports` is not revalidated here either, and for the same reason
-     `editFactorSet` records. */
-  revalidatePath("/activity/factors");
-  revalidatePath("/activity/mappings");
-  revalidatePath("/activity");
-  return {
-    ok: true,
-    mappingCount: outcome.mappingCount,
-    factorCount: outcome.factorCount,
-  };
 }
 
 /* -------------------------------------------------------------------------- */

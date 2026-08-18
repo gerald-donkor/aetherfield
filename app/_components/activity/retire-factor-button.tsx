@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { retireCustomFactor } from "../../activity/actions";
+import { retireCustomFactor } from "../../activity/factors/actions";
 import { Button } from "../primitives";
 import { useWrite } from "../use-write";
 
