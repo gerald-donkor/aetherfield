@@ -1,12 +1,12 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent } from "react";
 
 import { editFactorSet } from "../../activity/actions";
 import type { EditFactorSetField } from "../../../lib/validation/emissions";
 import { Button, Field, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Corrects one customer-supplied factor set's provenance — prompt 84.
@@ -56,11 +56,8 @@ const GAS_BASIS_LABEL = {
 } as const;
 
 export function FactorSetForm({ set }: { set: EditableFactorSet }) {
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<
-    Partial<Record<EditFactorSetField, string>>
-  >({});
+  const write = useWrite<EditFactorSetField>();
+  const { pending, message, errors } = write;
 
   /* The outcome takes focus whenever it settles, so a screen reader lands on it
      rather than being told about it from wherever the caret was
@@ -68,43 +65,36 @@ export function FactorSetForm({ set }: { set: EditableFactorSet }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setErrors({});
 
     const form = new FormData(event.currentTarget);
     const text = (name: string) => String(form.get(name) ?? "");
 
-    setPending(true);
-    try {
-      const result = await editFactorSet({
-        setId: set.id,
-        source: text("source"),
-        datasetVersion: text("datasetVersion"),
-        publicationYear: Number(form.get("publicationYear")),
-        effectiveFrom: text("effectiveFrom"),
-        effectiveTo: text("effectiveTo"),
-        licence: text("licence"),
-        licenceUrl: text("licenceUrl"),
-        sourceUrl: text("sourceUrl"),
-        sourceReference: text("sourceReference"),
-        notes: text("notes"),
-      });
-
-      if (result.ok) {
-        setMessage(
-          "Set updated. The corrected provenance is rendered beside every figure its rows produce from now on. Reports already built keep the evidence they were built with, and a changed effective range applies at the next recalculation.",
-        );
-      } else {
-        // An honest failure is a visible state, never a silent success
-        // (AGENTS.md 8.2 rule 4).
-        setErrors(result.fieldErrors ?? {});
-        setMessage(result.fieldErrors?.setId ?? result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      // An honest failure is a visible state, never a silent success
+      // (AGENTS.md 8.2 rule 4). `editFactorSet`'s generic `error` is not what
+      // this form has always shown on a `setId` refusal — the specific
+      // `fieldErrors.setId` is, when one exists.
+      call: async () => {
+        const result = await editFactorSet({
+          setId: set.id,
+          source: text("source"),
+          datasetVersion: text("datasetVersion"),
+          publicationYear: Number(form.get("publicationYear")),
+          effectiveFrom: text("effectiveFrom"),
+          effectiveTo: text("effectiveTo"),
+          licence: text("licence"),
+          licenceUrl: text("licenceUrl"),
+          sourceUrl: text("sourceUrl"),
+          sourceReference: text("sourceReference"),
+          notes: text("notes"),
+        });
+        return result.ok
+          ? result
+          : { ...result, error: result.fieldErrors?.setId ?? result.error };
+      },
+      onSuccess: () =>
+        "Set updated. The corrected provenance is rendered beside every figure its rows produce from now on. Reports already built keep the evidence they were built with, and a changed effective range applies at the next recalculation.",
+    });
   }
 
   return (

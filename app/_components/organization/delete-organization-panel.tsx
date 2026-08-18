@@ -7,15 +7,16 @@ import {
   restoreOrganization,
 } from "../../account/actions";
 import {
-  type DeleteOrganizationFieldErrors,
   deleteOrganizationSchema,
   NO_DELETE_ORGANIZATION_FIELD_ERRORS,
   ORGANIZATION_DELETION_ERRORS,
   ORGANIZATION_DELETION_WINDOW_DAYS,
+  type DeleteOrganizationField,
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
+import { fieldErrorsFrom } from "../../../lib/validation/result";
 
 /**
  * The organisation's deletion surface — prompt 73.
@@ -42,24 +43,15 @@ import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
  */
 
 function RestoreControl({ organizationName }: { organizationName: string }) {
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function restore() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await restoreOrganization();
-      setMessage(
-        result.ok
-          ? `${organizationName} is restored. Its data is available again and nothing was removed.`
-          : result.error,
-      );
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      call: () => restoreOrganization(),
+      onSuccess: () =>
+        `${organizationName} is restored. Its data is available again and nothing was removed.`,
+    });
   }
 
   return (
@@ -80,63 +72,52 @@ function DeleteForm({
   organizationSlug: string;
 }) {
   const [confirmSlug, setConfirmSlug] = useState("");
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<DeleteOrganizationFieldErrors>(
-    NO_DELETE_ORGANIZATION_FIELD_ERRORS,
-  );
+  const write = useWrite<DeleteOrganizationField>();
+  const { pending, message, errors } = write;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
 
     const parsed = deleteOrganizationSchema.safeParse({ confirmSlug });
     if (!parsed.success) {
       /* The fallback is kept, not inherited by accident: an issue with an empty
          path belongs to no field, and this form has one control to say it
-         against. `deleteOrganizationSchema` emits no such issue today. */
+         against. `deleteOrganizationSchema` emits no such issue today. This is
+         a bespoke courtesy check rather than `submit`'s own `parse` stage
+         because of that fallback — `useWrite`'s generic branch has no
+         site-specific default to apply. */
       const fieldErrors = fieldErrorsFrom(
         parsed.error,
         NO_DELETE_ORGANIZATION_FIELD_ERRORS,
       );
-      setErrors({
-        confirmSlug:
-          fieldErrors.confirmSlug ?? "Type the identifier to confirm.",
-      });
-      setMessage("Check the marked field and try again.");
+      write.invalid(
+        {
+          confirmSlug:
+            fieldErrors.confirmSlug ?? "Type the identifier to confirm.",
+        },
+        "Check the marked field and try again.",
+      );
       return;
     }
     /* The same comparison the action makes, run here only so a typo costs no
        round trip. The action's copy is the one that decides. */
     if (parsed.data.confirmSlug !== organizationSlug) {
-      setErrors({ confirmSlug: ORGANIZATION_DELETION_ERRORS.SLUG_MISMATCH });
-      setMessage("Check the marked field and try again.");
+      write.invalid(
+        { confirmSlug: ORGANIZATION_DELETION_ERRORS.SLUG_MISMATCH },
+        "Check the marked field and try again.",
+      );
       return;
     }
 
-    setErrors(NO_DELETE_ORGANIZATION_FIELD_ERRORS);
-    setPending(true);
-    try {
-      const result = await requestOrganizationDeletion(parsed.data);
-      if (result.ok) {
+    await write.submit({
+      call: () => requestOrganizationDeletion(parsed.data),
+      onSuccess: () => {
+        setConfirmSlug("");
         /* The page revalidates into its locked state, so this sentence is what
            the person reads in the moment between the two. */
-        setMessage(
-          `${organizationName} is scheduled for deletion and is now locked.`,
-        );
-        setConfirmSlug("");
-        return;
-      }
-      setErrors({
-        ...NO_DELETE_ORGANIZATION_FIELD_ERRORS,
-        ...result.fieldErrors,
-      });
-      setMessage(result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return `${organizationName} is scheduled for deletion and is now locked.`;
+      },
+    });
   }
 
   return (

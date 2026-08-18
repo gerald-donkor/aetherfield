@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { retireCustomFactor } from "../../activity/actions";
 import { Button } from "../primitives";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Retires one customer-supplied factor row — prompt 67 decisions 3 and 8.
@@ -32,8 +32,8 @@ export function RetireFactorButton({
 }) {
   const statusRef = useRef<HTMLParagraphElement>(null);
   const [armed, setArmed] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite<"factorId">();
+  const { pending, message } = write;
 
   useEffect(() => {
     if (message) statusRef.current?.focus();
@@ -43,7 +43,7 @@ export function RetireFactorButton({
     if (!armed) {
       setArmed(true);
       /* Announced, not only styled: the arm state is the warning. */
-      setMessage(
+      write.setMessage(
         mappingCount > 0
           ? `Retiring this factor leaves ${mappingCount.toLocaleString(
               "en-GB",
@@ -55,28 +55,27 @@ export function RetireFactorButton({
       return;
     }
 
-    setPending(true);
-    try {
-      const result = await retireCustomFactor({ factorId });
-      if (result.ok) {
+    await write.submit({
+      /* `retireCustomFactor`'s generic `error` is not what this control has
+         always shown — the specific `fieldErrors.factorId` is, when one
+         exists. See `retire-set-button.tsx` for the identical reasoning. */
+      call: async () => {
+        const result = await retireCustomFactor({ factorId });
+        return result.ok
+          ? result
+          : { ...result, error: result.fieldErrors?.factorId ?? result.error };
+      },
+      onSuccess: (result) => {
         setArmed(false);
-        setMessage(
-          result.mappingCount > 0
-            ? `Factor retired. ${result.mappingCount.toLocaleString(
-                "en-GB",
-              )} mapped ${
-                result.mappingCount === 1 ? "pair is" : "pairs are"
-              } now unmapped and outside the total until a factor is chosen again.`
-            : "Factor retired. No mapped pairs were using it.",
-        );
-      } else {
-        setMessage(result.fieldErrors?.factorId ?? result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return result.mappingCount > 0
+          ? `Factor retired. ${result.mappingCount.toLocaleString(
+              "en-GB",
+            )} mapped ${
+              result.mappingCount === 1 ? "pair is" : "pairs are"
+            } now unmapped and outside the total until a factor is chosen again.`
+          : "Factor retired. No mapped pairs were using it.";
+      },
+    });
   }
 
   return (
@@ -98,7 +97,7 @@ export function RetireFactorButton({
           className="mt-3 ml-3"
           onClick={() => {
             setArmed(false);
-            setMessage("Retirement cancelled.");
+            write.setMessage("Retirement cancelled.");
           }}
         >
           Cancel

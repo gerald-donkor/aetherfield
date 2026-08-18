@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { respondToInvitation } from "../../invitation/[id]/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Accept or decline an invitation — prompt 63's client leaf on
@@ -36,9 +36,15 @@ export function InvitationResponse({
 }) {
   const statusRef = useRef<HTMLDivElement>(null);
 
+  /* A union of which decision is in flight, not the hook's own boolean
+     `pending` — the two buttons need to know *which* of them is disabled and
+     busy, not merely that something is. Set inside `call` so the timing
+     matches the original: right where `setPending(decision)` ran, and cleared
+     in its own `finally` regardless of outcome. */
   const [pending, setPending] = useState<"accept" | "decline" | null>(null);
   const [settled, setSettled] = useState<"accept" | "decline" | null>(null);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { message } = write;
 
   /* `statusRef` now serves only the settled panel below, which is not a
      `FormStatus` — it has its own class and body. The result line moved to
@@ -50,22 +56,21 @@ export function InvitationResponse({
   }, [settled]);
 
   async function respond(decision: "accept" | "decline") {
-    setMessage("");
-    setPending(decision);
-    try {
-      const result = await respondToInvitation({ invitationId, decision });
-      if (result.ok) {
-        setSettled(decision);
-        return;
-      }
+    await write.submit({
       // An honest failure is a visible state, never a silent success
       // (AGENTS.md 8.2 rule 4).
-      setMessage(result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(null);
-    }
+      call: async () => {
+        setPending(decision);
+        try {
+          return await respondToInvitation({ invitationId, decision });
+        } finally {
+          setPending(null);
+        }
+      },
+      onSuccess: () => {
+        setSettled(decision);
+      },
+    });
   }
 
   if (settled) {

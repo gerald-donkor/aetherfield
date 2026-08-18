@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { retireTarget } from "../../targets/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Retiring one target — build step 11's only destructive control, given the
@@ -51,8 +51,8 @@ export function RetireTargetControl({ targetId }: { targetId: string }) {
      effect cannot steal focus on mount or after a failed confirm. */
   const restoreFocus = useRef(false);
   const [confirming, setConfirming] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   useEffect(() => {
     if (confirming || !restoreFocus.current) return;
@@ -61,18 +61,11 @@ export function RetireTargetControl({ targetId }: { targetId: string }) {
   }, [confirming]);
 
   async function retire() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await retireTarget(targetId);
-      setMessage(result.ok ? "Target retired." : result.error);
-      if (!result.ok) setConfirming(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setConfirming(false);
-    } finally {
-      setPending(false);
-    }
+    const ok = await write.submit({
+      call: () => retireTarget(targetId),
+      onSuccess: () => "Target retired.",
+    });
+    if (!ok) setConfirming(false);
   }
 
   return (
@@ -108,7 +101,7 @@ export function RetireTargetControl({ targetId }: { targetId: string }) {
           size="secondary"
           bullet={false}
           onClick={() => {
-            setMessage("");
+            write.setMessage("");
             setConfirming(true);
           }}
         >

@@ -12,11 +12,11 @@ import {
   TARGET_MAX_YEAR,
   TARGET_MIN_YEAR,
   type TargetCoverage,
-  type TargetFieldErrors,
+  type TargetField,
 } from "../../../lib/validation/targets";
 import { Button, Field, SelectField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 export function CreateTargetForm({
   suggestions,
@@ -32,9 +32,11 @@ export function CreateTargetForm({
   const [baselineSource, setBaselineSource] = useState<
     "stated" | "computed_at_creation"
   >("stated");
-  const [errors, setErrors] = useState<TargetFieldErrors>({});
-  const [message, setMessage] = useState("");
-  const [pending, setPending] = useState(false);
+  const write = useWrite<TargetField>({
+    fields: TARGET_FIELDS,
+    fieldsMessage: "Check the marked fields and try again.",
+  });
+  const { pending, message, errors } = write;
 
   const suggestion = suggestions.find(
     (entry) => entry.year === Number(baseYear) && entry.coverage === coverage,
@@ -42,8 +44,6 @@ export function CreateTargetForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setErrors({});
 
     const body = new FormData(event.currentTarget);
     const input = {
@@ -56,36 +56,18 @@ export function CreateTargetForm({
       baselineSource,
     };
 
-    const checked = createTargetSchema.safeParse(input);
-    if (!checked.success) {
-      setErrors(fieldErrorsFrom(checked.error, TARGET_FIELDS));
-      setMessage("Check the marked fields and try again.");
-      return;
-    }
-
-    setPending(true);
-    try {
-      const result = await createTarget(checked.data);
-      if (!result.ok) {
-        setErrors(result.fieldErrors ?? {});
-        setMessage(result.error);
-        setPending(false);
-        return;
-      }
-
-      formRef.current?.reset();
-      setCoverage("scope_1_2");
-      setBaseYear("");
-      setBaseline("");
-      setBaselineSource("stated");
-      setMessage(
-        "Target saved. Its trajectory and projection are shown below.",
-      );
-      setPending(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setPending(false);
-    }
+    await write.submit({
+      parse: () => createTargetSchema.safeParse(input),
+      call: (data) => createTarget(data),
+      onSuccess: () => {
+        formRef.current?.reset();
+        setCoverage("scope_1_2");
+        setBaseYear("");
+        setBaseline("");
+        setBaselineSource("stated");
+        return "Target saved. Its trajectory and projection are shown below.";
+      },
+    });
   }
 
   return (
@@ -187,7 +169,10 @@ export function CreateTargetForm({
               onClick={() => {
                 setBaseline(suggestion.tonnes);
                 setBaselineSource("computed_at_creation");
-                setErrors((current) => ({ ...current, baseline: undefined }));
+                write.setErrors((current) => ({
+                  ...current,
+                  baseline: undefined,
+                }));
               }}
               disabled={pending}
             >

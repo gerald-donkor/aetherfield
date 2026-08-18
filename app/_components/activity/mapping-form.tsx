@@ -12,7 +12,7 @@ import {
 } from "../../../lib/validation/activity";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The column-mapping override — build step 9, and **the review step AGENTS.md
@@ -50,16 +50,11 @@ export function ActivityMappingForm({
   className?: string;
 }) {
   const [draft, setDraft] = useState<ActivityMapping>(mapping);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<Partial<Record<ActivityField, string>>>(
-    {},
-  );
+  const write = useWrite<ActivityField>();
+  const { pending, message, errors } = write;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setErrors({});
 
     /* The courtesy check: every required field needs a column. The action
        re-checks this against the *stored* header row, which is the check
@@ -68,30 +63,19 @@ export function ActivityMappingForm({
       (field) => draft[field] === null,
     );
     if (missing.length > 0) {
-      setErrors(
+      write.invalid(
         Object.fromEntries(
           missing.map((field) => [field, "Choose the column this comes from."]),
         ),
+        "Check the marked fields and try again.",
       );
-      setMessage("Check the marked fields and try again.");
       return;
     }
 
-    setPending(true);
-    try {
-      const result = await updateImportMapping(importId, draft);
-      if (result.ok) {
-        setMessage("Mapping saved. Every row has been re-checked.");
-        setPending(false);
-        return;
-      }
-      setErrors(result.fieldErrors ?? {});
-      setMessage(result.error);
-      setPending(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setPending(false);
-    }
+    await write.submit({
+      call: () => updateImportMapping(importId, draft),
+      onSuccess: () => "Mapping saved. Every row has been re-checked.",
+    });
   }
 
   return (

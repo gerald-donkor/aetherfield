@@ -1,11 +1,9 @@
 "use client";
 
-import { useState } from "react";
-
 import { recalculate } from "../../activity/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The recalculate control — build step 10.
@@ -31,29 +29,17 @@ export function RecalculateControl({
   importId?: string | null;
   className?: string;
 }) {
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function run() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await recalculate(importId);
-      if (result.ok) {
-        setMessage(
-          importId
-            ? "Emissions recalculated for this import."
-            : "Emissions recalculated across your activity records.",
-        );
-      } else {
-        // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
-        setMessage(result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      call: () => recalculate(importId),
+      onSuccess: () =>
+        importId
+          ? "Emissions recalculated for this import."
+          : "Emissions recalculated across your activity records.",
+    });
   }
 
   return (

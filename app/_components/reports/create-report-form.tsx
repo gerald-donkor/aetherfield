@@ -11,7 +11,7 @@ import {
   type ReportField,
 } from "../../../lib/validation/reports";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The create-report leaf — build step 13.
@@ -31,40 +31,23 @@ import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
 
 export function CreateReportForm() {
   const [title, setTitle] = useState("");
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<
-    Partial<Record<ReportField, string>>
-  >({});
+  const write = useWrite<ReportField>({
+    fields: REPORT_FIELDS,
+    fieldsMessage: REPORT_ERRORS.fields,
+  });
+  const { pending, message, errors: fieldErrors } = write;
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setFieldErrors({});
 
-    const parsed = createReportSchema.safeParse({ title });
-    if (!parsed.success) {
-      setFieldErrors(fieldErrorsFrom(parsed.error, REPORT_FIELDS));
-      setMessage(REPORT_ERRORS.fields);
-      return;
-    }
-
-    setPending(true);
-    try {
-      const result = await createReport(parsed.data);
-      if (result.ok) {
+    await write.submit({
+      parse: () => createReportSchema.safeParse({ title }),
+      call: (data) => createReport(data),
+      onSuccess: () => {
         setTitle("");
-        setMessage("Report built. It appears below with its figures.");
-      } else {
-        // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
-        setFieldErrors(result.fieldErrors ?? {});
-        setMessage(result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return "Report built. It appears below with its figures.";
+      },
+    });
   }
 
   return (

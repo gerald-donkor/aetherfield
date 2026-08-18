@@ -5,7 +5,7 @@ import { useState } from "react";
 import { setAlertEmailPreference } from "../../account/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The alert-email off switch on `/account` — build step 14.
@@ -35,31 +35,20 @@ export function AlertPreferenceControl({
   className?: string;
 }) {
   const [enabled, setEnabled] = useState(emailAlerts);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function toggle() {
     const next = !enabled;
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await setAlertEmailPreference({ emailAlerts: next });
-      if (result.ok) {
+    await write.submit({
+      call: () => setAlertEmailPreference({ emailAlerts: next }),
+      onSuccess: () => {
         setEnabled(next);
-        setMessage(
-          next
-            ? "Alert email is on. You'll be told when a target's projection drifts past the threshold."
-            : "Alert email is off. Targets are still tracked, and the workspace still shows the reading.",
-        );
-      } else {
-        // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
-        setMessage(result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return next
+          ? "Alert email is on. You'll be told when a target's projection drifts past the threshold."
+          : "Alert email is off. Targets are still tracked, and the workspace still shows the reading.";
+      },
+    });
   }
 
   return (

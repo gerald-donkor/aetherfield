@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { confirmSubscription, unsubscribe } from "../../_actions/newsletter";
 import type { NewsletterTokenState } from "../../../lib/validation/newsletter";
 import { Button, ButtonLink } from "../primitives";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The one button on `/newsletter/confirm` and `/newsletter/unsubscribe`.
@@ -94,11 +94,11 @@ export function NewsletterTokenAction({
   token?: string;
 }) {
   const statusRef = useRef<HTMLParagraphElement>(null);
-  const [pending, setPending] = useState(false);
+  const write = useWrite();
+  const { pending, message: error } = write;
   const [state, setState] = useState<NewsletterTokenState | null>(
     token ? null : "missing",
   );
-  const [error, setError] = useState("");
 
   const copy = COPY[kind];
   const announcement = error || (state ? copy.states[state] : "");
@@ -109,20 +109,13 @@ export function NewsletterTokenAction({
 
   async function run() {
     if (!token) return;
-    setError("");
-    setPending(true);
-    try {
-      const result =
-        kind === "confirm"
-          ? await confirmSubscription(token)
-          : await unsubscribe(token);
-      if (result.ok) setState(result.state);
-      else setError(result.error);
-    } catch {
-      setError(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      call: () =>
+        kind === "confirm" ? confirmSubscription(token) : unsubscribe(token),
+      onSuccess: (result) => {
+        setState(result.state);
+      },
+    });
   }
 
   /* Any `state` at all is a final classification of this token — expired and

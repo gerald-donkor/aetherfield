@@ -13,7 +13,7 @@ import {
 } from "../../../lib/validation/activity";
 import { Button, FileField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The activity-file upload leaf — build step 9.
@@ -46,9 +46,9 @@ export function ActivityUploadForm({ className = "" }: { className?: string }) {
   const router = useRouter();
 
   const [file, setFile] = useState<File | null>(null);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [fieldError, setFieldError] = useState("");
+  const write = useWrite<"file">();
+  const { pending, message, errors } = write;
+  const fieldError = errors.file ?? "";
 
   /* The outcome takes focus whenever it settles, so a screen reader lands on
      it rather than being told about it from wherever the caret was
@@ -56,44 +56,38 @@ export function ActivityUploadForm({ className = "" }: { className?: string }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setFieldError("");
 
     if (!file || file.size === 0) {
-      setFieldError(CSV_ERRORS.missing);
-      setMessage("Check the marked field and try again.");
+      write.invalid(
+        { file: CSV_ERRORS.missing },
+        "Check the marked field and try again.",
+      );
       return;
     }
     if (file.size > CSV_MAX_BYTES) {
-      setFieldError(CSV_ERRORS.size);
-      setMessage("Check the marked field and try again.");
+      write.invalid(
+        { file: CSV_ERRORS.size },
+        "Check the marked field and try again.",
+      );
       return;
     }
 
     const body = new FormData();
     body.set("file", file);
 
-    setPending(true);
-    try {
-      const result = await stageImport(body);
-      if (result.ok) {
+    await write.submit({
+      call: () => stageImport(body),
+      onSuccess: (result) => {
         /* Kept pending across the navigation: the form is about to be
            replaced, and re-enabling the button first invites a second upload
            of the same file. */
-        setMessage("Import staged. Opening it for review.");
         router.push(`/activity/${result.importId}`);
-        return;
-      }
-
-      // An honest failure is a visible state, never a silent success
-      // (AGENTS.md 8.2 rule 4).
-      setFieldError(result.fieldErrors?.file ?? "");
-      setMessage(result.error);
-      setPending(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setPending(false);
-    }
+        return {
+          message: "Import staged. Opening it for review.",
+          hold: true as const,
+        };
+      },
+    });
   }
 
   return (
@@ -111,7 +105,7 @@ export function ActivityUploadForm({ className = "" }: { className?: string }) {
         accept={CSV_ACCEPT_ATTR}
         onChange={(event) => {
           setFile(event.target.files?.[0] ?? null);
-          setFieldError("");
+          write.setErrors({});
         }}
         error={fieldError || undefined}
         disabled={pending}

@@ -24,7 +24,7 @@ import {
   TextareaField,
 } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Imports a CSV of customer-supplied factor rows — prompt 82.
@@ -82,12 +82,9 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
     sets.length > 0 ? sets[0].id : "new",
   );
   const [file, setFile] = useState<File | null>(null);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite<FactorImportField>();
+  const { pending, message, errors } = write;
   const [rowErrors, setRowErrors] = useState<FactorImportRowError[]>([]);
-  const [errors, setErrors] = useState<
-    Partial<Record<FactorImportField, string>>
-  >({});
 
   const creatingSet = setChoice === "new";
   const chosenSet = creatingSet
@@ -100,18 +97,14 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
     setRowErrors([]);
-    setErrors({});
 
     if (!file || file.size === 0) {
-      setErrors({ file: FACTOR_IMPORT_ERRORS.file });
-      setMessage(FACTOR_IMPORT_ERRORS.invalid);
+      write.invalid({ file: FACTOR_IMPORT_ERRORS.file }, FACTOR_IMPORT_ERRORS.invalid);
       return;
     }
     if (file.size > CSV_MAX_BYTES) {
-      setErrors({ file: CSV_ERRORS.size });
-      setMessage(FACTOR_IMPORT_ERRORS.invalid);
+      write.invalid({ file: CSV_ERRORS.size }, FACTOR_IMPORT_ERRORS.invalid);
       return;
     }
 
@@ -120,33 +113,28 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
     body.set("setId", creatingSet ? "" : setChoice);
     body.set("file", file);
 
-    setPending(true);
-    try {
-      const result = await importCustomFactors(body);
-      if (result.ok) {
+    await write.submit({
+      // An honest failure is a visible state, never a silent success
+      // (AGENTS.md 8.2 rule 4). `rowErrors` is outside the hook's own state,
+      // so it is set here alongside the result the hook's own error branch
+      // still reads.
+      call: async () => {
+        const result = await importCustomFactors(body);
+        if (!result.ok) setRowErrors(result.rowErrors ?? []);
+        return result;
+      },
+      onSuccess: (result) => {
         formRef.current?.reset();
         setFile(null);
-        setMessage(
-          `Imported ${result.imported.toLocaleString("en-GB")} ${
-            result.imported === 1 ? "row" : "rows"
-          }${
-            result.skipped > 0
-              ? `, and skipped ${result.skipped.toLocaleString("en-GB")} the set already held`
-              : ""
-          }. New rows are available in factor mapping and change no figure until a category and unit is mapped to them.`,
-        );
-      } else {
-        // An honest failure is a visible state, never a silent success
-        // (AGENTS.md 8.2 rule 4).
-        setErrors(result.fieldErrors ?? {});
-        setRowErrors(result.rowErrors ?? []);
-        setMessage(result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return `Imported ${result.imported.toLocaleString("en-GB")} ${
+          result.imported === 1 ? "row" : "rows"
+        }${
+          result.skipped > 0
+            ? `, and skipped ${result.skipped.toLocaleString("en-GB")} the set already held`
+            : ""
+        }. New rows are available in factor mapping and change no figure until a category and unit is mapped to them.`;
+      },
+    });
   }
 
   return (
@@ -313,7 +301,7 @@ export function FactorImportForm({ sets }: { sets: FormFactorSet[] }) {
             accept={CSV_ACCEPT_ATTR}
             onChange={(event) => {
               setFile(event.target.files?.[0] ?? null);
-              setErrors((current) => ({ ...current, file: undefined }));
+              write.setErrors((current) => ({ ...current, file: undefined }));
             }}
             error={errors.file}
             disabled={pending}

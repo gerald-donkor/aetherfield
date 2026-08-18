@@ -14,7 +14,7 @@ import {
 import type { Scope2MarketBasis } from "../../../lib/validation/emissions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 type SearchFactor = {
   id: string;
@@ -73,51 +73,42 @@ export function FactorPicker({
   children: ReactNode;
 }) {
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<
-    Partial<Record<FactorMappingField, string>>
-  >({});
+  const write = useWrite<FactorMappingField>({
+    fields: FACTOR_MAPPING_FIELDS,
+    fieldsMessage: FACTOR_MAPPING_ERRORS.invalid,
+  });
+  const { message, errors } = write;
 
   async function choose(factorId: string) {
-    setMessage("");
-    setErrors({});
-
-    const input = {
-      category,
-      unit,
-      factorId,
-      scope2Method: lane,
-      scope2MarketBasis: lane === "market_based" ? basis : null,
-    };
-    const checked = factorMappingSchema.safeParse(input);
-    if (!checked.success) {
-      setMessage(FACTOR_MAPPING_ERRORS.invalid);
-      setErrors(fieldErrorsFrom(checked.error, FACTOR_MAPPING_FIELDS));
-      return;
-    }
-
-    setPendingId(factorId);
-    try {
-      const result = await setFactorMapping(checked.data);
-      if (result.ok) {
-        setMessage(
-          lane !== "market_based"
-            ? "Factor saved. The organisation's figures have been recalculated."
-            : basis === "grid_average"
-              ? "Grid-average fallback saved. This pair's market-based figure is a grid average, recorded as the hierarchy's rung 5 and labelled as a fallback wherever it is shown. The organisation's figures have been recalculated on both lanes."
-              : "Market-based rate saved. The organisation's figures have been recalculated on both lanes.",
-        );
-        setPendingId(null);
-        return;
-      }
-
-      setErrors(result.fieldErrors ?? {});
-      setMessage(result.error);
-      setPendingId(null);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setPendingId(null);
-    }
+    await write.submit({
+      parse: () =>
+        factorMappingSchema.safeParse({
+          category,
+          unit,
+          factorId,
+          scope2Method: lane,
+          scope2MarketBasis: lane === "market_based" ? basis : null,
+        }),
+      // `pendingId` — not the hook's own `pending` — is what this component
+      // renders, because only one row's button may show "Saving..." at a
+      // time. Set inside `call` rather than before `submit()` so a parse
+      // failure never touches it, matching the original: no row-level pending
+      // state until the request itself is made.
+      call: async (data) => {
+        setPendingId(factorId);
+        try {
+          return await setFactorMapping(data);
+        } finally {
+          setPendingId(null);
+        }
+      },
+      onSuccess: () =>
+        lane !== "market_based"
+          ? "Factor saved. The organisation's figures have been recalculated."
+          : basis === "grid_average"
+            ? "Grid-average fallback saved. This pair's market-based figure is a grid average, recorded as the hierarchy's rung 5 and labelled as a fallback wherever it is shown. The organisation's figures have been recalculated on both lanes."
+            : "Market-based rate saved. The organisation's figures have been recalculated on both lanes.",
+    });
   }
 
   return (

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { retireFactorSet } from "../../activity/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Retires one customer-supplied factor set — prompt 84.
@@ -34,14 +34,14 @@ export function RetireSetButton({
   label: string;
 }) {
   const [armed, setArmed] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite<"setId">();
+  const { pending, message } = write;
 
   async function click() {
     if (!armed) {
       setArmed(true);
       /* Announced, not only styled: the arm state is the warning. */
-      setMessage(
+      write.setMessage(
         `Retiring ${label} takes its ${factorCount.toLocaleString("en-GB")} active ${
           factorCount === 1 ? "row" : "rows"
         } out of use. Any mapped pair using one is unmapped at the next recalculation, and reports already built keep the evidence they were built with. Select confirm to retire it.`,
@@ -49,32 +49,32 @@ export function RetireSetButton({
       return;
     }
 
-    setPending(true);
-    try {
-      const result = await retireFactorSet({ setId });
-      if (result.ok) {
+    await write.submit({
+      /* `retireFactorSet`'s generic `error` ("invalid") is not what this
+         control has always shown — the specific `fieldErrors.setId` is, when
+         one exists. Corrected here rather than in `useWrite`'s own failure
+         branch, which has no site-specific fallback to apply. */
+      call: async () => {
+        const result = await retireFactorSet({ setId });
+        return result.ok
+          ? result
+          : { ...result, error: result.fieldErrors?.setId ?? result.error };
+      },
+      onSuccess: (result) => {
         setArmed(false);
-        setMessage(
-          result.mappingCount > 0
-            ? `Set retired. Its ${result.factorCount.toLocaleString("en-GB")} ${
-                result.factorCount === 1 ? "row is" : "rows are"
-              } no longer selectable, and ${result.mappingCount.toLocaleString(
-                "en-GB",
-              )} mapped ${
-                result.mappingCount === 1 ? "pair is" : "pairs are"
-              } now unmapped and outside the total until a factor is chosen again.`
-            : `Set retired. Its ${result.factorCount.toLocaleString("en-GB")} ${
-                result.factorCount === 1 ? "row is" : "rows are"
-              } no longer selectable. No mapped pairs were using them.`,
-        );
-      } else {
-        setMessage(result.fieldErrors?.setId ?? result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return result.mappingCount > 0
+          ? `Set retired. Its ${result.factorCount.toLocaleString("en-GB")} ${
+              result.factorCount === 1 ? "row is" : "rows are"
+            } no longer selectable, and ${result.mappingCount.toLocaleString(
+              "en-GB",
+            )} mapped ${
+              result.mappingCount === 1 ? "pair is" : "pairs are"
+            } now unmapped and outside the total until a factor is chosen again.`
+          : `Set retired. Its ${result.factorCount.toLocaleString("en-GB")} ${
+              result.factorCount === 1 ? "row is" : "rows are"
+            } no longer selectable. No mapped pairs were using them.`;
+      },
+    });
   }
 
   return (
@@ -96,7 +96,7 @@ export function RetireSetButton({
           className="mt-3 ml-3"
           onClick={() => {
             setArmed(false);
-            setMessage("Retirement cancelled.");
+            write.setMessage("Retirement cancelled.");
           }}
         >
           Cancel

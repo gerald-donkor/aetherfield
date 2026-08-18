@@ -23,7 +23,7 @@ import {
 } from "../../../lib/validation/emissions";
 import { Button, Field, SelectField, TextareaField } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Adds one customer-supplied factor row — prompt 66, corrected by prompt 67.
@@ -104,11 +104,11 @@ export function CustomFactorForm({
   const [biogenic, setBiogenic] = useState(false);
   /* "" is "restates nothing", which is the default and the common case. */
   const [supersedes, setSupersedes] = useState("");
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<
-    Partial<Record<CustomFactorField, string>>
-  >({});
+  const write = useWrite<CustomFactorField>({
+    fields: CUSTOM_FACTOR_FIELDS,
+    fieldsMessage: CUSTOM_FACTOR_ERRORS.invalid,
+  });
+  const { pending, message, errors } = write;
 
   const creatingSet = setChoice === "new";
   const chosenSet = creatingSet
@@ -117,8 +117,6 @@ export function CustomFactorForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
-    setErrors({});
 
     const body = new FormData(event.currentTarget);
     const input = {
@@ -173,34 +171,18 @@ export function CustomFactorForm({
       },
     };
 
-    const checked = createCustomFactorSchema.safeParse(input);
-    if (!checked.success) {
-      setErrors(fieldErrorsFrom(checked.error, CUSTOM_FACTOR_FIELDS));
-      setMessage(CUSTOM_FACTOR_ERRORS.invalid);
-      return;
-    }
-
-    setPending(true);
-    try {
-      const result = await createCustomFactor(checked.data);
-      if (result.ok) {
+    await write.submit({
+      parse: () => createCustomFactorSchema.safeParse(input),
+      call: (data) => createCustomFactor(data),
+      onSuccess: () => {
         formRef.current?.reset();
         setScope("scope_1");
         setGas("co2e");
         setBiogenic(false);
         setSupersedes("");
-        setMessage(
-          "Customer-supplied factor saved. It is available in factor mapping.",
-        );
-      } else {
-        setErrors(result.fieldErrors ?? {});
-        setMessage(result.error);
-      }
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return "Customer-supplied factor saved. It is available in factor mapping.";
+      },
+    });
   }
 
   return (

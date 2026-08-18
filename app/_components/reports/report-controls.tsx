@@ -1,12 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 import { deleteReport, generateNarrative } from "../../reports/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The two report controls — build step 13.
@@ -36,18 +35,17 @@ function ReportAction({
   className?: string;
 }) {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function activate() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await run();
-      setMessage(result.ok ? success : result.error);
+    await write.submit({
+      call: run,
+      onSuccess: () => success,
       /* Refresh on both outcomes: a rejected or failed draft changes the
          report's narrative status, and the page must show that rather than the
-         state it rendered with.
+         state it rendered with. Not on a network-error catch — a failed round
+         trip changed nothing server-side to refresh from.
 
          **Kept at prompt 109, which removed ten of these as redundant.** This
          one is not, and `deleteReport` is why: it revalidates `/reports` and
@@ -58,12 +56,8 @@ function ReportAction({
          with `generateNarrative`, whose own `revalidatePath` *does* cover this
          page, so for that action the call is redundant; one component serves
          both and the deleting one decides. */
-      router.refresh();
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+      onSettled: () => router.refresh(),
+    });
   }
 
   return (

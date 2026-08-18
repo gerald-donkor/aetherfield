@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../_components/primitives";
+import { useWrite } from "../_components/use-write";
 import type { SubmissionKind } from "../../lib/validation/submissions";
 import { changeStaffRole, removeSubmission } from "./actions";
-import { NETWORK_ERROR } from "../../lib/validation/result";
 
 function ResultMessage({ message }: { message: string }) {
   const ref = useRef<HTMLParagraphElement>(null);
@@ -36,29 +36,17 @@ export function StaffRoleControl({
   displayName: string;
   isStaff: boolean;
 }) {
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function submit() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await changeStaffRole({
-        userId,
-        role: isStaff ? "none" : "staff",
-      });
-      setMessage(
-        result.ok
-          ? isStaff
-            ? `Staff access revoked for ${displayName}.`
-            : `Staff access granted to ${displayName}.`
-          : result.error,
-      );
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      call: () => changeStaffRole({ userId, role: isStaff ? "none" : "staff" }),
+      onSuccess: () =>
+        isStaff
+          ? `Staff access revoked for ${displayName}.`
+          : `Staff access granted to ${displayName}.`,
+    });
   }
 
   return (
@@ -87,22 +75,15 @@ export function RemoveSubmissionControl({
   label: string;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function remove() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await removeSubmission({ kind, id });
-      setMessage(result.ok ? `${label} removed.` : result.error);
-      if (!result.ok) setConfirming(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setConfirming(false);
-    } finally {
-      setPending(false);
-    }
+    const ok = await write.submit({
+      call: () => removeSubmission({ kind, id }),
+      onSuccess: () => `${label} removed.`,
+    });
+    if (!ok) setConfirming(false);
   }
 
   return (
@@ -132,7 +113,7 @@ export function RemoveSubmissionControl({
           size="compact"
           bullet={false}
           onClick={() => {
-            setMessage("");
+            write.setMessage("");
             setConfirming(true);
           }}
         >

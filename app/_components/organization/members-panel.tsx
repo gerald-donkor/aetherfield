@@ -9,14 +9,14 @@ import {
   removeMember,
 } from "../../account/actions";
 import {
-  type InviteMemberFieldErrors,
   inviteMemberSchema,
   NO_INVITE_FIELD_ERRORS,
   ORGANIZATION_ROLES,
+  type InviteMemberField,
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The organisation's members surface — prompt 63, closing what build step 8
@@ -75,24 +75,15 @@ function RemoveMemberControl({
   displayName: string;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function remove() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await removeMember({ memberId });
-      setMessage(
-        result.ok ? `${displayName} no longer has access.` : result.error,
-      );
-      if (!result.ok) setConfirming(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setConfirming(false);
-    } finally {
-      setPending(false);
-    }
+    const ok = await write.submit({
+      call: () => removeMember({ memberId }),
+      onSuccess: () => `${displayName} no longer has access.`,
+    });
+    if (!ok) setConfirming(false);
   }
 
   return (
@@ -122,7 +113,7 @@ function RemoveMemberControl({
           size="compact"
           bullet={false}
           onClick={() => {
-            setMessage("");
+            write.setMessage("");
             setConfirming(true);
           }}
         >
@@ -135,20 +126,14 @@ function RemoveMemberControl({
 }
 
 function CancelInvitationControl({ invitationId }: { invitationId: string }) {
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function cancel() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await cancelInvitation({ invitationId });
-      setMessage(result.ok ? "Invitation withdrawn." : result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      call: () => cancelInvitation({ invitationId }),
+      onSuccess: () => "Invitation withdrawn.",
+    });
   }
 
   return (
@@ -169,26 +154,16 @@ function LeaveControl({
   viewerIsOwner: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function leave() {
-    setPending(true);
-    setMessage("");
-    try {
-      const result = await leaveOrganization();
-      setMessage(
-        result.ok
-          ? `You have left ${organizationName}. It no longer appears on your account.`
-          : result.error,
-      );
-      if (!result.ok) setConfirming(false);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setConfirming(false);
-    } finally {
-      setPending(false);
-    }
+    const ok = await write.submit({
+      call: () => leaveOrganization(),
+      onSuccess: () =>
+        `You have left ${organizationName}. It no longer appears on your account.`,
+    });
+    if (!ok) setConfirming(false);
   }
 
   return (
@@ -228,7 +203,7 @@ function LeaveControl({
           bullet={false}
           className="mt-4"
           onClick={() => {
-            setMessage("");
+            write.setMessage("");
             setConfirming(true);
           }}
         >
@@ -244,43 +219,32 @@ function InviteForm() {
   const [email, setEmail] = useState("");
   const [role, setRole] =
     useState<(typeof ORGANIZATION_ROLES)[number]>("member");
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<InviteMemberFieldErrors>(
-    NO_INVITE_FIELD_ERRORS,
-  );
+  const write = useWrite<InviteMemberField>({
+    fields: NO_INVITE_FIELD_ERRORS,
+    fieldsMessage: "Check the marked fields and try again.",
+  });
+  const { pending, message, errors } = write;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
 
-    const parsed = inviteMemberSchema.safeParse({ email, role });
-    if (!parsed.success) {
-      setErrors({
-        ...NO_INVITE_FIELD_ERRORS,
-        ...fieldErrorsFrom(parsed.error, NO_INVITE_FIELD_ERRORS),
-      });
-      setMessage("Check the marked fields and try again.");
-      return;
-    }
+    /* `inviteMember` resolves `{ ok: true }` with no `email` — the sentence
+       reads the parsed input, captured here since `onSuccess` sees only the
+       result. */
+    let invitedEmail = "";
 
-    setErrors(NO_INVITE_FIELD_ERRORS);
-    setPending(true);
-    try {
-      const result = await inviteMember(parsed.data);
-      if (result.ok) {
-        setMessage(`Invitation sent to ${parsed.data.email}.`);
+    await write.submit({
+      parse: () => inviteMemberSchema.safeParse({ email, role }),
+      call: (data) => {
+        invitedEmail = data.email;
+        return inviteMember(data);
+      },
+      onSuccess: () => {
         setEmail("");
         setRole("member");
-        return;
-      }
-      setErrors({ ...NO_INVITE_FIELD_ERRORS, ...result.fieldErrors });
-      setMessage(result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return `Invitation sent to ${invitedEmail}.`;
+      },
+    });
   }
 
   return (

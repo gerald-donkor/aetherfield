@@ -5,13 +5,13 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { createOrganization } from "../../account/actions";
 import {
   createOrganizationSchema,
-  type CreateOrganizationFieldErrors,
   NO_ORGANIZATION_FIELD_ERRORS,
   slugifyOrganizationName,
+  type CreateOrganizationField,
 } from "../../../lib/validation/organization";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The create-organisation client leaf — build step 8, and a copy of
@@ -53,12 +53,12 @@ export function CreateOrganizationForm({
   /* Once the person edits the slug it is theirs, and the name stops writing
      over it. Derived-until-touched, not derived-always. */
   const [slugTouched, setSlugTouched] = useState(false);
-  const [pending, setPending] = useState(false);
   const [done, setDone] = useState<{ name: string; slug: string } | null>(null);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<CreateOrganizationFieldErrors>(
-    NO_ORGANIZATION_FIELD_ERRORS,
-  );
+  const write = useWrite<CreateOrganizationField>({
+    fields: NO_ORGANIZATION_FIELD_ERRORS,
+    fieldsMessage: "Check the marked fields and try again.",
+  });
+  const { pending, message, errors } = write;
 
   /* The outcome takes focus whenever it settles, so a screen reader lands on it
      rather than being told about it from wherever the caret was
@@ -84,37 +84,23 @@ export function CreateOrganizationForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
 
-    const parsed = createOrganizationSchema.safeParse({ name, slug });
-    if (!parsed.success) {
-      setErrors({
-        ...NO_ORGANIZATION_FIELD_ERRORS,
-        ...fieldErrorsFrom(parsed.error, NO_ORGANIZATION_FIELD_ERRORS),
-      });
-      setMessage("Check the marked fields and try again.");
-      return;
-    }
+    /* `onSuccess` sees only the action's result, not the parsed input, so the
+       parsed data (which the schema may have normalised) is captured here for
+       it to read — `setDone` renders exactly what was submitted, as before. */
+    let parsedData: { name: string; slug: string } | undefined;
 
-    setErrors(NO_ORGANIZATION_FIELD_ERRORS);
-    setPending(true);
-    try {
-      const result = await createOrganization(parsed.data);
-      if (result.ok) {
-        setDone(parsed.data);
-        setMessage("Organisation created.");
-        return;
-      }
-
-      // An honest failure is a visible state, never a silent success
-      // (AGENTS.md 8.2 rule 4).
-      setErrors({ ...NO_ORGANIZATION_FIELD_ERRORS, ...result.fieldErrors });
-      setMessage(result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+    await write.submit({
+      parse: () => createOrganizationSchema.safeParse({ name, slug }),
+      call: (data) => {
+        parsedData = data;
+        return createOrganization(data);
+      },
+      onSuccess: () => {
+        setDone(parsedData!);
+        return "Organisation created.";
+      },
+    });
   }
 
   if (done) {

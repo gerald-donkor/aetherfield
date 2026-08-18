@@ -5,7 +5,7 @@ import { useState } from "react";
 import { commitImport, discardImport } from "../../activity/actions";
 import { Button } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * Commit and discard — build step 9.
@@ -43,37 +43,20 @@ export function ActivityImportControls({
   const [confirming, setConfirming] = useState<"commit" | "discard" | null>(
     null,
   );
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const write = useWrite();
+  const { pending, message } = write;
 
   async function run(kind: "commit" | "discard") {
-    setPending(true);
-    setMessage("");
-    try {
-      const result =
+    await write.submit({
+      call: () => (kind === "commit" ? commitImport(importId) : discardImport(importId)),
+      onSuccess: () =>
         kind === "commit"
-          ? await commitImport(importId)
-          : await discardImport(importId);
-
-      if (result.ok) {
-        setMessage(
-          kind === "commit"
-            ? `${validRowCount.toLocaleString("en-GB")} ${
-                validRowCount === 1 ? "row" : "rows"
-              } committed to your activity records.`
-            : "Import discarded. The uploaded file has been deleted.",
-        );
-      } else {
-        // An honest failure is a visible state (AGENTS.md 8.2 rule 4).
-        setMessage(result.error);
-      }
-      setConfirming(null);
-    } catch {
-      setMessage(NETWORK_ERROR);
-      setConfirming(null);
-    } finally {
-      setPending(false);
-    }
+          ? `${validRowCount.toLocaleString("en-GB")} ${
+              validRowCount === 1 ? "row" : "rows"
+            } committed to your activity records.`
+          : "Import discarded. The uploaded file has been deleted.",
+    });
+    setConfirming(null);
   }
 
   return (
@@ -82,7 +65,7 @@ export function ActivityImportControls({
         <div className="flex flex-wrap items-center gap-3">
           <Button
             onClick={() => {
-              setMessage("");
+              write.setMessage("");
               setConfirming("commit");
             }}
             disabled={validRowCount === 0}
@@ -94,7 +77,7 @@ export function ActivityImportControls({
             size="secondary"
             bullet={false}
             onClick={() => {
-              setMessage("");
+              write.setMessage("");
               setConfirming("discard");
             }}
           >

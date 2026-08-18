@@ -235,7 +235,7 @@ table below is appended to as prompts land, after the fact.
 | candidate | prompt | landed |
 | --- | --- | --- |
 | 1 · map a `ZodError` once | 121 | 18 Aug 2026 |
-| 2 · the submit lifecycle | — | — |
+| 2 · the submit lifecycle | 123 (workspace half only — the three marketing dialogs are prompt 124's) | 18 Aug 2026 |
 | 3 · one tenant gate | 122 | 18 Aug 2026 |
 | 4 · cut `app/activity/actions.ts` | — | — |
 | 5 · `lib/rate-limit/` policies | — | — |
@@ -530,3 +530,215 @@ warning on `/`, `/journal` and `/careers` does not apply to it.
 module that reads a session and Redis is exactly what that scope exists to
 prevent. Equivalence here is established by inspection — the table above — and
 by the E2E matrix. Nothing proved it by test.
+
+---
+
+## Prompt 123 — the record
+
+`app/_components/use-write.ts` — the six-stage submit lifecycle, collapsed from
+26 hand-rolled copies across 21 files into one hook. **This is the workspace
+half of candidate 2 only** — the three marketing dialogs
+(`demo-request-dialog.tsx`, `subscribe-dialog.tsx`, `apply-dialog.tsx`) are
+prompt 124's, per the review's own scope warning quoted above. Candidate 2 is
+not complete until that prompt lands.
+
+### The measured inventory, corrected
+
+The review's description of this candidate said "5 shapes" for the parse stage
+and "4 finally shapes." This session's count, from reading all 24 files that
+imported `NETWORK_ERROR`:
+
+- **24 files, 29 `catch` sites** — a file is not one submit path.
+  `members-panel.tsx` has 4, `submissions/action-controls.tsx` and
+  `delete-organization-panel.tsx` have 2–3 apiece, `report-controls.tsx` has 2
+  components sharing one shape.
+- Removing the three marketing dialogs (1 site each) left this prompt's scope:
+  **21 files, 26 submit paths** — confirmed again mechanically at
+  implementation time by counting `write.submit(` call sites, which also
+  came to 26 across 21 files.
+- **4 files hand-cleared `pending` on every branch** instead of using
+  `try/finally`: `create-target-form.tsx`, `mapping-form.tsx`,
+  `upload-form.tsx`, `factor-picker.tsx` (the review missed the last one —
+  `pendingId` there is per-row, not a boolean, and every branch cleared it by
+  hand for that reason).
+- The singular/plural "Check the marked field(s) and try again." split, and
+  every success sentence, were carried over **verbatim** — none were
+  normalised.
+
+### The interface decisions, and how each fared
+
+1. **The review's literal `useWrite(schema, action, FIELDS)` sketch was not
+   implemented.** Three things ruled it out, each confirmed by a real site:
+   `updateImportMapping(importId, draft)` and `stageImport(FormData)` show the
+   call signature is not uniform; `upload-form.tsx` and `mapping-form.tsx`
+   hand-check required fields with no schema at all; `stageImport`'s
+   `onSuccess` reads `result.importId` off the action's own result. `call` is a
+   thunk instead — the leaf closes over whatever its own action needs, and
+   `parse` is optional.
+2. **`onSuccess`'s return value carries the settle stage**, and it is the one
+   real addition to the review's shape: a plain `string` is the announced
+   sentence (the common case, all but two of the 26 paths); `{ message, hold:
+   true }` is `upload-form.tsx`'s one site, which deliberately holds `pending`
+   across a `router.push`; `void` is `token-action.tsx`'s, whose success drives
+   a separate `state` value rather than an announced sentence.
+3. **`onSettled` is the second addition**, found adopting `report-controls.tsx`:
+   `ReportAction` calls `router.refresh()` on both a successful and a refused
+   draft (either changes the report's narrative status) but not on a
+   network-error catch (nothing server-side changed to refresh from).
+   `submit()`'s own boolean return could not express "ran, whichever way" — only
+   "succeeded."
+4. **`submit` resolves to a `boolean`, not `void`.** Four sites collapse an
+   inline confirm state only on failure
+   (`action-controls.tsx`'s `RemoveSubmissionControl`, `retire-target-control.tsx`,
+   `members-panel.tsx`'s `RemoveMemberControl` and `LeaveControl`) — the review
+   never named a way to observe that, and a boolean is the whole surface those
+   four sites need.
+5. **`invalid(fieldErrors, message)` is the non-Zod courtesy check.**
+   `upload-form.tsx` and `mapping-form.tsx` hand-check file presence/size and
+   required columns respectively; both produce field errors and a message
+   without a `ZodError` ever existing, so they call `invalid()` directly rather
+   than going through `submit`'s `parse` stage.
+6. **`setMessage` and `setErrors` are exported**, against the prompt's own
+   default of not exporting speculatively — justified by two recurring shapes,
+   not one: arming/cancelling a confirm step clears or sets `message` outside
+   any submit (six sites), and `create-target-form.tsx` / `factor-import-form.tsx`
+   clear one field's error functionally, which `invalid`'s whole-object
+   replacement cannot express.
+7. **The `parse` type is structural** (`{ issues: readonly { path, message }[]
+   }`), not `import type { ZodError }` — the same argument
+   `lib/validation/result.ts` makes for `fieldErrorsFrom`: a parameter that
+   cannot see an issue's `input` cannot leak a submitted value. Verified against
+   the installed Zod that `.safeParse()` returns exactly this shape on `error`.
+
+### The one rule read and refused, and why it survived contact
+
+`rendering-usetransition-loading` (`vercel-react-best-practices`) argues for
+`useTransition`'s `isPending` over a manual flag. `useState` was kept, and
+adopting 26 sites confirmed both of the prompt's reasons were real, not
+theoretical: `upload-form.tsx`'s held-pending case genuinely cannot be
+expressed with `isPending`, which React owns; and a transition would have made
+every one of the 26 sites' surrounding updates non-urgent, a behavioural change
+the equivalence rule forbids. No render timing was measured — this is a
+judgement, not a measurement (§12 rule 4).
+
+### Divergences found and closed at adoption time
+
+Three sites could not adopt `submit`'s own failure branch unmodified without
+changing what was announced, because they read the failure message from
+`fieldErrors` rather than `error`:
+
+| site | original fallback | how it is expressed now |
+| --- | --- | --- |
+| `retire-set-button.tsx` | `result.fieldErrors?.setId ?? result.error` | `call` wraps `retireFactorSet` and substitutes `error` before returning, so `submit`'s own branch reads the corrected text |
+| `retire-factor-button.tsx` | `result.fieldErrors?.factorId ?? result.error` | same wrapper pattern, on `retireCustomFactor` |
+| `factor-set-form.tsx` | `result.fieldErrors?.setId ?? result.error` | same wrapper pattern, on `editFactorSet` |
+
+Two sites read the *parsed input*, not the action's `{ ok: true }` result, in
+their success sentence — `onSuccess` only sees the result, so the parsed value
+is captured by the `call` closure and read back in `onSuccess`:
+
+| site | what is read | why |
+| --- | --- | --- |
+| `create-organization-form.tsx` | `parsedData` (name, slug) | `createOrganization` resolves `{ ok: true }` with no payload; the settled panel renders what was submitted |
+| `members-panel.tsx`'s `InviteForm` | `invitedEmail` | `inviteMember` resolves `{ ok: true }` with no `email`; the original read `parsed.data.email` |
+
+One site's `pending` is per-row, not a single boolean — `factor-picker.tsx`'s
+`FactorPicker` keeps its own `pendingId` state, set and cleared inside `call`'s
+own `try/finally` (so a parse failure never touches it, matching the original:
+no row-level pending state exists until the request is actually made). The
+hook's own `pending` is unused there.
+
+One site's `pending` is a union of *which* action is in flight, not a boolean —
+`invitation-response.tsx`'s `InvitationResponse` keeps its own
+`"accept" | "decline" | null` state, set inside `call` for the same reason.
+
+`delete-organization-panel.tsx`'s `DeleteForm` runs its parse manually rather
+than through `submit`'s `parse` stage, because its fallback message
+(`"Type the identifier to confirm."`) and its second check (the typed
+identifier against the organisation's slug) have no generic `submit` branch to
+live in; both call `invalid()` directly, and `submit()` is used only for the
+actual deletion request.
+
+### Equivalence, per site
+
+Read off the before and after, all 21 files. **Every row is identical in
+message wording, field-error keys, reset behaviour and `finally` shape**,
+except the seven rows above, which are recorded as arguable rather than
+normalised.
+
+| file | leaves | fields | notes |
+| --- | --- | --- | --- |
+| `app/submissions/action-controls.tsx` | `StaffRoleControl`, `RemoveSubmissionControl` | none | `ok` boolean collapses confirm on failure |
+| `app/_components/targets/retire-target-control.tsx` | `RetireTargetControl` | none | `ok` boolean collapses confirm |
+| `app/_components/activity/import-controls.tsx` | `ActivityImportControls` | none | `confirming` cleared unconditionally, as before |
+| `app/_components/activity/recalculate-control.tsx` | `RecalculateControl` | none | — |
+| `app/_components/activity/retire-set-button.tsx` | `RetireSetButton` | `setId` | `call` wraps the fallback message (above) |
+| `app/_components/activity/retire-factor-button.tsx` | `RetireFactorButton` | `factorId` | `call` wraps the fallback message (above) |
+| `app/_components/reports/report-controls.tsx` | `ReportAction` (2 callers) | none | `onSettled` runs `router.refresh()` |
+| `app/_components/activity/factor-set-form.tsx` | `FactorSetForm` | `EditFactorSetField` | `call` wraps the fallback message (above) |
+| `app/_components/activity/custom-factor-form.tsx` | `CustomFactorForm` | `CustomFactorField` | standard `parse` + `call` |
+| `app/_components/targets/create-target-form.tsx` | `CreateTargetForm` | `TargetField` | `write.setErrors` functional update on "Use calculated figure" |
+| `app/_components/activity/mapping-form.tsx` | `ActivityMappingForm` | `ActivityField` | `invalid()` for the required-column check |
+| `app/_components/activity/upload-form.tsx` | `ActivityUploadForm` | `"file"` | `invalid()` ×2; `{ hold: true }` on success |
+| `app/_components/activity/factor-import-form.tsx` | `FactorImportForm` | `FactorImportField` | `invalid()` ×2; `rowErrors` set inside `call` alongside the result |
+| `app/_components/activity/factor-picker.tsx` | `FactorPicker` | `FactorMappingField` | per-row `pendingId`, set/cleared inside `call` (above) |
+| `app/_components/newsletter/token-action.tsx` | `NewsletterTokenAction` | none | `onSuccess` returns `void`; drives local `state` |
+| `app/_components/reports/create-report-form.tsx` | `CreateReportForm` | `ReportField` | standard `parse` + `call` |
+| `app/_components/organization/create-organization-form.tsx` | `CreateOrganizationForm` | `CreateOrganizationField` | captured `parsedData` closure (above) |
+| `app/_components/organization/delete-organization-panel.tsx` | `RestoreControl`, `DeleteForm` | none / `DeleteOrganizationField` | `DeleteForm`'s manual parse (above) |
+| `app/_components/organization/members-panel.tsx` | `RemoveMemberControl`, `CancelInvitationControl`, `LeaveControl`, `InviteForm` | none / none / none / `InviteMemberField` | `ok` booleans on the first and third; captured `invitedEmail` closure on the fourth (above) |
+| `app/_components/organization/invitation-response.tsx` | `InvitationResponse` | none | union `pending` state (above) |
+| `app/_components/alerts/alert-preference-control.tsx` | `AlertPreferenceControl` | none | standard |
+
+### Measured line counts
+
+`wc -l`, before at `3ac8c64` and after, the 21 adopted files:
+
+| | before | after | delta |
+| --- | --- | --- | --- |
+| 21 adopted files, summed | 4,114 | 3,865 | −249 |
+| `app/_components/use-write.ts` | — | 214 | +214 |
+| **net** | **4,114** | **4,079** | **−35** |
+
+As at prompt 122, this is not the measure — the review's own win is locality,
+not line count, and a hook with a 100-line docblock arguing seven judgement
+calls is not a smaller artifact than the 26 copies it replaces. It is a single
+one.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output (one real finding fixed first: `react-hooks/refs` on a ref mutated during render — resolved by not memoising `submit`, see the module's own comment) |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **318 passed, 13 files**, unchanged from prompt 122 — nothing in scope is under `lib/{domain,validation}` |
+| `npm run build` | route table unchanged: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, everything else `ƒ` |
+| prerender diff | **21 of 21 prerendered HTML files byte-identical with only `.next/BUILD_ID` normalised, no chunk normalisation needed** — two-build method, `git stash push -u` on the 22 changed/new files then rebuild in place, matching this prompt's own prediction |
+| `npm run test:e2e:local` (Chromium, Firefox) | First run: **109 passed, 12 skipped, 1 failed (5.4m)**. Re-run after the investigation below: **110 passed, 12 skipped, 0 failed (5.9m)** |
+| `npm run test:e2e:webkit` | **Did not run — a different failure than the standing gap recorded at prompts 121 and 122.** Those found `which podman` empty; this session's `podman` container launched (its `/work/...` paths show the run reached the container), but failed inside it: `browserType.launch: Executable doesn't exist at /ms-playwright/chromium_headless_shell-1234/…` — the pinned image's own setup fixture needs a Chromium the image does not carry, before WebKit itself ever runs. **Not investigated further or fixed**: out of this prompt's scope, and the container image is shared infrastructure this candidate does not own. Reported as a gap, corrected from the stale "Podman not installed" description rather than repeating it silently (§12 rule 8) |
+
+**The one e2e failure, investigated rather than waved off (§12 rule 3).** It
+failed once in the full run, on `action-controls.tsx`'s `StaffRoleControl` —
+exactly the file this prompt touches first. Re-run 7× more on the adopted code:
+2 further failures (3/8 total). The control: `git stash push -u` on all 22
+changed/new files, rebuilding the *pre-adoption* code, run 8×: **5 failures**,
+a higher rate on code this prompt never touched. The flake is in
+`changeStaffRole`'s revalidation timing under `--repeat-each` load, pre-dating
+this prompt, and adopting `useWrite` did not make it worse. Not filed as a
+separate finding — no `docs/` file owns build-step-7's E2E suite, and
+`docs/automation.md`'s standing warnings do not yet cover it.
+
+**Two things this record states as unverified rather than invents (§12 rule
+9).** No render-timing measurement backs the `useTransition` refusal above —
+restated as a judgement. And whether the flake's root cause is specifically
+`revalidatePath("/submissions")` racing the client `setMessage` is diagnosed by
+elimination (baseline is worse, so this prompt did not introduce it), not by
+tracing the actual race — that would be its own investigation, unprompted by
+this candidate.
+
+### Where this leaves candidate 2
+
+The landed table's candidate-2 row is filled with `123` and today's date, and
+marked **workspace half only** — the three marketing dialogs remain prompt
+124's, per the scope warning this file already carries. Candidate 2 is not
+complete until that prompt lands.
