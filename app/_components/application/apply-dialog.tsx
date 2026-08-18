@@ -18,10 +18,10 @@ import {
   CV_MAX_BYTES,
   CV_MAX_LABEL,
   NO_FIELD_ERRORS,
-  type ApplicationFieldErrors,
+  type ApplicationField,
 } from "../../../lib/validation/application";
 import { Button, Field, FileField, Seal, TextareaField } from "../primitives";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The apply dialog — build step 5's client leaf, and a copy of
@@ -130,10 +130,12 @@ export function ApplyDialog({
 
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [errors, setErrors] = useState<ApplicationFieldErrors>(NO_FIELD_ERRORS);
+  const write = useWrite<ApplicationField>({
+    fields: NO_FIELD_ERRORS,
+    fieldsMessage: "Check the marked fields and try again.",
+  });
+  const { pending, message, errors } = write;
 
   /* Ids are namespaced by slug rather than fixed. Only one apply dialog appears
      on a page today, but `/` already ships two demo dialogs with one heading id
@@ -157,8 +159,7 @@ export function ApplyDialog({
   }, [open]);
 
   function openDialog() {
-    setMessage("");
-    setErrors(NO_FIELD_ERRORS);
+    write.reset();
     setFile(null);
     setDone(false);
     setOpen(true);
@@ -170,10 +171,13 @@ export function ApplyDialog({
   }
 
   /* Fires for the close button, an Escape press and a backdrop click alike, so
-     focus returns to the trigger by every route out. */
+     focus returns to the trigger by every route out. `write.reset()` replaces
+     the bare `setPending(false)` this used to be — it also clears `message`
+     and `errors`, but `openDialog` was already about to on the next open, so
+     the substitution is behaviourally identical. */
   function onClose() {
     setOpen(false);
-    setPending(false);
+    write.reset();
     triggerRef.current?.focus();
   }
 
@@ -186,71 +190,73 @@ export function ApplyDialog({
 
   /* Choosing a file clears the file's error: the person has answered the
      complaint, and leaving the marker up would have them re-reading a sentence
-     about the file they just replaced. */
+     about the file they just replaced. This is the hook's `setErrors` export's
+     first real call site — a functional update `submit`/`invalid` cannot
+     express on their own. */
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     setFile(event.target.files?.[0] ?? null);
-    setErrors((current) => (current.cv ? { ...current, cv: "" } : current));
+    write.setErrors((current) =>
+      current.cv ? { ...current, cv: "" } : current,
+    );
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
 
-    const data = new FormData(event.currentTarget);
+    const formData = new FormData(event.currentTarget);
     const raw = {
-      name: String(data.get("name") ?? ""),
-      email: String(data.get("email") ?? ""),
-      message: String(data.get("message") ?? ""),
+      name: String(formData.get("name") ?? ""),
+      email: String(formData.get("email") ?? ""),
+      message: String(formData.get("message") ?? ""),
     };
 
-    const parsed = applicationFieldsSchema.safeParse(raw);
-    const cvError = checkCv(file);
+    await write.submit({
+      /* Neither `submit`'s `parse` alone (Zod-only) nor `invalid` alone (drops
+         the Zod fields) expresses "the schema and the CV courtesy check
+         together, one message" — `cv` has no schema entry
+         (`lib/validation/application.ts`'s documented reason) but is a
+         rendered field. This folds `checkCv`'s failure into a synthetic issue
+         so `fieldErrorsFrom` sees one list, and the merge — `cv` from
+         `checkCv`, the rest from Zod — falls out of the module's existing
+         first-wins rule rather than being hand-merged a second way. */
+      parse: () => {
+        const parsed = applicationFieldsSchema.safeParse(raw);
+        const cvError = checkCv(file);
 
-    /* `|| !file` is logically redundant — `checkCv` already returns
-       `CV_ERRORS.missing` for a null file — and is there so the narrowing below
-       is the compiler's rather than a cast's. */
-    if (!parsed.success || cvError || !file) {
-      setErrors({
-        ...NO_FIELD_ERRORS,
-        ...(parsed.success
-          ? {}
-          : fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS)),
-        cv: cvError,
-      });
-      setMessage("Check the marked fields and try again.");
-      return;
-    }
-
-    setErrors(NO_FIELD_ERRORS);
-    setPending(true);
-    try {
-      /* Assembled rather than reusing the form's own `FormData`: the values
-         posted are then the parsed ones — trimmed name, lowercased address —
-         and an absent message is absent rather than an empty string, which is
-         what `application.message` being nullable means. */
-      const payload = new FormData();
-      payload.set("name", parsed.data.name);
-      payload.set("email", parsed.data.email);
-      if (parsed.data.message) payload.set("message", parsed.data.message);
-      payload.set("jobSlug", jobSlug);
-      payload.set("cv", file);
-
-      const result = await submitApplication(payload);
-      if (result.ok) {
+        /* `|| !file` is logically redundant — `checkCv` already returns
+           `CV_ERRORS.missing` for a null file — and is there so the narrowing
+           below is the compiler's rather than a cast's. */
+        if (!parsed.success || cvError || !file) {
+          return {
+            success: false as const,
+            error: {
+              issues: [
+                ...(parsed.success ? [] : parsed.error.issues),
+                ...(cvError ? [{ path: ["cv"], message: cvError }] : []),
+              ],
+            },
+          };
+        }
+        return { success: true as const, data: { ...parsed.data, cv: file } };
+      },
+      call: (data) => {
+        /* Assembled rather than reusing the form's own `FormData`: the values
+           posted are then the parsed ones — trimmed name, lowercased address —
+           and an absent message is absent rather than an empty string, which
+           is what `application.message` being nullable means. */
+        const payload = new FormData();
+        payload.set("name", data.name);
+        payload.set("email", data.email);
+        if (data.message) payload.set("message", data.message);
+        payload.set("jobSlug", jobSlug);
+        payload.set("cv", data.cv);
+        return submitApplication(payload);
+      },
+      onSuccess: () => {
         setDone(true);
-        setMessage("Application received.");
-        return;
-      }
-
-      // An honest failure is a visible state, never a silent success
-      // (AGENTS.md 8.2 rule 4).
-      setErrors({ ...NO_FIELD_ERRORS, ...result.fieldErrors });
-      setMessage(result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return "Application received.";
+      },
+    });
   }
 
   return (

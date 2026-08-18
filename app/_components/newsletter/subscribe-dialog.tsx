@@ -6,11 +6,11 @@ import { subscribeToNewsletter } from "../../_actions/newsletter";
 import {
   newsletterFieldsSchema,
   NO_FIELD_ERRORS,
-  type NewsletterFieldErrors,
+  type NewsletterField,
 } from "../../../lib/validation/newsletter";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-import { NETWORK_ERROR, fieldErrorsFrom } from "../../../lib/validation/result";
+import { useWrite } from "../use-write";
 
 /**
  * The newsletter's client leaf — build step 4, and a copy of
@@ -63,9 +63,11 @@ export function NewsletterSubscribeDialog({
 
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errors, setErrors] = useState<NewsletterFieldErrors>(NO_FIELD_ERRORS);
+  const write = useWrite<NewsletterField>({
+    fields: NO_FIELD_ERRORS,
+    fieldsMessage: "Check the marked field and try again.",
+  });
+  const { pending, message, errors } = write;
 
   // The announcement takes focus whenever it changes, so a screen reader lands
   // on the outcome rather than being told about it from wherever it was.
@@ -79,8 +81,7 @@ export function NewsletterSubscribeDialog({
   }, [open]);
 
   function openDialog() {
-    setMessage("");
-    setErrors(NO_FIELD_ERRORS);
+    write.reset();
     setDone(false);
     setOpen(true);
     dialogRef.current?.showModal();
@@ -91,10 +92,13 @@ export function NewsletterSubscribeDialog({
   }
 
   /* Fires for the close button, an Escape press and a backdrop click alike, so
-     focus returns to the trigger by every route out. */
+     focus returns to the trigger by every route out. `write.reset()` replaces
+     the bare `setPending(false)` this used to be — it also clears `message`
+     and `errors`, but `openDialog` was already about to on the next open, so
+     the substitution is behaviourally identical. */
   function onClose() {
     setOpen(false);
-    setPending(false);
+    write.reset();
     triggerRef.current?.focus();
   }
 
@@ -107,40 +111,18 @@ export function NewsletterSubscribeDialog({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
 
     const data = new FormData(event.currentTarget);
     const raw = { email: String(data.get("email") ?? "") };
 
-    const parsed = newsletterFieldsSchema.safeParse(raw);
-    if (!parsed.success) {
-      setErrors({
-        ...NO_FIELD_ERRORS,
-        ...fieldErrorsFrom(parsed.error, NO_FIELD_ERRORS),
-      });
-      setMessage("Check the marked field and try again.");
-      return;
-    }
-
-    setErrors(NO_FIELD_ERRORS);
-    setPending(true);
-    try {
-      const result = await subscribeToNewsletter(parsed.data);
-      if (result.ok) {
+    await write.submit({
+      parse: () => newsletterFieldsSchema.safeParse(raw),
+      call: (parsedData) => subscribeToNewsletter(parsedData),
+      onSuccess: () => {
         setDone(true);
-        setMessage("Confirmation sent.");
-        return;
-      }
-
-      // An honest failure is a visible state, never a silent success
-      // (AGENTS.md 8.2 rule 4).
-      setErrors({ ...NO_FIELD_ERRORS, ...result.fieldErrors });
-      setMessage(result.error);
-    } catch {
-      setMessage(NETWORK_ERROR);
-    } finally {
-      setPending(false);
-    }
+        return "Confirmation sent.";
+      },
+    });
   }
 
   return (

@@ -235,7 +235,7 @@ table below is appended to as prompts land, after the fact.
 | candidate | prompt | landed |
 | --- | --- | --- |
 | 1 · map a `ZodError` once | 121 | 18 Aug 2026 |
-| 2 · the submit lifecycle | 123 (workspace half only — the three marketing dialogs are prompt 124's) | 18 Aug 2026 |
+| 2 · the submit lifecycle | 123, 124 | 18 Aug 2026 |
 | 3 · one tenant gate | 122 | 18 Aug 2026 |
 | 4 · cut `app/activity/actions.ts` | — | — |
 | 5 · `lib/rate-limit/` policies | — | — |
@@ -742,3 +742,107 @@ The landed table's candidate-2 row is filled with `123` and today's date, and
 marked **workspace half only** — the three marketing dialogs remain prompt
 124's, per the scope warning this file already carries. Candidate 2 is not
 complete until that prompt lands.
+
+---
+
+## Prompt 124 — the record
+
+`use-write.ts` adopted on the three marketing dialogs
+(`app/_components/lead/demo-request-dialog.tsx`,
+`app/_components/newsletter/subscribe-dialog.tsx`,
+`app/_components/application/apply-dialog.tsx`), closing out candidate 2. §8.1
+territory throughout — the leaves live inside `/`, `/journal`, `/careers` and
+`/job-listing/[slug]`, all prerendered — so the whole prompt is graded on the
+prerender diff below, not on the equivalence table alone.
+
+### The interface decision: `apply-dialog.tsx`'s merged `parse`
+
+`applicationFieldsSchema` has no `cv` entry — the CV's rules live in the action
+because a browser-declared `File.type` is attacker-controlled
+(`lib/validation/application.ts`'s documented reason) — but `cv` is a rendered
+field the courtesy check still needs to fail on. The prompt's proposed shape
+survived unmodified:
+
+```ts
+parse: () => {
+  const parsed = applicationFieldsSchema.safeParse(raw);
+  const cvError = checkCv(file);
+  if (!parsed.success || cvError || !file) {
+    return {
+      success: false as const,
+      error: {
+        issues: [
+          ...(parsed.success ? [] : parsed.error.issues),
+          ...(cvError ? [{ path: ["cv"], message: cvError }] : []),
+        ],
+      },
+    };
+  }
+  return { success: true as const, data: { ...parsed.data, cv: file } };
+},
+```
+
+Verified against `use-write.ts`'s structural `Issues` type and
+`fieldErrorsFrom`'s first-wins rule rather than assumed: a synthetic
+`{ path: ["cv"], message: cvError }` issue satisfies `Issues` exactly (a
+`readonly PropertyKey[]` path and a `string` message — `zod-docs` skill
+confirmed `.safeParse()`'s discriminated union carries this same shape on
+`error`), and `cv` cannot collide with a Zod-declared field because the schema
+declares none — the two issue lists are on disjoint field names by
+construction, so first-wins never has to arbitrate between them. `npm run
+typecheck` passing with no cast confirms the shape compiles as written.
+
+### The two `write.reset()` substitutions, checked rather than assumed
+
+The prompt flagged one candidate divergence in advance — `onClose`'s bare
+`setPending(false)` becoming `write.reset()` — and asked that it be checked
+against all three dialogs, not just `demo-request-dialog.tsx`. All three
+`openDialog` functions already call `write.reset()` (or, before adoption,
+cleared `message` and `errors` by hand) before the next `showModal()`, so none
+of the three relies on `message` or `errors` surviving a close. The
+substitution is behaviourally identical on all three, applied uniformly.
+
+### Equivalence, per site
+
+| file | fields | notes |
+| --- | --- | --- |
+| `lead/demo-request-dialog.tsx` | `DemoRequestField` (`NO_FIELD_ERRORS`) | standard `parse` + `call`; `call` composes `source` onto the parsed data exactly as before; GSAP hover/spin/fan untouched |
+| `newsletter/subscribe-dialog.tsx` | `NewsletterField` | the simplest of the three — one field, no courtesy-check wrinkle, standard `parse` + `call` |
+| `application/apply-dialog.tsx` | `ApplicationField` | merged `parse` above; `onFileChange`'s functional `cv` clear moved to `write.setErrors(...)` — the second real call site for that export, after `create-target-form.tsx`'s at prompt 123 |
+
+Every user-visible sentence — the singular/plural fields message on each
+dialog, each success sentence and body paragraph, and `apply-dialog.tsx`'s
+role-line heading — is unchanged, confirmed by reading the JSX after adoption
+rather than only the submit path.
+
+### Measured line counts
+
+`wc -l`, before (prompt 123's committed state) and after, the three dialogs:
+
+| file | before | after |
+| --- | --- | --- |
+| `lead/demo-request-dialog.tsx` | 579 | 561 |
+| `newsletter/subscribe-dialog.tsx` | 230 | 212 |
+| `application/apply-dialog.tsx` | 402 | 408 |
+| **total** | **1,211** | **1,181** |
+
+`apply-dialog.tsx` grew by 6 lines despite the state removal — the merged
+`parse`'s explanatory comment is longer than the code it replaced. As at
+prompts 121–123, line count is not the measure; the win is one lifecycle
+across all 24 write-path leaves now, not 21.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | 318 passed, 13 files — unchanged from prompts 122/123's baseline, nothing in scope is under `lib/{domain,validation}` |
+| `npm run build` | route table unchanged: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, everything else `ƒ` |
+| prerender diff | **21 of 21 byte-identical after chunk-name substitution** — two-build method (`git stash push` the three changed files, rebuild, `git stash pop`), normalising `.next/BUILD_ID`, the CSS chunk name and Server Action ids. 19 of 21 files differed solely in 5 shared JS chunk filenames (17 chunk names identical, 5 moved); substituting the 5 makes all 21 byte-identical, and the JS chunk **count** per page is unchanged on every page — no markup, no copy and no script moved |
+| `npm run test:e2e` | Chromium + Firefox: **110 passed, 12 skipped (4.0m)** — same totals as prompt 123's re-run, all three dialogs exercised (`/` hero + CTA band, `/journal`'s subscribe band, `/careers`'s open-application card, a `/job-listing/[slug]` apply flow). **WebKit did not run** — the same gap prompt 123's record already found: `podman` launches the pinned container, but its own auth-setup fixture fails on `browserType.launch: Executable doesn't exist at /ms-playwright/chromium_headless_shell-1234/…` before WebKit itself runs. Not a new finding; not investigated further here for the same reason prompt 123 gave — shared container infrastructure this candidate does not own |
+
+### Where this leaves candidate 2
+
+The landed table's candidate-2 row now reads `123, 124` with today's date, and
+the "workspace half only" qualifier is dropped — **candidate 2 is complete**.
