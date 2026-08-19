@@ -247,6 +247,17 @@ The homepage's `Explore the platform` uses the same destination. `Request a
 demo` remains inert for build step 2, and the footer's settled links remain
 unchanged.
 
+### Nav — Auth-aware CTA switches to Account, prompt 131
+
+Prompt 131 connects `SiteNav` to Better Auth's client session hook
+(`authClient.useSession()` from `better-auth/react`). When an active user session
+is present (`Boolean(session?.user)`), both the desktop `LinkButton` and mobile
+`ButtonLink` render "Account" pointing to `/account` instead of "Get started"
+pointing to `/sign-in`. The mobile panel-close handler, button sizing, link
+arrow affordance, and layout invariants remain identical. Static prerendered
+HTML is unchanged because build-time evaluation without session cookies emits
+the unauthenticated `Get started` default.
+
 ## The tab title, prompt 112
 
 The browser tab is chrome, and the homepage's read **"Aetherfield — Design

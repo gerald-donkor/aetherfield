@@ -1,5 +1,6 @@
 "use client";
 
+import { createAuthClient } from "better-auth/react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
@@ -8,6 +9,8 @@ import { FooterMotion } from "./motion/footer-reveal";
 import { NavDrop } from "./motion/nav-drop";
 import { NewsletterSubscribeDialog } from "./newsletter/subscribe-dialog";
 import { Button, ButtonLink, LinkButton, Wordmark } from "./primitives";
+
+const authClient = createAuthClient();
 
 /* There is no /product route, so Product resolves to the home page — the
    product story is what the homepage tells. */
@@ -30,6 +33,8 @@ const CONTAINER = "mx-auto w-full max-w-page px-5 lg:px-6";
 
 export function SiteNav() {
   const [open, setOpen] = useState(false);
+  const { data: session } = authClient.useSession();
+  const isAuthenticated = Boolean(session?.user);
 
   return (
     // Pinned, full-bleed frosted glass: the page scrolls underneath it. The
@@ -66,7 +71,11 @@ export function SiteNav() {
               {item.label}
             </Link>
           ))}
-          <LinkButton href="/sign-in">Get started</LinkButton>
+          {isAuthenticated ? (
+            <LinkButton href="/account">Account</LinkButton>
+          ) : (
+            <LinkButton href="/sign-in">Get started</LinkButton>
+          )}
         </nav>
 
         {/* Mobile toggle: + rotates into × */}
@@ -113,13 +122,23 @@ export function SiteNav() {
                 {item.label}
               </Link>
             ))}
-            <ButtonLink
-              href="/sign-in"
-              onClick={() => setOpen(false)}
-              className="mt-6 h-[52px] w-full"
-            >
-              Get started
-            </ButtonLink>
+            {isAuthenticated ? (
+              <ButtonLink
+                href="/account"
+                onClick={() => setOpen(false)}
+                className="mt-6 h-[52px] w-full"
+              >
+                Account
+              </ButtonLink>
+            ) : (
+              <ButtonLink
+                href="/sign-in"
+                onClick={() => setOpen(false)}
+                className="mt-6 h-[52px] w-full"
+              >
+                Get started
+              </ButtonLink>
+            )}
           </nav>
         </div>
       ) : null}
