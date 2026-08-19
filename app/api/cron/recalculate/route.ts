@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { sweep } from "./sweep";
-import { checkLimit } from "../../../../lib/rate-limit";
+import { spendLimit } from "../../../../lib/rate-limit/spend";
 
 /**
  * The nightly recalculation and alert sweep — build step 14.
@@ -77,12 +77,11 @@ export async function GET(request: NextRequest) {
      unreachable is worse than letting an idempotent sweep run unmetered during
      an outage. It exists so a leaked secret cannot drive repeated full-tenant
      sweeps, not to shape normal traffic. */
-  try {
-    const limit = await checkLimit("cron-sweep");
-    if (!limit.allowed) {
-      return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
-    }
-  } catch {
+  const spend = await spendLimit("cron-sweep");
+  if (spend.status === "throttled") {
+    return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
+  }
+  if (spend.status === "unavailable") {
     // Deliberately continues.
   }
 

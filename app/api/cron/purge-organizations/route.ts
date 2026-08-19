@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { sweep } from "./sweep";
-import { checkLimit } from "../../../../lib/rate-limit";
+import { spendLimit } from "../../../../lib/rate-limit/spend";
 
 /**
  * The nightly organisation-erasure sweep — prompt 73.
@@ -90,12 +90,11 @@ export async function GET(request: NextRequest) {
      It shares the `"cron-sweep"` policy's bucket deliberately — the two jobs are
      one scheduler making one call each per night, and a leaked `CRON_SECRET`
      driving repeated sweeps is the single thing both limits exist to bound. */
-  try {
-    const limit = await checkLimit("cron-sweep");
-    if (!limit.allowed) {
-      return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
-    }
-  } catch {
+  const spend = await spendLimit("cron-sweep");
+  if (spend.status === "throttled") {
+    return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
+  }
+  if (spend.status === "unavailable") {
     return NextResponse.json({ skipped: "limiter-unavailable" }, { status: 503 });
   }
 

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { unsubscribeByToken } from "../../../../lib/db/subscriber-queries";
-import { checkLimit } from "../../../../lib/rate-limit";
+import { spendLimit } from "../../../../lib/rate-limit/spend";
 
 /**
  * The one-click endpoint named in the welcome email's `List-Unsubscribe`
@@ -49,10 +49,9 @@ export async function POST(request: NextRequest) {
      compliance failure; letting an idempotent, non-destructive write through
      unmetered for the duration of an outage is not. The reasoning is inverted
      because the risk is. */
-  try {
-    const limit = await checkLimit("newsletter-one-click", token);
-    if (!limit.allowed) return ok();
-  } catch {
+  const spend = await spendLimit("newsletter-one-click", token);
+  if (spend.status === "throttled") return ok();
+  if (spend.status === "unavailable") {
     // Deliberately continues.
   }
 

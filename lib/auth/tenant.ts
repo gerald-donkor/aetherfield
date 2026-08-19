@@ -1,6 +1,7 @@
 import "server-only";
 
-import { checkLimit, formatRetry, type RateLimitPolicy } from "../rate-limit";
+import type { RateLimitPolicy } from "../rate-limit";
+import { spendLimit } from "../rate-limit/spend";
 import { getCurrentMembership, type CurrentMembership } from "./organization";
 import { getCurrentAccount } from "./server";
 
@@ -83,11 +84,11 @@ export type TenantMessages = {
  * produce.
  *
  * `throttled` is a builder rather than a string because the retry window is
- * only known here. **`formatRetry` is applied inside the gate**, so the
- * seconds-to-prose rule lives in one place and a call site can never format it
- * differently; the builder receives the finished phrase and decides only the
- * sentence around it ("too many changes" on a factor edit, "too many imports"
- * on a bulk upload).
+ * only known once the limiter answers. **`formatRetry` is applied inside
+ * `lib/rate-limit/spend.ts`**, so the seconds-to-prose rule lives in one place
+ * and a call site can never format it differently; the builder receives the
+ * finished phrase and decides only the sentence around it ("too many changes"
+ * on a factor edit, "too many imports" on a bulk upload).
  */
 export type TenantWriteMessages = TenantMessages & {
   throttled: (retry: string) => string;
@@ -159,9 +160,10 @@ export type TenantGateOptions =
  * stage order: the limit is keyed by the user id, and there is no key without
  * the session. Every authenticated action in this repository already makes it.
  *
- * **It fails closed.** A limiter that throws returns `failure`, not a pass: an
- * unlimited write path is worse than a control that is briefly unavailable, and
- * AGENTS.md 8.2 rule 4 wants the failure visible rather than a silent success.
+ * **It fails closed.** `lib/rate-limit/spend.ts`'s `unavailable` outcome maps to
+ * `failure`, not to a pass: an unlimited write path is worse than a control
+ * that is briefly unavailable, and AGENTS.md 8.2 rule 4 wants the failure
+ * visible rather than a silent success.
  *
  * A signed-out or organisation-less caller gets a handled `{ ok: false }` and
  * never a redirect and never a throw (AGENTS.md 10 rule 2). `proxy.ts`'s
@@ -213,17 +215,11 @@ export async function resolveTenant(
   if (refusal) return { ok: false, error: refusal };
 
   if (options.limiter) {
-    try {
-      const limit = await checkLimit(options.limiter, membership.account.user.id);
-      if (!limit.allowed) {
-        return {
-          ok: false,
-          error: options.messages.throttled(
-            formatRetry(limit.retryAfterSeconds),
-          ),
-        };
-      }
-    } catch {
+    const spend = await spendLimit(options.limiter, membership.account.user.id);
+    if (spend.status === "throttled") {
+      return { ok: false, error: options.messages.throttled(spend.retry) };
+    }
+    if (spend.status === "unavailable") {
       return { ok: false, error: messages.failure };
     }
   }

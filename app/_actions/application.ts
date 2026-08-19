@@ -7,7 +7,7 @@ import { headers } from "next/headers";
 import { getJob } from "../_content/jobs";
 import { insertApplication } from "../../lib/db/application-queries";
 import { sendApplicationEmails } from "../../lib/email/application";
-import { checkLimit, formatRetry } from "../../lib/rate-limit";
+import { spendLimit } from "../../lib/rate-limit/spend";
 import { deleteCv, putCv, sanitiseFilename } from "../../lib/storage/cv";
 import {
   applicationFieldsSchema,
@@ -88,17 +88,14 @@ export async function submitApplication(
      directly throws `headers.get is not a function`. The wrapper hits the
      documented `Request`-shaped branch. */
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
-  try {
-    const limit = await checkLimit("application", ip);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many requests. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const spend = await spendLimit("application", ip);
+  if (spend.status === "throttled") {
+    return {
+      ok: false,
+      error: `That's a few too many requests. Try again in ${spend.retry}.`,
+    };
+  }
+  if (spend.status === "unavailable") {
     // Fails closed: an unlimited public *upload* path is a worse outcome than
     // a form that is briefly unavailable, and 8.2 rule 4 requires the failure
     // be visible rather than a silent success.

@@ -8,7 +8,7 @@ import * as z from "zod";
 import { insertLead } from "../../lib/db/lead-queries";
 import { sendDemoRequestEmails } from "../../lib/email/demo-request";
 import { leadSource } from "../../lib/db/schema";
-import { checkLimit, formatRetry } from "../../lib/rate-limit";
+import { spendLimit } from "../../lib/rate-limit/spend";
 import {
   demoRequestFieldsSchema,
   NO_FIELD_ERRORS,
@@ -68,17 +68,14 @@ export async function submitDemoRequest(
      directly throws `headers.get is not a function`. The wrapper hits the
      documented `Request`-shaped branch. */
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
-  try {
-    const limit = await checkLimit("demo-request", ip);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many requests. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const spend = await spendLimit("demo-request", ip);
+  if (spend.status === "throttled") {
+    return {
+      ok: false,
+      error: `That's a few too many requests. Try again in ${spend.retry}.`,
+    };
+  }
+  if (spend.status === "unavailable") {
     // Fails closed: an unlimited public write path is a worse outcome than a
     // form that is briefly unavailable, and 8.2 rule 4 requires the failure be
     // visible rather than a silent success.

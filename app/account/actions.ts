@@ -16,7 +16,7 @@ import {
   listPendingInvitations,
 } from "../../lib/db/organization-queries";
 import { sendOrganizationDeletionNotice } from "../../lib/email/organization";
-import { checkLimit, formatRetry } from "../../lib/rate-limit";
+import { spendLimit } from "../../lib/rate-limit/spend";
 import {
   ALERT_PREFERENCE_ERRORS,
   alertPreferenceSchema,
@@ -105,17 +105,14 @@ export async function createOrganization(
      `admin` are orthogonal to tenant membership (AGENTS.md 11), and being staff
      grants nothing on this path — the same invariant `lib/auth/organization.ts`
      states for reads. */
-  try {
-    const limit = await checkLimit("organization-create", account.user.id);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many attempts. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const spend = await spendLimit("organization-create", account.user.id);
+  if (spend.status === "throttled") {
+    return {
+      ok: false,
+      error: `That's a few too many attempts. Try again in ${spend.retry}.`,
+    };
+  }
+  if (spend.status === "unavailable") {
     // Fails closed, as every earlier path does: an unlimited write path is
     // worse than a form that is briefly unavailable, and 8.2 rule 4 requires
     // the failure be visible rather than a silent success.

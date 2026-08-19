@@ -14,7 +14,7 @@ import {
   sendNewsletterConfirmation,
   sendNewsletterWelcome,
 } from "../../lib/email/newsletter";
-import { checkLimit, formatRetry } from "../../lib/rate-limit";
+import { spendLimit } from "../../lib/rate-limit/spend";
 import {
   newsletterFieldsSchema,
   NO_FIELD_ERRORS,
@@ -75,17 +75,14 @@ export async function subscribeToNewsletter(
      directly throws `headers.get is not a function`. The trap is recorded in
      `docs/backend.md`, step 2. */
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
-  try {
-    const limit = await checkLimit("newsletter-ip", ip);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many requests. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const ipSpend = await spendLimit("newsletter-ip", ip);
+  if (ipSpend.status === "throttled") {
+    return {
+      ok: false,
+      error: `That's a few too many requests. Try again in ${ipSpend.retry}.`,
+    };
+  }
+  if (ipSpend.status === "unavailable") {
     // Fails closed, as step 2 does: an unlimited public write path is worse
     // than a form that is briefly unavailable, and 8.2 rule 4 requires the
     // failure be visible rather than a silent success.
@@ -110,17 +107,14 @@ export async function subscribeToNewsletter(
      per address, and it needs the canonical lowercased address that stage c
      produces — so it sits after the parse and before the write, which is still
      before anything expensive. The key is a sha256, never the address itself. */
-  try {
-    const limit = await checkLimit("newsletter-address", email);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `A confirmation was already sent to that address. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const addressSpend = await spendLimit("newsletter-address", email);
+  if (addressSpend.status === "throttled") {
+    return {
+      ok: false,
+      error: `A confirmation was already sent to that address. Try again in ${addressSpend.retry}.`,
+    };
+  }
+  if (addressSpend.status === "unavailable") {
     return { ok: false, error: GENERIC_FAILURE };
   }
 
@@ -224,17 +218,14 @@ async function guardTokenRequest(
   }
 
   const ip = ipAddress({ headers: await headers() }) ?? "unknown";
-  try {
-    const limit = await checkLimit("newsletter-token", ip);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many requests. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const tokenSpend = await spendLimit("newsletter-token", ip);
+  if (tokenSpend.status === "throttled") {
+    return {
+      ok: false,
+      error: `That's a few too many requests. Try again in ${tokenSpend.retry}.`,
+    };
+  }
+  if (tokenSpend.status === "unavailable") {
     return { ok: false, error: TOKEN_FAILURE };
   }
 

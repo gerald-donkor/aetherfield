@@ -10,7 +10,7 @@ import {
 import { setStaffRole } from "../../lib/db/auth-queries";
 import { softDeleteLead } from "../../lib/db/lead-queries";
 import { softDeleteSubscriber } from "../../lib/db/subscriber-queries";
-import { checkLimit, formatRetry } from "../../lib/rate-limit";
+import { spendLimit } from "../../lib/rate-limit/spend";
 import { deleteCvStrict } from "../../lib/storage/cv";
 import type { SubmitResult } from "../../lib/validation/result";
 import {
@@ -66,17 +66,14 @@ async function resolveAdminForWrite(): Promise<
   const admin = await getAdminAccount();
   if (!admin) return { ok: false, error: FORBIDDEN };
 
-  try {
-    const limit = await checkLimit("submission-write", admin.user.id);
-    if (!limit.allowed) {
-      return {
-        ok: false,
-        error: `That's a few too many changes. Try again in ${formatRetry(
-          limit.retryAfterSeconds,
-        )}.`,
-      };
-    }
-  } catch {
+  const spend = await spendLimit("submission-write", admin.user.id);
+  if (spend.status === "throttled") {
+    return {
+      ok: false,
+      error: `That's a few too many changes. Try again in ${spend.retry}.`,
+    };
+  }
+  if (spend.status === "unavailable") {
     return { ok: false, error: GENERIC_FAILURE };
   }
 

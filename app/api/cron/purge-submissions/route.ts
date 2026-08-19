@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { sweep } from "./sweep";
-import { checkLimit } from "../../../../lib/rate-limit";
+import { spendLimit } from "../../../../lib/rate-limit/spend";
 
 /**
  * The nightly phase-one retention sweep — prompt 81.
@@ -104,12 +104,11 @@ export async function GET(request: NextRequest) {
      one scheduler making one call each per night, comfortably inside that
      limiter's six per hour, and a leaked `CRON_SECRET` driving repeated sweeps
      is the single thing all three limits exist to bound. */
-  try {
-    const limit = await checkLimit("cron-sweep");
-    if (!limit.allowed) {
-      return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
-    }
-  } catch {
+  const spend = await spendLimit("cron-sweep");
+  if (spend.status === "throttled") {
+    return NextResponse.json({ skipped: "rate-limited" }, { status: 429 });
+  }
+  if (spend.status === "unavailable") {
     return NextResponse.json({ skipped: "limiter-unavailable" }, { status: 503 });
   }
 

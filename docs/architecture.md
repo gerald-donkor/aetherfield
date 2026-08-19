@@ -1536,6 +1536,18 @@ an unsubscribe because Redis is unreachable is a compliance failure") and
 drive repeated full-tenant sweeps"). The candidate is that the posture is
 *documented* rather than *expressed in the interface*, **not** that it is wrong.
 
+**Corrected at prompt 130 (§12 rule 8): only one of the three cron routes is
+among the fail-open sites, not all three.** The two paragraphs above already
+named the correct pair — `recalculate` and `unsubscribe` — but a reader could
+take "the fail-open sites" together with "the three cron routes" nearby and
+conclude all three cron routes share that posture. Checked at every site
+rather than assumed: `purge-organizations` and `purge-submissions` both `catch`
+into a `503 limiter-unavailable`, i.e. fail **closed**, and say so in their own
+comments (`purge-submissions/route.ts:95–101`: "this one deletes personal data
+irreversibly, so a limiter that cannot be consulted is a reason to wait a night
+rather than to proceed unmetered"). The twelve-site split is **ten fail-closed,
+two fail-open** — see "Prompt 130 — the record" below for the full table.
+
 **Five of the six landed remediation modules were checked and judged deep** —
 `lib/rate-limit/*`, `lib/validation/result.ts`, `workspace-boundary.tsx`,
 `lib/db/tenant-scope.ts` and the three-way activity cut all earned their
@@ -1581,3 +1593,147 @@ Then the `code-review` skill with `2337ab1` as the fixed point, substituting the
 spec source per adaptation 1 above, and `improve-codebase-architecture` for the
 deepening pass. A future review's fixed point is **this** prompt's `HEAD`, not
 `2337ab1` — that ground is now covered twice.
+
+---
+
+## Prompt 130 — the record
+
+Phase B's top recommendation, **Concentrate the limiter spend**, deepening
+candidate 1 from the 17 Aug 2026 review (candidate 3, "one tenant gate that
+also spends the limiter") for the twelve sites that gate left outside it.
+`lib/rate-limit/spend.ts` is the new module; every one of the twelve direct
+`checkLimit` call sites and `lib/auth/tenant.ts` itself now call it instead.
+
+### The interface
+
+```ts
+export type SpendOutcome =
+  | { status: "allowed" }
+  | { status: "throttled"; retryAfterSeconds: number; retry: string }
+  | { status: "unavailable" };
+
+export function spendLimit(
+  policy: Exclude<RateLimitPolicy, "cron-sweep">,
+  identifier: string,
+): Promise<SpendOutcome>;
+export function spendLimit(policy: "cron-sweep"): Promise<SpendOutcome>;
+```
+
+A three-state discriminated union, not a sentence and not a boolean, for the
+reason the prompt gave: a sentence fits the eight Server Actions and fits
+neither the four route sites nor the fail-open pair, and a boolean collapses
+`throttled` and `unavailable` — precisely the distinction every existing
+`catch` already drew in a comment. `retry` is `formatRetry(retryAfterSeconds)`,
+so no caller outside `lib/rate-limit/` calls `formatRetry` any more.
+`spendLimit` mirrors `checkLimit`'s own overload pair rather than replacing
+it — internally it narrows on `policy === "cron-sweep"` and delegates,
+so `"cron-sweep"` taking no identifier is still a compile error one level up
+rather than only inside `checkLimit`.
+
+The `try`/`catch` moves inside `spendLimit` and disappears from every call
+site. **Nothing is logged on the `unavailable` path** — no caught error, no
+identifier, no policy name — matching the twelve `catch` blocks it replaces,
+none of which logged anything either.
+
+### A correction to Phase B's framing, checked at every site
+
+**The Phase B write-up above (line ~1531) already named the correct fail-open
+pair — `recalculate` and `unsubscribe` — but placed that claim next to "the
+three cron routes" closely enough that a reader could take all three cron
+routes as fail-open.** Checked at every site rather than assumed, and the
+correction is now inline in that section (§12 rule 8) rather than left
+standing beside a contradiction:
+
+| # | site | policy | on throttle | on limiter error |
+| --- | --- | --- | --- | --- |
+| 1 | `app/submissions/actions.ts:70` | `submission-write` | "…too many **changes**…" | closed → `GENERIC_FAILURE` |
+| 2 | `app/account/actions.ts:109` | `organization-create` | "…too many **attempts**…" | closed → `GENERIC_FAILURE` |
+| 3 | `app/invitation/[id]/actions.ts:58` | `invitation-response` | "…too many **attempts**…" | closed → `MEMBERSHIP_ERRORS.GENERIC` |
+| 4 | `app/_actions/demo-request.ts:72` | `demo-request` | "…too many **requests**…" | closed → `GENERIC_FAILURE` |
+| 5 | `app/_actions/application.ts:92` | `application` | "…too many **requests**…" | closed → `GENERIC_FAILURE` |
+| 6 | `app/_actions/newsletter.ts:79` | `newsletter-ip` | "…too many **requests**…" | closed → `GENERIC_FAILURE` |
+| 7 | `app/_actions/newsletter.ts:114` | `newsletter-address` | "**A confirmation was already sent…**" | closed → `GENERIC_FAILURE` |
+| 8 | `app/_actions/newsletter.ts:228` | `newsletter-token` | "…too many **requests**…" | closed → `TOKEN_FAILURE` |
+| 9 | `app/api/cron/purge-organizations/route.ts:94` | `cron-sweep` | `429 {skipped:"rate-limited"}` | **closed** → `503 limiter-unavailable` |
+| 10 | `app/api/cron/purge-submissions/route.ts:108` | `cron-sweep` | `429 {skipped:"rate-limited"}` | **closed** → `503 limiter-unavailable` |
+| 11 | `app/api/cron/recalculate/route.ts:81` | `cron-sweep` | `429 {skipped:"rate-limited"}` | **open** → continues |
+| 12 | `app/api/newsletter/unsubscribe/route.ts:53` | `newsletter-one-click` | `ok()` — 200, silent | **open** → continues |
+| 13 | `lib/auth/tenant.ts:217` (the gate) | per call site | `options.messages.throttled(spend.retry)` | closed → `messages.failure` |
+
+**Ten fail-closed, two fail-open — confirmed unchanged from before the
+refactor to after it.** Every sentence, status code and posture above is
+byte-identical to what the same site returned before this change; the diffs
+touch only how the `try`/`catch` is expressed, never what a caller receives.
+
+### Equivalence and counts, measured
+
+**One correction to the prompt's own predicted counts, made at implementation
+time rather than carried forward (§12 rule 8): `formatRetry` was called from
+seven files before this change, not six** — the prompt's table named "6 files"
+but the seventh, `lib/auth/tenant.ts`, was always one of them; the "9 call
+sites" figure was already correct (`1+1+1+1+3+1+1`, `newsletter.ts` alone
+holding 3). Re-run against the pre-change tree with `git stash -u` rather than
+recalled from the prompt:
+
+| measurement | before | after |
+| --- | --- | --- |
+| `grep -rn "checkLimit" app lib` (raw line count — imports, calls and docblock prose) | 32 | 13 |
+| `grep -rln "checkLimit" app lib` (distinct files) | 13 — the 10 call-site files, `lib/auth/tenant.ts`, and `lib/rate-limit/index.ts` and `lib/rate-limit/policies.ts`, both hit only by their own docblock prose | 4 — `lib/rate-limit/index.ts` (defines it), `lib/rate-limit/policies.ts` (docblock prose, unchanged), `lib/rate-limit/spend.ts` (calls it), and `lib/auth/tenant.ts` (docblock prose at :146 and :149 only — the runtime call there is gone) |
+| `grep -rn "formatRetry" app lib` (raw line count) | 18 | 6 |
+| `formatRetry` real call sites (invocations, not imports or prose) | 9, across 7 files — corrected count above | 1, in `lib/rate-limit/spend.ts` |
+| `try`/`catch` blocks around a limiter call | 13 (one per site in the equivalence table above, including the gate) | 0 outside `lib/rate-limit/spend.ts`, which now holds exactly 1 |
+| files changed | — | 11 modified (`git diff --stat`: the ten call-site files — `newsletter.ts` holds 3 of the 12 sites — plus `lib/auth/tenant.ts`) + 1 new (`lib/rate-limit/spend.ts`) |
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | clean, no output |
+| `npm run typecheck` | clean, no output |
+| `npm test` | **318 passed, 13 files** — unchanged from the prompt 129 baseline; nothing in scope is under `lib/domain/` or `lib/validation/` |
+| `npm run build` | exit 0. Route table matches §8.1 exactly: `/ /_not-found /about /careers /design-system /forgot-password /journal /reset-password /sign-in /sign-up /verify-email` as `○`, `/article/[slug]` (6) and `/job-listing/[slug]` (3) as `●`, every authenticated route `ƒ` |
+| prerender diff | **not run, and the reason is the rule.** Every file in scope is `server-only`, a `"use server"` action module, or an `app/api/*` route handler — no client leaf under `app/_components/` was touched, and no prerendered page renders any changed file. The prompt's own branch for this case is "run the build and confirm the route table", which is the row above |
+| `grep -rn "formatRetry" app lib` | `lib/rate-limit/` only, as measured above |
+| `grep -rn "checkLimit" app lib` | `lib/rate-limit/` only, as measured above |
+| `npm run test:e2e:local` | **Chromium + Firefox: 110 passed, 12 skipped** — matches the prompt 126/129 baseline exactly, no flake this run (3.4m) |
+| `npm run test:e2e:webkit` | **50 passed, 12 skipped (2.3m)**, run inside the pinned rootless Podman container. Unlike prompt 129's session, this session's container had working outbound network — Neon and the Google Fonts fetch both succeeded — so this is a real pass, not a repeat of the prior infrastructure gap |
+
+### Prerender impact
+
+`none — no route changes`, verified by the route table above rather than
+assumed.
+
+### Trust boundary
+
+No new request path and no change to an existing one. Verified per site: the
+limiter still runs at stage **b**, before the shared Zod parse at stage **c**
+(`newsletter-address` still keys on the canonical lowercased address stage c
+produces, since the parse still runs before that spend); `lib/auth/tenant.ts`
+still spends the limiter **after** the deletion lock and `authorize`, so a
+refusal still spends no token; every cron route's `CRON_SECRET` check still
+precedes the spend; every action still returns
+`{ ok: true } | { ok: false, error, fieldErrors? }` and never throws.
+
+### Secrets and data
+
+No environment variable read, added or changed. Nothing is logged by
+`spendLimit` on any path — confirmed by reading the finished file rather than
+assumed, since this was the rule the prompt flagged as most at risk.
+
+### Non-goals honoured
+
+No policy, window, prefix or key treatment in `lib/rate-limit/policies.ts`
+changed. No user-visible sentence, status code or posture changed (see the
+equivalence table). `lib/auth/tenant.ts`'s `authorize` hook was not adopted at
+any of the nine sites that still check the role inline — that is a separate,
+recorded finding (Phase A, Standards #3). No test infrastructure added, no
+Redis mock, no e2e spec added. `vitest.config.mts`'s scope is unchanged.
+
+### Where this leaves Phase B's candidate list
+
+Candidate 1 is landed. Candidates 2–6 (collapsing the arm-and-confirm control,
+one CSV intake for the two upload paths, the public write path's missing gate,
+letting the submit lifecycle name the invocation, and the tenant sentence set
+in two homes) remain open — nothing in this prompt bears on any of them, and
+`spendLimit` is deliberately the module candidate 4 would call rather than a
+part of that candidate's own scope.
