@@ -352,3 +352,15 @@ careers.html        Careers — Aetherfield
 
 `SiteFooter`, `SiteNav`, the font setup in `layout.tsx` and every piece of
 visible on-page copy are untouched.
+
+### Footer band motion — prompt 132
+
+On 20 September 2026 the user authorised continuous unwinding motion inside the
+settled fabric band. `FooterTexture` now wraps the original Image, retaining its
+responsive classes, dimensions, centred crop and no-JavaScript/reduced-motion
+fallback. A decorative canvas deforms the existing texture within that same box.
+The footer navigation, text reveal, wordmark and all surrounding geometry remain
+unchanged. Before/after bounds match at 375, 800 and 1280; masked comparisons
+outside the band return zero pixel differences. Motion parameters, lifecycle,
+verification limits and the session recording are in `docs/motion-site.md`,
+"Footer texture unwinding".

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { DemoRequestDialog } from "./lead/demo-request-dialog";
 import { FooterMotion } from "./motion/footer-reveal";
+import { FooterTexture } from "./motion/footer-texture";
 import { NavDrop } from "./motion/nav-drop";
 import { NewsletterSubscribeDialog } from "./newsletter/subscribe-dialog";
 import { Button, ButtonLink, LinkButton, Wordmark } from "./primitives";
@@ -242,15 +243,17 @@ export function SiteFooter() {
 
       {/* Halftone-screened fabric band */}
       <div className="mx-auto max-w-page px-5 lg:px-6">
-        <Image
-          src="/assets/generated/texture-brand.png"
-          alt=""
-          width={1800}
-          height={409}
-          sizes="100vw"
-          aria-hidden
-          className="h-[120px] w-full object-cover sm:h-[210px] lg:h-[280px]"
-        />
+        <FooterTexture>
+          <Image
+            src="/assets/generated/texture-brand.png"
+            alt=""
+            width={1800}
+            height={409}
+            sizes="100vw"
+            aria-hidden
+            className="h-[120px] w-full object-cover sm:h-[210px] lg:h-[280px]"
+          />
+        </FooterTexture>
       </div>
 
       {/* Oversized wordmark, sharing the band's 20px gutter and cropped at the

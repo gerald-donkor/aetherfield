@@ -1383,3 +1383,28 @@ Remove the worktrees before believing a root-level lint.
 **Standing instruction:** each session, watch for steps repeated by hand and add
 the mechanical ones here, so later sessions start from the command rather than
 the investigation.
+
+## Footer canvas verification — prompt 132
+
+The homepage has two semantic footers: the testimonial attribution and SiteFooter.
+Use `footer.bg-brand` for shared-footer browser probes. After a viewport resize,
+scroll it back into view before asserting that its animation clock resumes;
+responsive page height can otherwise put the target offscreen legitimately.
+
+For footer-only pixel comparisons, subtract the footer's document y from the
+image's document y, then mask the entire rasterized band: floor the top edge and
+ceil the bottom edge. A fractional footer screenshot crop can include one more
+edge row than the band's integer CSS height. Report that edge coverage explicitly.
+Compare the band separately, and retain the existing page-wide motion masks.
+
+A shader period can be checked without waiting for a lucky video frame: inside
+one synchronous browser evaluation, set its phase uniform to 0 and 2π, draw and
+readPixels after each. Compare these byte arrays and also nearby phase samples.
+Do not leave readPixels in the product's frame loop. Profile separately without
+recordVideo: software rendering plus video encoding materially changed the
+measured frame interval during this session.
+
+Tailwind also scans TypeScript boolean expressions. Negating a variable named
+`visible` emitted an unused important visibility utility (40 bytes). Renaming
+that local to `onScreen` removed the utility. Avoid reproducing the combined
+candidate in documentation, or the explanation itself will keep it emitted.

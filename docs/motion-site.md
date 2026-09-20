@@ -1395,3 +1395,146 @@ reproduced the expected route table (`/`, `/about`, `/careers`,
 `/design-system`, `/journal` `○ Static`; `/article/[slug]` and
 `/job-listing/[slug]` `● SSG`), and lint, typecheck and the 283 `lib/domain/`
 tests all passed.
+
+## Footer texture unwinding — prompt 132 (20 September 2026)
+
+The user explicitly authorised continuous motion inside the otherwise settled
+halftone band. `motion/footer-texture.tsx` wraps the existing Image in a relative
+box; that image still determines layout. One decorative WebGL canvas is appended
+only under the named full-motion media condition. The existing footer text
+reveals, wordmark, navigation, colours and dimensions are unchanged.
+
+Two travelling spatial harmonics deform the existing image coordinates, so the
+printed dots follow the folds. No generated replacement image, particles, model
+call, dependency or rendering library was added. Canvas 2D strip rendering was
+not selected: a shader can deform both axes continuously without strip seams.
+The shader samples the rendered image's current source and reproduces its centred
+object-cover crop. The layer appears only after a successful draw; load, shader,
+context-initialisation or context-loss failure leaves the original image visible.
+Context loss deliberately keeps the fallback until a new mount/media lifecycle.
+
+**Judged parameters, not measurements from the static screenshot:** 18 seconds
+per period, linear GSAP phase (an explicit exception to the shared one-shot reveal
+ease), two waves across the band, horizontal displacement coefficients 0.045 and
+0.018, vertical coefficients 0.115 and 0.035, with sine envelopes pinning each
+axis at its boundaries. Rendering caps device pixel ratio at 1.5 and buffer width
+at 1920. No shared DUR/EASE value changed. Integer phase harmonics make the
+position and its velocity continuous across a repeat.
+
+The scoped useGSAP/matchMedia lifecycle owns the paused tween, canvas, observers,
+image/document/context listeners and GPU resources. IntersectionObserver and
+Page Visibility pause the clock; resuming does not advance it by time spent
+inactive. ResizeObserver updates the cover crop and capped buffer dimensions.
+Reduced motion removes the canvas completely, including when changed live.
+Cleanup kills the clock, disconnects observers, removes listeners, deletes the
+texture/buffer/program/shaders, releases the context and removes the canvas.
+There is no per-frame React state and no contextSafe.
+
+Native APIs were verified in TypeScript's installed `lib.dom.d.ts`; texture
+filtering, non-power-of-two constraints and orientation were also checked against
+[MDN's WebGL texture tutorial](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Using_textures_in_WebGL).
+The installed Next.js `use-client.md` and all seven skills in the prompt were
+read. No dedicated shader/design skill is installed. The browser-use executable
+is absent; verification used the project's installed Playwright package.
+
+### Measured geometry and pixels
+
+Before/after production captures on `/about`, viewport height 900, device scale
+1, fonts ready and text reveals settled. All footer, band, navigation and wordmark
+bounding boxes match exactly at widths 375, 800 and 1280. Band boxes in document
+coordinates:
+
+| viewport | x | y | width | height |
+| --- | --- | --- | --- | --- |
+| 375 | 20 | 5030.65625 | 335 | 120 |
+| 800 | 20 | 3753.484375 | 760 | 210 |
+| 1280 | 24 | 3754.3125 | 1232 | 280 |
+
+Masked footer comparison: `AE 0 (0)` outside the band at all three sizes.
+The mobile raster includes a partial extra edge row: masking only 120 integer
+rows leaves texture pixels, so the mask includes that rasterized edge too.
+The band itself is intentionally different; it was visually inspected in desktop
+and mobile stills and in a recording spanning more than two 18-second periods.
+The folds travel coherently, retaining the yellow/olive print, without exposed
+edges or a reset. This visual assessment is judgement. Numeric wrap probe at
+1232 x 280: phase 0 versus 2π mean byte difference 0.000201, maximum 1;
+adjacent ±0.006-radian frames differ by means 4.471 and 4.459 respectively.
+Reduced-motion and no-JavaScript desktop footer screenshots both compare to the
+original full footer at `AE 0 (0)`.
+
+### Browser checks and performance
+
+Chromium 151.0.7922.34, headless on this Arch Linux workstation, using ANGLE
+Vulkan SwiftShader software rendering at 1280 x 900. A five-second run without
+recording measured 300 draws, median interval 16.7 ms, p95 16.8 ms, and p95 JS
+draw submission 0.1 ms. Submission time is not GPU completion time. Buffer size
+was 1232 x 280. A concurrent recorded run was slower (1747 draws in 38 seconds,
+p95 interval 30.8 ms); it is recorded separately rather than presented as the
+unencumbered frame rate. These are local measurements, not a low-end-device or
+hardware-GPU guarantee.
+
+Chromium checks passed on `/about` and `/`: initial offscreen draw count zero,
+o draws while offscreen or hidden, correct canvas/image alignment after resizing,
+live reduced-motion teardown/restart, context-loss fallback, route away/return,
+no draws against detached canvases, no-JavaScript image and zero page errors.
+The hidden-document case dispatched Page Visibility with a controlled hidden
+property in headless mode; a real OS tab-background transition was not measured.
+Two initial probe failures were harness errors: resizing moved the band offscreen,
+and the homepage has a testimonial footer in addition to the shared footer.
+The corrected probes explicitly scroll back and select `footer.bg-brand`.
+
+WebKit could not run: the documented runner printed `Podman is required for
+WebKit on Arch Linux.` No system packages or alternate ABI libraries were added.
+
+Review artifact for this session: `/tmp/aetherfield-footer-unwinding.mp4` (38-second
+excerpt). Desktop/mobile stills, browser JSON, build logs and the geometry JSON
+are under `/tmp/aetherfield-132-*`; these are local review artifacts, not shipped
+assets. To review live, run `npm run dev`, open `/about` or `/`, scroll to the
+footer, stop scrolling and watch at least 36 seconds. Toggle reduced motion,
+resize across 640/1024px and navigate away/return to check the lifecycle.
+
+### Scope and build verification
+
+Direct SiteFooter consumers are `/`, `/about`, `/journal`, `/careers`,
+`/design-system`, `/article/[slug]`, `/job-listing/[slug]`, `/account`,
+`/dashboard`, `/targets`, `/activity`, `/activity/[importId]`,
+`/activity/mappings`, `/activity/factors`, `/reports`, `/reports/[reportId]`
+and `/submissions`. AuthShell also reaches `/sign-in`, `/sign-up`,
+`/forgot-password`, `/reset-password`, `/verify-email`, `/invitation/[id]`,
+`/newsletter/confirm` and `/newsletter/unsubscribe`. WorkspaceBoundary reaches
+the dashboard/targets/reports/submissions loading and error states and the
+submissions not-found state. No request path, secret or personal data was added.
+
+The baseline and final builds ran at the same repository root to preserve the
+Tailwind scan environment. The 21 prerendered HTML paths and route render modes
+are unchanged. Nineteen footer-containing outputs gain the relative band wrapper
+and changed client code/flight references. Removing that sole wrapper and
+normalizing build/chunk names, with flight payloads separately excluded, leaves
+all 21 rendered markup outputs identical. This is not literal byte identity of
+the changed client payloads. The two outputs without SiteFooter are checked
+separately with content-hashed chunk names.
+
+Checks executed: `npm run lint` and `npm run typecheck` exited 0 without
+diagnostics; `npm test` reported `Test Files 13 passed (13)` and
+`Tests 318 passed (318)`. `npm run build` generated `32/32` static pages and
+retained the existing Static/SSG/Dynamic route table. The first sandboxed build
+could not fetch Archivo, JetBrains Mono and Newsreader; the network-enabled
+retry succeeded without changing the font configuration.
+
+Firefox 153.0 passed the same focused browser checks with zero page errors after
+installing the browser revision required by the existing Playwright package.
+Five seconds produced 300 draws, median interval 17 ms and p95 18 ms; its masked
+renderer string was `Intel(R) HD Graphics, or similar`, so that is not treated as
+an identification of the actual GPU. The p95 JS submission reading rounded to
+0 ms at Firefox's timer precision. No browser package dependency changed.
+
+Final same-root comparison: both non-footer outputs (`_not-found.html` and
+`_global-error.html`) have identical full HTML after build/action normalization
+and content-hashed chunk naming. Both CSS chunks are byte-identical to baseline
+(419907 bytes combined), all 21 rendered markup comparisons pass after removing
+the approved band wrapper, and the complete route tables are identical.
+
+Final production smoke probe passed normal rendering at mobile device scale 3
+(buffer width 503 for a 335px band, respecting the 1.5 cap), forced unavailable
+WebGL, and forced shader compilation failure. Both forced failures kept the image
+fallback; all three cases recorded zero page errors.
