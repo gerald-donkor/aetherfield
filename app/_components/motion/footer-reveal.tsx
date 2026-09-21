@@ -22,6 +22,13 @@ const WORDMARK_BLUR = 16;
    its headline arrives, without the wait. A judgement, not a measurement. */
 const WORDMARK_DELAY = 0.24;
 
+/* Deliberately slower than the desktop navbar's 0.04s / 0.02s quarters and
+   stagger. This is a user-directed pacing judgement; see docs/motion-site.md.
+   EASE remains shared with the rest of the site. */
+const WAVE_DUR = 0.06;
+const WAVE_STAGGER = 0.03;
+const WAVE_Y = 12;
+
 type FooterMotionProps = {
   /** Taken over from the `<footer>` being replaced, so no box is added. */
   className?: string;
@@ -65,15 +72,25 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
 
       mm.add(
         {
+          canHover: "(hover: hover)",
+          finePointer: "(pointer: fine)",
           reduceMotion: "(prefers-reduced-motion: reduce)",
           fullMotion: "(prefers-reduced-motion: no-preference)",
         },
         (context) => {
-          const { reduceMotion } = context.conditions as {
-            reduceMotion: boolean;
-          };
+          const { canHover, finePointer, reduceMotion, fullMotion } =
+            context.conditions as {
+              canHover: boolean;
+              finePointer: boolean;
+              reduceMotion: boolean;
+              fullMotion: boolean;
+            };
+          const canWave = canHover && finePointer && fullMotion;
 
           const lines = gsap.utils.toArray<HTMLElement>("[data-footer-split]");
+          const links = gsap.utils.toArray<HTMLElement>(
+            "a[data-footer-split]",
+          );
           const wordmark = gsap.utils.toArray<HTMLElement>(
             "[data-footer-wordmark]",
           );
@@ -96,6 +113,7 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
           // Same shape as the capabilities section's on-screen gate.
           let entered = false;
           const pending = new Set<gsap.core.Tween>();
+          const waves = new Map<HTMLElement, gsap.core.Timeline>();
           const gate = (t: gsap.core.Tween) => {
             if (entered) t.play();
             else {
@@ -116,8 +134,24 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
             },
           });
 
+          const removers: Array<() => void> = [];
+          if (canWave) {
+            links.forEach((link) => {
+              const replay = () => waves.get(link)?.restart();
+              link.addEventListener("pointerenter", replay);
+              link.addEventListener("pointerleave", replay);
+              removers.push(() => {
+                link.removeEventListener("pointerenter", replay);
+                link.removeEventListener("pointerleave", replay);
+              });
+            });
+          }
+
           SplitText.create(lines, {
-            type: "words",
+            // One SplitText owner preserves the entrance's original global
+            // word order while, only where the wave can run, making its
+            // generated characters available to link-local timelines.
+            type: canWave ? "words,chars" : "words",
             // The pieces sit inside `<a>` and `<p>`, so a `<div>` would be
             // invalid markup. Spans then need an explicit `inline-block` or the
             // `y` will not render; it is set for the tween's duration only and
@@ -134,7 +168,7 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
               // between two `blur()` functions. `clearProps` may never touch
               // opacity or transform: that hands the element back to the CSS
               // start state in `globals.css` and it vanishes.
-              return gate(
+              const entrance = gate(
                 gsap.from(self.words, {
                   opacity: 0,
                   filter: `blur(${SPLIT_BLUR}px)`,
@@ -145,6 +179,66 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
                   clearProps: "filter,display",
                 }),
               );
+
+              // `autoSplit` replaces generated nodes on font readiness and
+              // resplits. Kill the previous paused timelines before pointing
+              // the stable native listeners at their fresh character nodes.
+              waves.forEach((timeline) => timeline.kill());
+              waves.clear();
+
+              if (!canWave) return entrance;
+
+              links.forEach((link) => {
+                const chars = self.chars.filter((char) => link.contains(char));
+                if (!chars.length) return;
+
+                // SplitText's inline spans accept GSAP matrices but do not
+                // paint them; transformable inline-level boxes retain normal
+                // text flow without a global style or utility.
+                gsap.set(chars, { display: "inline-block" });
+
+                const timeline = gsap.timeline({ paused: true });
+                timeline
+                  .fromTo(
+                    chars,
+                    { y: 0, rotation: 0 },
+                    {
+                      keyframes: [
+                        {
+                          y: -WAVE_Y,
+                          rotation: 90,
+                          duration: WAVE_DUR,
+                          ease: EASE,
+                        },
+                        {
+                          y: 0,
+                          rotation: 180,
+                          duration: WAVE_DUR,
+                          ease: EASE,
+                        },
+                        {
+                          y: WAVE_Y,
+                          rotation: 270,
+                          duration: WAVE_DUR,
+                          ease: EASE,
+                        },
+                        {
+                          y: 0,
+                          rotation: 360,
+                          duration: WAVE_DUR,
+                          ease: EASE,
+                        },
+                      ],
+                      stagger: { each: WAVE_STAGGER, from: "start" },
+                      transformOrigin: "50% 50%",
+                      immediateRender: false,
+                    },
+                  )
+                  .set(chars, { y: 0, rotation: 0 });
+                waves.set(link, timeline);
+              });
+
+              return entrance;
             },
           });
 
@@ -180,6 +274,12 @@ export function FooterMotion({ className, children }: FooterMotionProps) {
               ),
             );
           }
+
+          return () => {
+            removers.forEach((remove) => remove());
+            waves.forEach((timeline) => timeline.kill());
+            waves.clear();
+          };
         },
         root,
       );

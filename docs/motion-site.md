@@ -1983,3 +1983,24 @@ a fabricated result. No route mode, server/data path, footer geometry, CSS,
 shader aesthetic or interaction behaviour was intentionally changed; the
 approved Image source, intrinsic metadata and responsive URLs are the sole
 prerendered-markup delta.
+
+## Responsive footer link wave — prompt 141 (21 September 2026)
+
+Prompt 140's footer character wave incorrectly made `min-width: 48rem` one of
+its activation conditions. That was a viewport proxy for input capability, so a
+fine-pointer, hover-capable tablet could not receive the enhancement. The footer
+now gates the character split and prebuilt wave timelines solely on named
+`hover: hover`, `pointer: fine`, and reduced-motion no-preference conditions.
+Coarse, non-hover, and reduced-motion contexts retain the original word-only
+split entrance and ordinary link markup; the five destinations, layout, and
+scroll-triggered entrance are unchanged.
+
+This is a runtime-only shared client change. The production build compiled in
+9.2 seconds, finished TypeScript in 8.9 seconds, generated 32/32 static pages
+in 509ms, and retained the existing route classifications. `npm run lint`,
+`npm run typecheck`, `npm test` (13 files, 318 tests), and `git diff --check`
+all exited 0. The local Playwright matrix also exited 0: 110 passed across
+Chromium and Firefox, with 12 existing skipped tests. WebKit remains unavailable
+because Podman is not installed on this Arch Linux host. The initial sandboxed
+build and E2E startup could not fetch the three configured Google Fonts; each
+succeeded on the authorised network-enabled retry.
