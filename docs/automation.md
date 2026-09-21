@@ -1408,3 +1408,13 @@ Tailwind also scans TypeScript boolean expressions. Negating a variable named
 `visible` emitted an unused important visibility utility (40 bytes). Renaming
 that local to `onScreen` removed the utility. Avoid reproducing the combined
 candidate in documentation, or the explanation itself will keep it emitted.
+
+### Comparing pointer influence at a fixed autonomous phase — prompt 134
+
+For a shader with pointer uniforms, capture the current uniforms and read the
+pixels, zero only the pointer uniforms and draw/read again synchronously, then
+restore the uniforms. Keeping phase unchanged separates input response from
+ordinary animation. Compare a nearby region and a distant region independently;
+repeat after exit to measure decay. Query each array element's uniform location
+when reading a GLSL uniform array: reading its first location does not return the
+whole array. Keep GPU readback out of product code and performance samples.

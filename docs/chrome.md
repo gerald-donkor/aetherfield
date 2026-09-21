@@ -364,3 +364,8 @@ unchanged. Before/after bounds match at 375, 800 and 1280; masked comparisons
 outside the band return zero pixel differences. Motion parameters, lifecycle,
 verification limits and the session recording are in `docs/motion-site.md`,
 "Footer texture unwinding".
+
+Prompt 134 extends that same band canvas with a material-driven dot field and
+local decaying mouse influence. The source fallback, crop, dimensions and all
+surrounding footer geometry remain unchanged; see `docs/motion-site.md` for the
+rendering choices, pointer lifecycle and measured comparisons.

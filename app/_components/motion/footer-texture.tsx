@@ -23,6 +23,8 @@ const FRAGMENT = `
   uniform sampler2D fabric;
   uniform vec2 crop;
   uniform float phase;
+  uniform vec2 size;
+  uniform vec4 wake[3];
   varying vec2 uv;
   void main() {
     // Interleaved travelling folds, with the edges pinned to avoid seams.
@@ -33,8 +35,38 @@ const FRAGMENT = `
       0.045 * sin(wave) + 0.018 * sin(wave * 2.0 + uv.y * 3.0),
       0.115 * cos(wave) + 0.035 * sin(wave * 2.0)
     ) * envelope;
-    vec2 sampleUV = (uv + offset - 0.5) * crop + 0.5;
-    gl_FragColor = texture2D(fabric, sampleUV);
+    // Distances and velocity are in band-height units, independent of aspect.
+    vec2 aspect = vec2(size.x / size.y, 1.0);
+    vec2 disturbance = vec2(0.0);
+    for (int i = 0; i < 3; i++) {
+      vec2 delta = (uv - wake[i].xy) * aspect;
+      float falloff = 1.0 - smoothstep(0.0, 0.65, length(delta));
+      vec2 velocity = wake[i].zw;
+      float turn = velocity.x * delta.y - velocity.y * delta.x;
+      disturbance += falloff * falloff *
+        (velocity + vec2(-delta.y, delta.x) * turn * 2.0) / aspect;
+    }
+    vec2 flow = uv + offset + disturbance * envelope;
+    vec2 sampleUV = (flow - 0.5) * crop + 0.5;
+    // Sample the material at a small neighbourhood to recover fold density
+    // without screening its original printed dots a second time.
+    vec2 spread = crop * vec2(3.0) / size;
+    vec3 material = (texture2D(fabric, sampleUV + spread).rgb +
+      texture2D(fabric, sampleUV - spread).rgb +
+      texture2D(fabric, sampleUV + vec2(spread.x, -spread.y)).rgb +
+      texture2D(fabric, sampleUV + vec2(-spread.x, spread.y)).rgb) * 0.25;
+    float density = clamp((1.0 - material.r) / 0.6, 0.0, 1.0);
+    // A staggered screen carried by the same folds; periodic fine drift means
+    // dots reorganise continuously without a phase reset or random particles.
+    vec2 screen = (uv + offset * 0.24 + disturbance * envelope) * size / 3.8;
+    screen += vec2(sin(wave), cos(wave * 2.0)) * 0.32;
+    screen.x += mod(floor(screen.y), 2.0) * 0.5;
+    float radius = mix(0.12, 0.66, density);
+    float dotInk = 1.0 - smoothstep(radius - 0.10, radius + 0.10,
+      length(fract(screen) - 0.5));
+    vec3 paper = vec3(1.0, 0.9608, 0.2745);
+    vec3 ink = vec3(0.4, 0.3922, 0.0588);
+    gl_FragColor = vec4(mix(mix(paper, ink, dotInk), material, 0.24), 1.0);
   }
 `;
 
@@ -79,10 +111,64 @@ export function FooterTexture({ children }: { children: ReactNode }) {
       let uploadedSource = "";
       let phaseLocation: WebGLUniformLocation | null = null;
       let cropLocation: WebGLUniformLocation | null = null;
+      let sizeLocation: WebGLUniformLocation | null = null;
+      let wakeLocation: WebGLUniformLocation | null = null;
+      const wakes = new Float32Array(12);
+      const pointer = { x: 0.5, y: 0.5, vx: 0, vy: 0, time: 0 };
+      let bounds = { left: 0, top: 0, width: 1, height: 1 };
+      let lastDraw = 0;
+      const resetInput = () => {
+        pointer.time = 0;
+        pointer.vx = pointer.vy = 0;
+        wakes.fill(0);
+        lastDraw = 0;
+      };
+      const leave = () => { pointer.time = 0; };
+      const move = (event: PointerEvent) => {
+        if (event.pointerType !== "mouse" || !onScreen || document.hidden || failed) return;
+        const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+        const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
+        const elapsed = (event.timeStamp - pointer.time) / 1000;
+        if (pointer.time && elapsed > 0 && elapsed < 0.15) {
+          const vx = (x - pointer.x) * bounds.width / bounds.height / elapsed;
+          const vy = (y - pointer.y) / elapsed;
+          const scale = 0.055 / Math.max(1, Math.hypot(vx, vy) / 2);
+          pointer.vx = vx * scale;
+          pointer.vy = vy * scale;
+        }
+        pointer.x = x;
+        pointer.y = y;
+        pointer.time = event.timeStamp;
+      };
+      // Read geometry on layout/scroll changes, never on pointermove or draw.
+      const measure = () => { bounds = image.getBoundingClientRect(); resetInput(); };
       const clock = { phase: 0 };
 
       const draw = () => {
         if (!ready || failed || !onScreen || document.hidden) return;
+        const now = performance.now();
+        const dt = lastDraw ? Math.min((now - lastDraw) / 1000, 0.05) : 0;
+        lastDraw = now;
+        const follow = 1 - Math.exp(-dt / 0.08);
+        pointer.vx *= Math.exp(-dt / 0.18);
+        pointer.vy *= Math.exp(-dt / 0.18);
+        for (let i = 2; i >= 0; i--) {
+          const index = i * 4;
+          const x = i ? wakes[index - 4] : pointer.x;
+          const y = i ? wakes[index - 3] : pointer.y;
+          if (Math.hypot(wakes[index + 2], wakes[index + 3]) < 0.0001) {
+            wakes[index] = x;
+            wakes[index + 1] = y;
+          } else {
+            wakes[index] += (x - wakes[index]) * follow;
+            wakes[index + 1] += (y - wakes[index + 1]) * follow;
+          }
+          const vx = i ? wakes[index - 2] * 0.65 : pointer.vx;
+          const vy = i ? wakes[index - 1] * 0.65 : pointer.vy;
+          wakes[index + 2] += (vx - wakes[index + 2]) * follow;
+          wakes[index + 3] += (vy - wakes[index + 3]) * follow;
+        }
+        gl.uniform4fv(wakeLocation, wakes);
         gl.uniform1f(phaseLocation, clock.phase);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       };
@@ -91,7 +177,9 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         ease: "none", paused: true, onUpdate: draw,
       });
       const sync = () => {
-        tween.paused(!ready || failed || !onScreen || document.hidden);
+        const paused = !ready || failed || !onScreen || document.hidden;
+        if (paused) resetInput();
+        tween.paused(paused);
       };
       const fail = () => {
         failed = true;
@@ -100,12 +188,14 @@ export function FooterTexture({ children }: { children: ReactNode }) {
       };
       const resize = () => {
         if (!ready || failed) return;
-        const { width, height } = image.getBoundingClientRect();
+        measure();
+        const { width, height } = bounds;
         if (!width || !height) return;
         const ratio = Math.min(window.devicePixelRatio, MAX_DPR, MAX_WIDTH / width);
         canvas.width = Math.max(1, Math.round(width * ratio));
         canvas.height = Math.max(1, Math.round(height * ratio));
         gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.uniform2f(sizeLocation, width, height);
         const cover = Math.max(width / image.naturalWidth, height / image.naturalHeight);
         gl.uniform2f(cropLocation,
           width / (image.naturalWidth * cover),
@@ -150,7 +240,7 @@ export function FooterTexture({ children }: { children: ReactNode }) {
           else fail();
         }
       };
-      const onVisibility = () => { draw(); sync(); };
+      const onVisibility = () => { resetInput(); draw(); sync(); };
       // Keep the fallback after context loss; a later mount can try afresh.
       const onContextLost = () => fail();
 
@@ -180,6 +270,8 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
         phaseLocation = gl.getUniformLocation(program, "phase");
         cropLocation = gl.getUniformLocation(program, "crop");
+        sizeLocation = gl.getUniformLocation(program, "size");
+        wakeLocation = gl.getUniformLocation(program, "wake[0]");
         gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -190,6 +282,10 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         image.addEventListener("error", fail);
         canvas.addEventListener("webglcontextlost", onContextLost);
         document.addEventListener("visibilitychange", onVisibility);
+        host.addEventListener("pointermove", move, { passive: true });
+        host.addEventListener("pointerleave", leave);
+        host.addEventListener("pointercancel", leave);
+        window.addEventListener("scroll", measure, { passive: true });
         sizing.observe(image);
         visibility.observe(host);
       } catch {
@@ -205,6 +301,10 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         image.removeEventListener("error", fail);
         canvas.removeEventListener("webglcontextlost", onContextLost);
         document.removeEventListener("visibilitychange", onVisibility);
+        host.removeEventListener("pointermove", move);
+        host.removeEventListener("pointerleave", leave);
+        host.removeEventListener("pointercancel", leave);
+        window.removeEventListener("scroll", measure);
         gl.deleteTexture(texture);
         gl.deleteBuffer(buffer);
         gl.deleteProgram(program);

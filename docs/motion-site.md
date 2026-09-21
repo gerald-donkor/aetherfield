@@ -1592,3 +1592,106 @@ JetBrains Mono and Newsreader from Google Fonts; the network-enabled retry
 compiled successfully in 19.8 seconds, completed TypeScript in 13.7 seconds and
 generated all pages. No source, amplitude, direction, resolution, fallback,
 lifecycle, cleanup, layout, server-rendered markup or CSS changed.
+
+## Footer pixel flow and pointer influence — prompt 134 (21 September 2026)
+
+The user approved combining the existing fabric motion with the dot-field quality
+of `/home/dgk/Videos/screenrecording-2026-09-21_00-10-15.mp4`, plus mouse influence.
+The reference shows broad flowing light/dark bands and regular halftone dots;
+it does not establish a particle simulation or click physics. Our implementation
+is a shader field, with no simulation dependency or additional canvas.
+
+The original image remains both material input and static fallback. Four nearby
+samples estimate its fold density; a staggered dot screen varies radius with that
+density and travels with the existing folds. A small periodic screen displacement
+adds fine flow. The screen uses the existing brand and brand-ink colours, blended
+with the material. All phase terms are integer harmonics of the existing linear
+12-second clock. The retained source image, crop, wrapper and reveal are unchanged.
+
+Mouse movement on the band supplies normalized local position and bounded velocity.
+Three smoothed wake samples displace the material and dots together, with a local
+rotational term and compact spatial falloff. The base phase never stops for hover.
+Touch pointer events are ignored, with no capture or preventDefault, preserving
+native scrolling. Leave/cancel discards the velocity sampling baseline while the
+wake decays; resize, scroll, hidden/offscreen transitions reset transient input and
+frame timing. Geometry is read on resize/scroll, never per pointer event or frame.
+All added listeners and GPU resources belong to the existing media lifecycle.
+
+**Design judgements, not measurements from the recording:** 3.8 CSS-pixel dot
+pitch; radius 0.12–0.66 cell units with 0.10 edge smoothing; 24% material blend;
+0.32-cell fine drift; screen follows 24% of the broad deformation. Pointer radius
+is 0.65 band heights with squared smooth falloff; velocity saturates at 2 band
+heights/second before a 0.055 displacement scale. Following uses an 80 ms time
+constant, input decays over 180 ms, and successive wakes retain 65% strength.
+Frame integration is capped at 50 ms; the existing 1.5 DPR / 1920px width caps
+remain. These are tuned visual choices, not a claim to reproduce the reference's
+unknown algorithm. No dedicated shader/design skill is installed. Native pointer
+and uniform APIs were checked in installed TypeScript DOM declarations.
+
+### Verification
+
+Baseline and final production captures at widths 375, 800 and 1280 show identical
+footer, band, nav and wordmark boxes. The band remains 120/210/280px high. Masked
+footer comparisons all report `AE 0 (0)` outside the band, including the fractional
+mobile edge row. The original no-JavaScript and reduced-motion image remains.
+The dot field retains recognizable yellow/olive folds and local flow; that visual
+assessment is judgement. Scratch captures and browser probes use the prefix
+`/tmp/aetherfield-134-`.
+
+A synchronous same-phase GPU readback compares actual mouse uniforms against zero
+wake uniforms. The initial unrecorded sweep measured nearby mean RGB difference
+27.085 levels and distant difference 0. After stopping for one second and leaving
+for two seconds, the local difference was 0; stationary re-entry remained 0.
+Phase 0 versus 2π measured mean byte difference 0.000202, maximum 1, confirming
+numerical wrap continuity. The readback runs only in the probe, never the product.
+
+Chromium 151.0.7922.34 and Firefox 153.0 passed `/about` and `/` lifecycle probes:
+no initial offscreen work, zero draws offscreen/hidden, resume, live reduced-motion
+teardown/restart, resize alignment, context-loss fallback, route away/return and
+no detached-canvas draws. Both recorded zero page errors; console error events
+were captured explicitly and none appeared. Hidden state is a controlled Page
+Visibility event in headless mode, not a measured OS background-tab transition.
+Mobile DPR 3 renders a 503px buffer for the 335px band. Forced unavailable WebGL
+and shader compilation failure retain the loaded image with no page errors.
+
+Unrecorded five-second lifecycle samples at a 1232×280 buffer: Chromium measured
+221 draws, median 21.3 ms, p95 29.8 ms, p95 JS submission 0.1 ms; Firefox measured
+300 draws, median 17 ms, p95 18 ms, submission rounded to 0 ms. Chromium identifies
+ANGLE Vulkan SwiftShader; Firefox exposes the masked `Intel(R) HD Graphics, or
+similar` string, which does not identify the physical GPU. These are local browser
+measurements, not hardware-GPU or low-end-device guarantees. JS submission does
+not measure GPU completion. Recorded timing is kept separate from these samples.
+
+`npm run lint` and `npm run typecheck` exit 0 without diagnostics. `npm test`:
+`Test Files 13 passed (13)` and `Tests 318 passed (318)`. The baseline's sandboxed
+build could not fetch the three Google Fonts; the authorized network-enabled
+build succeeded. Production builds generate 32/32 pages and retain the same route
+classifications. All 21 prerendered paths retain identical rendered markup after
+build/chunk normalization and separating flight scripts. Client chunk contents
+and references change; literal HTML byte identity is not claimed. Both CSS chunks
+remain byte-identical, 419907 bytes combined, with builds in the same root scan
+environment. No route, server boundary, dependency, secret or backend changed.
+
+`npm run test:e2e:webkit` cannot run: `Podman is required for WebKit on Arch Linux.`
+No system packages were installed. WebKit verification remains an environmental
+gap. Review locally with `npm run dev`, open `/about`, scroll to the footer and
+watch two 12-second cycles, then sweep the mouse slowly, reverse quickly, stop,
+leave and re-enter. Toggle reduced motion and resize across the existing breakpoints.
+
+A separate unrecorded pointer profile measured idle median/p95 20.3/25.7 ms
+(236 draws in five seconds), and moving-pointer median/p95 20.1/25.0 ms
+(121 draws during the sweep), with p95 submission 0.1 ms for each. Same-phase
+nearby/distant differences on this repeat were 24.923/0 RGB levels and settled
+to 0 again. Variation in nearby difference is expected from different sweep
+phase and velocity. Coarse touch input produced zero pointer displacement while
+the autonomous canvas remained visible; high-DPI/failure checks also passed in
+that mobile context. The film includes at least 24.5 seconds of idle motion plus
+slow sweeps, fast reversals, stopping, exit and re-entry.
+
+Final build output: `Compiled successfully in 24.4s`, `Finished TypeScript in
+21.8s`, `Generating static pages using 7 workers (32/32) in 1936ms`. The final
+route table compares exactly to baseline, with 21/21 rendered markup comparisons
+and the same byte-identical CSS result. Review video:
+`/tmp/aetherfield-footer-pixel-flow.mp4`; sampled motion sheet:
+`/tmp/aetherfield-134-motion-sheet.png`. These are local review artifacts, not
+shipped assets. The unrelated `.claude/settings.local.json` is preserved.
