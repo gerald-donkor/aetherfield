@@ -1,13 +1,11 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import { useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 
+import { authClient } from "../../../lib/auth/client";
 import { Button, ButtonLink, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-
-const authClient = createAuthClient();
 
 export function VerifyEmailResult() {
   const searchParams = useSearchParams();

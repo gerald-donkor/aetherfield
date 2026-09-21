@@ -1,15 +1,13 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useState } from "react";
 
+import { authClient } from "../../../lib/auth/client";
 import { Button, Field } from "../primitives";
 import { GoogleSignInButton } from "./google-sign-in-button";
 import { FormStatus } from "../form-status";
-
-const authClient = createAuthClient();
 
 /* The same discriminated path `/sign-up` uses. A bare boolean would let a
    Google attempt and an email attempt run at once and report over each other. */
@@ -71,12 +69,10 @@ export function SignInForm() {
         return;
       }
 
-      /* Kept at prompt 109, for the reason `sign-out-button` gives: Better
-         Auth's client is not a Server Action, so no `revalidatePath` runs and
-         nothing invalidates the router cache. The refresh is what makes
-         `/account` render against the session that has just been created. */
+      /* The shared Better Auth client invalidates the navbar's session atom.
+         This uncached destination navigation performs the authoritative
+         `/account` render against the newly written HttpOnly cookie. */
       router.replace("/account");
-      router.refresh();
     } catch {
       setMessage("We couldn't sign you in. Check your details and try again.");
     } finally {

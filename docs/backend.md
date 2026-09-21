@@ -14273,3 +14273,113 @@ rather than a silent one:
   nothing in AGENTS.md §6.3 requires one `actions.ts` per route directory, and
   each rate-limit wrapper carries its own docblock justifying its number. Not
   restructured.
+
+---
+
+## Shared browser auth client and the post-login transition, prompt 142
+
+Implemented on 21 September 2026. The navbar and seven auth leaves had each
+constructed a separate `createAuthClient()` result. Better Auth 1.6.26's
+installed `config.mjs` registers `/sign-in/email` and `/sign-out` as
+`$sessionSignal` mutations, but a signal only reaches subscribers on the same
+client store. `lib/auth/client.ts` now owns the one browser-only client and all
+eight consumers import it. `lib/auth/server.ts`, `proxy.ts`, the catch-all
+handler, cookies, origins, rate limits and every database-backed authorisation
+check are unchanged.
+
+The installed sign-in endpoint exposed a second part of the regression during
+the new browser test: `callbackURL` is both the callback embedded in an
+unverified account's replacement verification message and the automatic
+redirect returned for a successful verified sign-in. The form must keep the
+settled `/verify-email?verified=1` callback for the former, while its successful
+path must make the one intentional navigation to `/account`. The shared client
+therefore carries one narrow pre-redirect Better Fetch hook: only a successful
+`/sign-in/email` response has its client-side `redirect` flag suppressed.
+Social sign-in and every other Better Auth redirect keep the library default;
+the email endpoint still receives the same absolute verification callback.
+
+With that one store, sign-in and sign-out no longer follow `router.replace()`
+with `router.refresh()`. The session mutation refetches the mounted navbar's
+atom, while the destination navigation renders the authoritative server route
+against the changed HttpOnly cookie. Sign-out was re-evaluated separately: its
+shared signal clears the navbar, `/sign-in` is public, and a subsequent direct
+`/account` request is still rejected by the server and redirected with the
+exact callback.
+
+### Regression fixture and measured transition
+
+`e2e/auth-transition.spec.ts` reserves one generated, verified account that is
+not signed in during setup. Its random password exists only in the gitignored
+`e2e/.auth/run.json`; teardown deletes the exact user/account/session rows and
+then confirms every counted relation has returned to its pre-run count. The
+request-count assertion runs in Chromium only so two browser projects cannot
+spend one one-time credential concurrently; Firefox records the intentional
+skip and the rest of its auth matrix still runs.
+
+The focused production run measured, from the submit boundary:
+
+| observation | result |
+| --- | ---: |
+| `POST /api/auth/sign-in/email` | **1** |
+| `GET /api/auth/get-session` caused by the mutation | **1** |
+| `GET /account` document/RSC requests | **1**, at **1,394 ms** |
+| browser `navigation` entries | unchanged |
+| final navbar after a 1.5 s stability window | **Account** |
+
+The full native matrix repeated the same **1 / 1 / 1** request counts with the
+account request at **1,521 ms**. It then signed out, observed `Get started`, and
+confirmed a direct `/account` visit returned to
+`/sign-in?callbackURL=%2Faccount`. This is measured request behavior; the
+absence of the former visual churn is a judgement on it.
+
+A separate `next dev` attempt used an isolated agent-browser session, a
+temporary verified account and port 3102. The first start found the old
+Turbopack persistence store corrupt (`ArrayLengthMismatch`); `.next/dev` was
+moved aside and the clean server started in 208 ms. Agent-browser's credential
+helper filled the React form but submitted it as the browser's native GET,
+placing the synthetic fields in the query rather than invoking the hydrated
+handler. No auth POST occurred, so that run is **not** counted as a development
+transition measurement. The HAR stayed local, the vault/browser were removed,
+the exact synthetic user was deleted, and a database readback returned zero.
+The production browser regression is the acceptance evidence; no development
+request count is fabricated from the failed driver path.
+
+### Prerender and bundle impact
+
+Two detached builds at parent `0b955c8` and the implementation produced the
+same route table: the marketing/auth routes remain `○ Static`, six articles
+and three job listings remain `● SSG`, and authenticated/API routes remain
+`ƒ Dynamic`. All **21** prerendered files have byte-identical visible markup
+after removing scripts and preloads. Their normalized full HTML differs only
+because the shared client changes the content-hashed JavaScript reference; the
+sole CSS chunk is byte-identical at **75,966 bytes** (`828a0a295483`).
+
+Representative client chunk counts are unchanged: 10 for `/`, `/about`,
+`/careers`, `/journal`, `/sign-in` and the sampled job listing; 9 for
+`/design-system` and the sampled article. Raw route totals change by
+**+243 to +295 bytes**; gzip totals range from **-206 to +94 bytes** depending
+on chunk compression. The emitted-chunk counts containing the Better Auth
+sign-in path and SplitText are unchanged (**9** and **11**, respectively), so
+the refactor adds neither a second auth implementation nor a second GSAP copy.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `npm run lint` | exit 0, no output |
+| `npm run typecheck` | exit 0, no output |
+| `npm test` | 13 files, **318 passed** |
+| `npm run build` | exit 0; route modes unchanged as above |
+| focused auth Playwright run | **3 passed** (setup, regression, teardown) in 1.7 min |
+| `npm run test:e2e:local` | **110 passed, 13 skipped, 1 failed** in 3.7 min |
+| `git diff --check` | exit 0, no output |
+
+The full-matrix failure is outside this change:
+`market-based-scope-2.spec.ts` timed out in Chromium waiting for its existing
+market-rate success message, while Firefox passed the same case. The auth
+transition itself passed before that failure, and teardown restored every
+counted fixture relation. An immediate isolated Chromium rerun of that whole
+file completed **6 passed** (setup, four cases, teardown) in 4.8 min, confirming
+the full-matrix result was transient rather than an auth-client regression. The
+existing `pg` future-SSL warning and suppressed verification-email transport
+messages also remain unchanged.

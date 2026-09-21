@@ -1,12 +1,10 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import { type FormEvent, useState } from "react";
 
+import { authClient } from "../../../lib/auth/client";
 import { Button, Field } from "../primitives";
 import { FormStatus } from "../form-status";
-
-const authClient = createAuthClient();
 
 export function ForgotPasswordForm() {
   const [pending, setPending] = useState(false);

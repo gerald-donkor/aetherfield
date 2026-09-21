@@ -1,6 +1,5 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import {
   type FormEvent,
   useCallback,
@@ -9,11 +8,10 @@ import {
   useState,
 } from "react";
 
+import { authClient } from "../../../lib/auth/client";
 import { Button, Field } from "../primitives";
 import { GoogleSignInButton } from "./google-sign-in-button";
 import { FormStatus } from "../form-status";
-
-const authClient = createAuthClient();
 
 type PendingPath = "email" | "google" | null;
 

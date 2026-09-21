@@ -1,12 +1,10 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { authClient } from "../../../lib/auth/client";
 import { Button } from "../primitives";
-
-const authClient = createAuthClient();
 
 export function SignOutButton() {
   const router = useRouter();
@@ -41,15 +39,11 @@ export function SignOutButton() {
               setError("We couldn't sign you out. Try again.");
               return;
             }
-            /* `router.refresh()` is **not** redundant here, and prompt 109
-               kept it deliberately while removing ten others. Better Auth's
-               client is not a Server Action: nothing calls `revalidatePath`,
-               so nothing invalidates the router cache. The session cookie has
-               just changed, and this is what makes the destination render
-               against the new one instead of the entry the client already
-               holds. */
+            /* The shared client clears every mounted session subscriber after
+               sign-out. The destination is public, so one navigation is the
+               complete client transition; protected routes still re-check the
+               database-backed session on the server. */
             router.replace("/sign-in");
-            router.refresh();
           } catch {
             setError("We couldn't sign you out. Try again.");
           } finally {

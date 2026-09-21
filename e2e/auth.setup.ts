@@ -267,6 +267,17 @@ setup("provisions the authenticated fixture", async ({ browser, baseURL }) => {
     staffRole: "staff",
   });
 
+  /* A credential that is deliberately not signed in during setup. Chromium
+     uses the public form to create its first session, which lets the suite
+     observe the mutation signal and the single `/account` navigation. */
+  const authTransition = await provision(browser, baseURL!, {
+    role: "auth-transition",
+    runId,
+    password,
+    cleanup,
+    organization: null,
+  });
+
   /* One grant target per browser project. Ordinary verified accounts with no
      role at all — the state a public sign-up leaves a user in (11.2 rule 3) —
      and the rows `StaffRoleControl` acts on. One each, because the projects run
@@ -297,6 +308,7 @@ setup("provisions the authenticated fixture", async ({ browser, baseURL }) => {
     neighbourOrganization: neighbour.organization!,
     adminUser: admin.user,
     staffUser: staff.user,
+    authTransition: { user: authTransition.user, password },
     grantTargets,
     before,
     rateLimitBefore,

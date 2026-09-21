@@ -1,9 +1,8 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import { useEffect } from "react";
 
-const authClient = createAuthClient();
+import { authClient } from "../../../lib/auth/client";
 
 const GENERIC_FAILURE =
   "We couldn't connect your Google account. Please try again.";

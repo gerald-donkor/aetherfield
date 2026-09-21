@@ -131,6 +131,12 @@ export type RunRecord = {
       `setStaffRoleDirectly` in `support/database.ts`. */
   adminUser: FixtureUser;
   staffUser: FixtureUser;
+  /**
+   * A verified account reserved for the real browser sign-in regression.
+   * The generated password exists only in this gitignored record and is
+   * removed with the account by the teardown project.
+   */
+  authTransition: { user: FixtureUser; password: string };
   /** One grant target per browser project, keyed by that project's name, so
       the parallel projects never mutate the same row. Each is an ordinary
       verified account with no role at all — the state a public sign-up leaves

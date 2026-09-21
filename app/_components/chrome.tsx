@@ -1,9 +1,9 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { authClient } from "../../lib/auth/client";
 import { DemoRequestDialog } from "./lead/demo-request-dialog";
 import { FooterMotion } from "./motion/footer-reveal";
 import { NavLinkWave } from "./motion/nav-link-wave";
@@ -11,8 +11,6 @@ import { FooterTexture } from "./motion/footer-texture";
 import { NavDrop } from "./motion/nav-drop";
 import { NewsletterSubscribeDialog } from "./newsletter/subscribe-dialog";
 import { Button, ButtonLink, LinkButton, Wordmark } from "./primitives";
-
-const authClient = createAuthClient();
 
 /* There is no /product route, so Product resolves to the home page — the
    product story is what the homepage tells. */

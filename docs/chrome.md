@@ -416,3 +416,20 @@ tightly and strongly while a shorter, weaker wake preserves the fabric response.
 The canvas, source, autonomous loop and all footer geometry remain unchanged; its
 baseline/final correspondence and performance measurements are in
 `docs/motion-site.md`.
+
+### Auth-aware nav — one shared session transition, prompt 142
+
+`SiteNav` now imports the single browser client from `lib/auth/client.ts`
+instead of constructing a private Better Auth store. A successful email sign-in
+therefore invalidates the exact session atom the mounted navbar reads: after the
+one `/account` navigation it settles on `Account`, and sign-out settles on
+`Get started`, without a second `router.refresh()` request or an authenticated
+→ fallback → authenticated label cycle.
+
+The nav's classes, 60px geometry, glass, destinations, mobile panel, five
+`data-nav-wave` markers and `NavLinkWave` key/dependency cleanup are untouched.
+The production browser regression observed one session refetch and one account
+request, then held the final `Account` label through a 1.5 s stability window.
+All 21 prerendered pages retain byte-identical visible markup; the CSS chunk is
+also byte-identical. Full request, bundle and check results are recorded in
+`docs/backend.md`, "Shared browser auth client and the post-login transition".
