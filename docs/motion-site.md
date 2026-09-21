@@ -1538,3 +1538,57 @@ Final production smoke probe passed normal rendering at mobile device scale 3
 (buffer width 503 for a 335px band, respecting the 1.5 cap), forced unavailable
 WebGL, and forced shader compilation failure. Both forced failures kept the image
 fallback; all three cases recorded zero page errors.
+
+## Faster footer texture unwinding — prompt 133 (20 September 2026)
+
+At the user's request, the judged loop period changed from prompt 132's original
+18 seconds to the new shipped value of 12 seconds, making the same motion 50%
+faster. Only `PERIOD` in `motion/footer-texture.tsx` changed. The spatial
+deformation, linear phase, direction, texture and resolution caps are unchanged,
+as are its pause/resume lifecycle, reduced-motion and no-JavaScript fallbacks,
+failure handling, cleanup and footer geometry. Prompt 132's measurements above
+remain the historical verification record for the original 18-second version.
+
+The authored acceptance target was two complete 12-second periods with a
+continuous wrap. It is a judgement translating the user's qualitative request,
+not a duration measured from a reference.
+
+Production Chromium 151.0.7922.34 observed 38 seconds of stopped-scroll motion,
+more than three new periods. A nine-frame sheet sampled the recording at
+four-second intervals; the folds keep their direction and spatial shape and
+return every third sample without a seam, flash, gap or visible reset. The
+numeric phase probe remained effectively identical to prompt 132: phase 0 versus
+2π mean byte difference 0.000201 and maximum 1, with adjacent ±0.006-radian
+means 4.471 and 4.459. This is expected because the shader is unchanged; only
+the rate at which GSAP advances the phase changed. The recording is
+`/tmp/aetherfield-132-video/page@01c62d44abde0ce57876bf12492fc46b.webm`
+and the review sheet is `/tmp/aetherfield-133-motion-sheet.png`.
+
+The reused focused lifecycle probe passed in Chromium and Firefox 153.0 with
+zero page errors on `/about` and `/`. It confirmed continued motion after
+scrolling stops, zero draws offscreen and while hidden, resume without a jump,
+live reduced-motion teardown/restart, the original no-JavaScript image, exact
+canvas/image alignment after resizing, context-loss fallback and route-away /
+return cleanup. Chromium's recorded run produced 1,316 draws with a 24.4 ms
+median and 60.4 ms p95 interval; recording and SwiftShader materially affect
+those figures, so they are evidence of continued work rather than a performance
+claim. Firefox's unrecorded five-second sample produced 300 draws, 17 ms median
+and 21 ms p95. WebKit was not run because `podman` is unavailable, the existing
+documented Arch Linux environmental block.
+
+Focused geometry at 375, 800 and 1280 is byte-for-byte the same JSON as prompt
+132's production baseline. At 1280 the band remains x 24, y 3754.3125, width
+1232 and height 280; the complete footer, navigation and wordmark boxes also
+match. Both production CSS chunks are byte-identical to baseline. The baseline
+and final sets contain the same 21 prerendered HTML files; after normalising the
+build id, generated chunk names and Server Action ids, all 21 complete HTML
+files and all 21 rendered-markup views compare equal. The build generated 32/32
+static pages and retained the existing Static/SSG/Dynamic route table.
+
+Checks on 21 September 2026: `npm run lint` and `npm run typecheck` exited 0
+without diagnostics; `npm test` reported 13 files and 318 tests passed. The
+first sandboxed `npm run build` failed only because it could not fetch Archivo,
+JetBrains Mono and Newsreader from Google Fonts; the network-enabled retry
+compiled successfully in 19.8 seconds, completed TypeScript in 13.7 seconds and
+generated all pages. No source, amplitude, direction, resolution, fallback,
+lifecycle, cleanup, layout, server-rendered markup or CSS changed.

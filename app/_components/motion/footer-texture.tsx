@@ -5,7 +5,7 @@ import { gsap, useGSAP } from "./register";
 
 // Judged for this continuous surface, not fitted from a static reference.
 // Linear phase is intentional; the shared reveal duration/ease do not apply.
-const PERIOD = 18;
+const PERIOD = 12;
 const MAX_DPR = 1.5;
 const MAX_WIDTH = 1920;
 
