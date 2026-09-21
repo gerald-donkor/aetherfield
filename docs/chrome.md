@@ -25,6 +25,39 @@ three comps — glyph height 55 / 125 / 204, insets 20 on both sides at each.
 If a design genuinely calls for a different footer, ask first rather than
 editing this one.
 
+### Full-resolution footer texture — prompt 136 (21 September 2026)
+
+The settled band continues to use the same landscape framing, `object-cover`
+crop, 120 / 210 / 280px responsive heights and yellow/olive halftone treatment,
+but its sole consumer now points to the 3720x840
+`/assets/generated/texture-brand-full.png` sibling. The old 1800x409
+`texture-brand.png` remains in the repository as the rollback and visual
+reference; it is not upscaled.
+
+The new 203,861-byte PNG is made directly from the 3720x840 RGBA master rather
+than from the old derivative:
+
+```
+magick "public/assets/images/Footer image.png" \
+  -colorspace Gray -ordered-dither o8x8 \
+  +level-colors '#746E0B','#FFF546' \
+  public/assets/generated/texture-brand-full.png
+```
+
+`o8x8` preserves the established yellow paper, olive ink and fine printed-dot
+character while retaining the master's full spatial detail. This is a visual
+judgement against `texture-brand.png`, not a claim of byte-identical colour
+quantisation: the old opaque derivative has 28 colours, whereas this output has
+the same two treated inks before browser resampling. The fold direction, crop
+and palette remain visually consistent at 100% scale.
+
+The Image declares the source's true 3720x840 intrinsic dimensions, retains
+`sizes="100vw"`, decorative accessibility and lazy loading, and now requests
+`quality={100}`. Next 16.2.12 accepts that only because `images.qualities` now
+contains `100`; the built markup confirms `q=100` on every 640–3840w candidate.
+The 3840w request is deliberately capped by the actual 3720px source rather
+than treated as invented detail.
+
 ### The band's earlier CSS implementation, removed in prompt 115
 
 The band was first planned as **CSS, not a photograph**. `prompts/01-design-systems.md:249`

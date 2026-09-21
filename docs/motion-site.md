@@ -1774,3 +1774,39 @@ No package was installed, so WebKit remains the documented environmental gap.
 No dependency, server boundary, route mode, backend, secret, source image,
 autonomous phase, fallback, footer markup or CSS changed. The unrelated
 `.claude/settings.local.json` remains untracked and untouched.
+
+## Source-limited footer texture resolution — prompt 136 (21 September 2026)
+
+Prompt 136 removes the previous 1.5 DPR / 1920px width drawing-buffer ceiling.
+The footer still creates one canvas, uploads one image texture, applies the
+same crop, 12-second autonomous GSAP clock, dots, pointer response, observers,
+failure fallback and cleanup. Only the resolution calculation changes.
+
+The canvas now uses `min(device DPR, delivered source width / CSS width,
+delivered source height / CSS height)`, with a minimum one-pixel ratio as the
+finite fallback. It reads the selected Next optimizer URL's `w` parameter from
+`currentSrc`, rather than `naturalWidth`, because responsive `srcset` reports a
+density-corrected natural width. The request width is clamped to the genuine
+3720x840 local source and converted to the matching proportional height. Thus
+the 3840w candidate never allocates fictional texels. The built production
+HTML confirms the 640, 750, 828, 1080, 1200, 1920, 2048 and 3840 candidates all
+request the full-quality (`q=100`) full-resolution asset.
+
+At the settled 1280px desktop band box (1232x280), that rule permits the
+source-limited targets specified by the prompt: 2464x560 at DPR 2 and 3696x840
+at DPR 3. This replaces the historical 1848x420 cap. The mobile candidate is
+honestly delivery-limited by its selected responsive optimizer width; it is not
+claimed to receive the master merely because the master exists.
+
+`npm run lint`, `npm run typecheck` and `npm test` pass (13 files, 318 tests).
+The first sandboxed production build failed solely on the existing Google Fonts
+network restriction; the final authorised retry compiled successfully in 14.0s,
+finished TypeScript in 10.7s and generated 32/32 static pages, while emitting
+the expected full-resolution `srcset`/`q=100` markup. Browser Use's CLI
+is not installed and no browser surface was available in this environment, so
+the requested interactive Chromium/Firefox lifecycle, visual-mask and renderer
+profiling matrix remains an explicit environmental verification gap rather than
+a fabricated result. No route mode, server/data path, footer geometry, CSS,
+shader aesthetic or interaction behaviour was intentionally changed; the
+approved Image source, intrinsic metadata and responsive URLs are the sole
+prerendered-markup delta.

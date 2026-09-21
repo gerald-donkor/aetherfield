@@ -6,8 +6,7 @@ import { gsap, useGSAP } from "./register";
 // Judged for this continuous surface, not fitted from a static reference.
 // Linear phase is intentional; the shared reveal duration/ease do not apply.
 const PERIOD = 12;
-const MAX_DPR = 1.5;
-const MAX_WIDTH = 1920;
+const FOOTER_SOURCE = { width: 3720, height: 840 };
 
 const VERTEX = `
   attribute vec2 position;
@@ -193,7 +192,25 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         measure();
         const { width, height } = bounds;
         if (!width || !height) return;
-        const ratio = Math.min(window.devicePixelRatio, MAX_DPR, MAX_WIDTH / width);
+        // Do not allocate texels the loaded source cannot supply. This retains
+        // the device's useful DPR while bounding the canvas on every viewport.
+        // `naturalWidth` is density-corrected for a responsive `srcset`, so it
+        // cannot describe the texels WebGL receives. Next's selected optimizer
+        // URL carries its requested physical width; clamp that to the genuine
+        // local asset for the 3840w candidate, which cannot invent extra texels.
+        const selectedWidth = Number(
+          new URL(image.currentSrc, window.location.href).searchParams.get("w"),
+        );
+        const sourceWidth = Math.min(
+          selectedWidth || FOOTER_SOURCE.width,
+          FOOTER_SOURCE.width,
+        );
+        const sourceHeight = Math.min(
+          Math.round(sourceWidth * FOOTER_SOURCE.height / FOOTER_SOURCE.width),
+          FOOTER_SOURCE.height,
+        );
+        const sourceRatio = Math.min(sourceWidth / width, sourceHeight / height);
+        const ratio = Math.max(1, Math.min(window.devicePixelRatio || 1, sourceRatio));
         canvas.width = Math.max(1, Math.round(width * ratio));
         canvas.height = Math.max(1, Math.round(height * ratio));
         gl.viewport(0, 0, canvas.width, canvas.height);

@@ -245,11 +245,12 @@ export function SiteFooter() {
       <div className="mx-auto max-w-page px-5 lg:px-6">
         <FooterTexture>
           <Image
-            src="/assets/generated/texture-brand.png"
+            src="/assets/generated/texture-brand-full.png"
             alt=""
-            width={1800}
-            height={409}
+            width={3720}
+            height={840}
             sizes="100vw"
+            quality={100}
             aria-hidden
             className="h-[120px] w-full object-cover sm:h-[210px] lg:h-[280px]"
           />
