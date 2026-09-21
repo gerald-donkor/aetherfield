@@ -1211,10 +1211,13 @@ flight-payload re-segmentation to see through**.
 
 ## The navbar's per-character rollover (`motion/nav-link-wave.tsx`)
 
-Prompt 138 adds the supplied character wave to the five **desktop** navbar
-links: Product, Journal, About, Careers and the auth-aware Get started / Account
-control. It supersedes prompt 33's "no split" non-goal for these five links
-only. The wordmark, mobile menu, header drop-in and footer motion are unchanged.
+Prompt 138 added the structure and timeline for the supplied character wave on
+the five **desktop** navbar links: Product, Journal, About, Careers and the
+auth-aware Get started / Account control. Prompt 139 corrected its rendering:
+the first implementation advanced its GSAP timelines and wrote transform
+matrices, but its ordinary inline character spans did not paint those
+transforms. The wordmark, mobile menu, header drop-in and footer motion remain
+unchanged.
 
 `NavLinkWave` is a component-only client leaf that renders the existing `<nav>`
 itself and takes its class string and children over, so it adds no layout box.
@@ -1231,6 +1234,20 @@ turned into children of `LinkButton`'s `inline-flex`. SplitText therefore uses a
 space delimiter with a non-breaking-space replacement. Whitespace remains out
 of `split.chars`, Get started still has **10** animated glyphs, and its accessible
 name remains the ordinary string "Get started".
+
+### The rendering correction
+
+SplitText's `tag: "span"` creates ordinary inline boxes. Chromium computed a
+changing GSAP matrix on those spans, but CSS transforms do not visually affect
+non-replaced inline boxes: the glyph rectangles stayed at their line position.
+Prompt 138's matrix/property probe was therefore a false positive, and its
+claim that the committed glyphs visibly travelled was inaccurate.
+
+Prompt 139 sets `display: "inline-block"` on `split.chars` with one scoped
+`gsap.set()` immediately after each split. This keeps every glyph in inline
+flow while making it a transformable box. It is a runtime-only write on
+SplitText's generated nodes, not a global selector or emitted utility, and the
+existing GSAP context removes it when the split reverts.
 
 ### The motion
 
@@ -1265,8 +1282,8 @@ unmount.
 
 ### Measured in the production build
 
-At 1280px, after fonts and the existing NavDrop had settled, the unsplit and
-split boxes were:
+At 1280px, after fonts and the existing NavDrop had settled, prompt 138's
+unsplit and original inline-split boxes were:
 
 | target | unsplit | split | absolute delta |
 | --- | ---: | ---: | ---: |
@@ -1282,23 +1299,39 @@ gaps stayed exactly **28px**. The nav's right edge stayed at 1256px, so its x
 shift is the same 0.297px as its width delta and remains under the approved
 0.5px ceiling. A 5%-fuzz no-hover header comparison reported 108.809 weighted
 pixels; visual inspection shows only the expected subpixel glyph-edge
-rasterisation, with no changed line, spacing, colour or glass geometry.
+rasterisation, with no changed line, spacing, colour or glass geometry. Those
+resting measurements remain valid; the earlier motion claim does not.
 
-Frame-by-frame production sampling measured `y = -12…12` on all five links.
-Get started's ten-glyph pass carried visible motion through about **325ms**;
-the authored twelve-glyph equivalent is 380ms. Product, Journal and Careers
-settled in about 258–274ms and About in about 225ms, consistent with the same
-0.16s glyph loop plus a 0.02s stagger. Three rapid boundary replays at 55ms
-intervals still landed all ten CTA glyphs at `matrix(1, 0, 0, 1, 0, 0)` with
-no retained transform. The real Chromium fine-pointer check kept the CTA arrow
-at `translate: 6px` on hover, exactly the existing measured travel.
+With prompt 139's transformable glyphs, the settled nav is **441.469px** wide,
+only **0.344px** wider than prompt 138's 441.125px inline-split render. Product
+and Careers each change by 0.172px; Journal, About and Get started remain within
+0.001px of their recorded split widths. Heights remain 16px and all four gaps
+remain exactly **28px**, so every correction delta stays inside the approved
+0.5px ceiling.
 
-The accessibility snapshot during the split reports Aetherfield home plus the
-five links with the names Product, Journal, About, Careers and Get started.
-Destinations remain `/`, `/journal`, `/about`, `/careers` and `/sign-in`; the
-mocked authenticated state reports Account at `/account`. At 375px there are
-zero split characters, at 800px there are 36, and reduced-motion emulation
-again reports zero.
+The corrected production probe checked rendered rectangles rather than GSAP
+state alone. Product's first glyph rests at `x 838.031, y 22, 10.906×16`; on
+the first sampled animation frame its painted box is
+`x 833.852, y 13.189, 19.264×17.216` with matrix
+`matrix(0.4768, 0.879012, -0.879012, 0.4768, 0, -8.2031)`. Later samples reach
+matrix y values of **-11.9999** and **+11.9692**, and the rectangle's position
+and dimensions change with its rotation. A 30fps production recording,
+inspected again as a 15fps navbar contact sheet, visibly shows the compact
+full-turn pass moving left to right on both pointer entry and exit. This is the
+paint evidence the original verification lacked.
+
+Six rapid boundary replays at 55ms intervals leave all ten CTA glyphs at rest
+with no retained transform. The CTA's independent Tailwind transition still
+lands its arrow at computed `translate: 6px`; the glyph correction does not
+target the SVG.
+
+The corrected accessibility snapshot during the split reports Aetherfield home
+plus the five links with the names Product, Journal, About, Careers and Get
+started. Destinations remain `/`, `/journal`, `/about`, `/careers` and
+`/sign-in`; the mocked authenticated state reports Account at `/account`. At
+375px there are zero split characters, at 800px there are 36 `inline-block`
+glyphs, and reduced-motion emulation again reports zero. A separate 1280px
+headless context with `hover: none` and `pointer: none` also remains unsplit.
 
 ### Impact
 
@@ -1320,6 +1353,24 @@ their page motion already contributes another), while exactly one existing
 shared chunk gains the wave leaf. There is **no second GSAP or SplitText chunk**.
 The sole CSS chunk is byte-identical at **68,814 bytes**.
 
+Prompt 139 adds no prerender marker or class. Its two-build comparison found all
+**21** HTML files identical after normalising build IDs and content-hashed JS /
+CSS names; the visible markup needs no further substitution. The comparison
+environment carried the local skill snapshots, so both sides emitted two CSS
+chunks (11,186 and 408,721 bytes); both pairs have identical SHA-256 hashes.
+Representative route chunk counts remain 10 for `/`, `/about`, `/careers`,
+`/journal`, `/job-listing/data-scientist` and `/sign-in`, and 9 for
+`/design-system` and the sampled article. The count of emitted chunks
+containing GSAP or SplitText is unchanged. The existing shared nav chunk grows
+**45 raw bytes**, or **5–6 gzip bytes** on the sampled routes.
+
+`npm run test:e2e:local` completed with **109 passed, 12 skipped and 1 failed**.
+The failure is outside this change: Chromium timed out in
+`scope-2-grid-average-fallback.spec.ts` waiting for the existing fallback write
+path, while Firefox passed it. One isolated rerun reproduced the same backend
+scenario at an earlier navigation wait (**2 passed, 1 failed**), so it is
+recorded as an existing E2E failure rather than described as a clean matrix.
+
 ### Non-goals held
 
 - No class string, destination, nav spacing, fitted glass, sticky behavior or
@@ -1328,7 +1379,8 @@ The sole CSS chunk is byte-identical at **68,814 bytes**.
 - `NavDrop`, `SiteFooter`, `LinkButton` and `motion/register.ts` are unchanged;
   the existing GSAP and SplitText registration is reused.
 - No dependency, token, global CSS rule, `will-change`, `clearProps`, blur,
-  opacity tween or layout property was added.
+  opacity tween or animated layout property was added. Prompt 139's only
+  runtime style addition is scoped `display: inline-block` on generated glyphs.
 
 ## `/job-listing/[slug]`'s two reveals
 

@@ -78,6 +78,11 @@ export function NavLinkWave({
             // 6px margin and hover travel keep the settled LinkButton geometry.
             ignored.forEach((element) => link.append(element));
 
+            // SplitText's span wrappers otherwise compute to ordinary inline
+            // boxes, which accept GSAP's transform matrix without painting it.
+            // Keep the glyphs in inline flow while making that matrix visible.
+            gsap.set(split.chars, { display: "inline-block" });
+
             const timeline = gsap.timeline({ paused: true });
             timeline
               .fromTo(
