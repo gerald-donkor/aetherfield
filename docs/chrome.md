@@ -369,3 +369,9 @@ Prompt 134 extends that same band canvas with a material-driven dot field and
 local decaying mouse influence. The source fallback, crop, dimensions and all
 surrounding footer geometry remain unchanged; see `docs/motion-site.md` for the
 rendering choices, pointer lifecycle and measured comparisons.
+
+Prompt 135 tunes only that pointer influence: the lead now tracks the mouse more
+tightly and strongly while a shorter, weaker wake preserves the fabric response.
+The canvas, source, autonomous loop and all footer geometry remain unchanged; its
+baseline/final correspondence and performance measurements are in
+`docs/motion-site.md`.

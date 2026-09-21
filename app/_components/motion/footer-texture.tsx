@@ -40,11 +40,11 @@ const FRAGMENT = `
     vec2 disturbance = vec2(0.0);
     for (int i = 0; i < 3; i++) {
       vec2 delta = (uv - wake[i].xy) * aspect;
-      float falloff = 1.0 - smoothstep(0.0, 0.65, length(delta));
+      float falloff = 1.0 - smoothstep(0.0, 0.56, length(delta));
       vec2 velocity = wake[i].zw;
       float turn = velocity.x * delta.y - velocity.y * delta.x;
       disturbance += falloff * falloff *
-        (velocity + vec2(-delta.y, delta.x) * turn * 2.0) / aspect;
+        (velocity + vec2(-delta.y, delta.x) * turn * 2.6) / aspect;
     }
     vec2 flow = uv + offset + disturbance * envelope;
     vec2 sampleUV = (flow - 0.5) * crop + 0.5;
@@ -132,7 +132,7 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         if (pointer.time && elapsed > 0 && elapsed < 0.15) {
           const vx = (x - pointer.x) * bounds.width / bounds.height / elapsed;
           const vy = (y - pointer.y) / elapsed;
-          const scale = 0.055 / Math.max(1, Math.hypot(vx, vy) / 2);
+          const scale = 0.11 / Math.max(1, Math.hypot(vx, vy) / 2);
           pointer.vx = vx * scale;
           pointer.vy = vy * scale;
         }
@@ -149,13 +149,15 @@ export function FooterTexture({ children }: { children: ReactNode }) {
         const now = performance.now();
         const dt = lastDraw ? Math.min((now - lastDraw) / 1000, 0.05) : 0;
         lastDraw = now;
-        const follow = 1 - Math.exp(-dt / 0.08);
-        pointer.vx *= Math.exp(-dt / 0.18);
-        pointer.vy *= Math.exp(-dt / 0.18);
+        const leadFollow = 1 - Math.exp(-dt / 0.018);
+        const trailFollow = 1 - Math.exp(-dt / 0.07);
+        pointer.vx *= Math.exp(-dt / 0.2);
+        pointer.vy *= Math.exp(-dt / 0.2);
         for (let i = 2; i >= 0; i--) {
           const index = i * 4;
           const x = i ? wakes[index - 4] : pointer.x;
           const y = i ? wakes[index - 3] : pointer.y;
+          const follow = i ? trailFollow : leadFollow;
           if (Math.hypot(wakes[index + 2], wakes[index + 3]) < 0.0001) {
             wakes[index] = x;
             wakes[index + 1] = y;
@@ -163,8 +165,8 @@ export function FooterTexture({ children }: { children: ReactNode }) {
             wakes[index] += (x - wakes[index]) * follow;
             wakes[index + 1] += (y - wakes[index + 1]) * follow;
           }
-          const vx = i ? wakes[index - 2] * 0.65 : pointer.vx;
-          const vy = i ? wakes[index - 1] * 0.65 : pointer.vy;
+          const vx = i ? wakes[index - 2] * 0.48 : pointer.vx;
+          const vy = i ? wakes[index - 1] * 0.48 : pointer.vy;
           wakes[index + 2] += (vx - wakes[index + 2]) * follow;
           wakes[index + 3] += (vy - wakes[index + 3]) * follow;
         }

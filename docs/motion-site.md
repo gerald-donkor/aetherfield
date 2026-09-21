@@ -1695,3 +1695,82 @@ and the same byte-identical CSS result. Review video:
 `/tmp/aetherfield-footer-pixel-flow.mp4`; sampled motion sheet:
 `/tmp/aetherfield-134-motion-sheet.png`. These are local review artifacts, not
 shipped assets. The unrelated `.claude/settings.local.json` is preserved.
+
+## Vivid, corresponding footer pointer motion — prompt 135 (21 September 2026)
+
+Prompt 135 tunes the pointer-driven part of prompt 134's existing footer shader.
+The lead wake sample now follows with an 18 ms time constant instead of sharing
+the old 80 ms wake smoothing; the two trailing samples use 70 ms and retain 48%
+of the preceding velocity rather than 65%. Input displacement doubles from 0.055
+to 0.11, its decay is 200 ms rather than 180 ms, the local radius narrows from
+0.65 to 0.56 band heights, and rotational contribution rises from 2.0 to 2.6.
+These are judged tuning values. Together they put the strongest response close
+to the live pointer, make ordinary slow motion visible, and leave a shorter wake
+without widening the affected region. The one canvas, three samples, typed-array
+data path, pointer listener, GSAP clock and allocation behaviour are unchanged.
+
+The identical deterministic production trajectory measured prompt 134 before
+editing and prompt 135 after it at 1280px. On the slow sweep, nearby mean RGB
+difference rises from 44.196 to 46.343 levels (+4.9%) while the influence
+centroid offset falls from 0.191 to 0.081 band heights (58% closer). On the
+medium sweep, nearby difference rises from 30.649 to 41.270 (+34.7%) and centroid
+offset falls from 0.625 to 0.401 band heights (36% closer). Slow distant
+difference remains 0; the medium distant reading improves from baseline noise
+of 0.346 to 0. The lead uniform finishes the slow path at x 0.599 for pointer x
+0.600, compared with baseline x 0.582. These are same-phase GPU readbacks, not
+autonomous-frame comparisons.
+
+A reversal probe confirms directional correspondence frame by frame. Before the
+turn, lead and trail x velocities are +0.191, +0.089 and +0.039. On the first
+reversed frame the lead is −0.131 while both older samples remain positive at
++0.090 and +0.040; on the next sample the lead is −0.182, the middle sample has
+started reversing and the oldest still trails at +0.032. After exit, maximum
+wake velocity decays from 0.182 to 0.045 at 250 ms, 0.013 at 500 ms and 0.001 at
+one second. Stationary re-entry produces no spike (maximum 0.0007).
+
+### Verification
+
+Chromium 151.0.7922.34 and Firefox 153.0 pass the reused production lifecycle
+matrix on `/about` and `/`: no initial work while offscreen, zero offscreen or
+hidden draws, resume, live reduced-motion teardown/restart, no-JavaScript image,
+resize alignment at all three breakpoints, context-loss fallback, route away /
+return without detached draws, and zero page or console errors. Mobile DPR 3
+still produces a 503px buffer for the 335px band; touch input leaves velocity at
+zero. Forced unavailable WebGL removes the canvas, and forced shader compilation
+failure keeps it hidden; both preserve the loaded image with no page errors.
+
+The prompt-134 and final captures use the same production procedure. At 375,
+800 and 1280 widths the footer, band, nav and wordmark boxes match exactly; band
+heights remain 120/210/280px. Masking the entire animated band, including its
+fractional edge row, gives `AE 0 (0)` outside it at all three widths. The final
+39.12-second film contains two complete idle periods followed by slow and medium
+sweeps, rapid reversals, stopping, exit and stationary re-entry. Visual review
+keeps dot integrity, continuous folds and safe edges; that assessment is
+judgement. Review video: `/tmp/aetherfield-footer-vivid-pointer.mp4`; motion
+sheet: `/tmp/aetherfield-135-motion-sheet.png`.
+
+On the same Chromium SwiftShader renderer and 1232×280 buffer, the identical
+unrecorded five-second probe changes idle median/p95 interval from 19.8/25.4 ms
+to 20.2/27.9 ms and active median/p95 from 19.7/23.3 ms to 19.6/23.0 ms. Both
+baseline and final p95 JS submission are 0.1 ms. The fuller final lifecycle
+sample records Chromium 20.9/27.0 ms with 0.1 ms submission and Firefox 17/20 ms
+with submission rounded to 0. These software-rendered figures do not measure GPU
+completion and are not hardware or low-end-device guarantees; importantly, the
+change adds no event-time rendering, allocation or shader sample.
+
+`npm run lint` and `npm run typecheck` exit 0 without diagnostics. `npm test`
+reports `Test Files 13 passed (13)` and `Tests 318 passed (318)`. The final
+network-enabled `npm run build` reports `Compiled successfully in 17.4s`,
+`Finished TypeScript in 15.2s` and `Generating static pages using 7 workers
+(32/32) in 675ms`; the route table is unchanged. All 21 prerendered HTML files
+retain identical rendered markup after normalising build/chunk references and
+separating flight scripts. Both CSS chunks are byte-identical at 419907 bytes
+combined. Client chunk content changes as expected. The initial sandboxed
+baseline build failed only because it could not fetch the three configured
+Google Fonts; the authorised retry succeeded.
+
+`npm run test:e2e:webkit` reports `Podman is required for WebKit on Arch Linux.`
+No package was installed, so WebKit remains the documented environmental gap.
+No dependency, server boundary, route mode, backend, secret, source image,
+autonomous phase, fallback, footer markup or CSS changed. The unrelated
+`.claude/settings.local.json` remains untracked and untouched.
