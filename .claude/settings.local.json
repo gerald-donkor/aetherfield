@@ -1,0 +1,11 @@
+{
+  "enabledMcpjsonServers": [
+    "motion",
+    "motion-plus"
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(printf *)"
+    ]
+  }
+}
