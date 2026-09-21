@@ -1209,6 +1209,127 @@ flight-payload re-segmentation to see through**.
 - **No `will-change`, no pin, no scrub.** The capabilities cloth is still the
   site's only scroll-linked element.
 
+## The navbar's per-character rollover (`motion/nav-link-wave.tsx`)
+
+Prompt 138 adds the supplied character wave to the five **desktop** navbar
+links: Product, Journal, About, Careers and the auth-aware Get started / Account
+control. It supersedes prompt 33's "no split" non-goal for these five links
+only. The wordmark, mobile menu, header drop-in and footer motion are unchanged.
+
+`NavLinkWave` is a component-only client leaf that renders the existing `<nav>`
+itself and takes its class string and children over, so it adds no layout box.
+The five anchors carry only `data-nav-wave=""`. Each anchor is split separately
+with `type: "chars"`, `smartWrap: true`, `tag: "span"` and automatic ARIA, so
+the accessibility tree continues to expose five links rather than individual
+letters. The CTA's `aria-hidden` SVG is ignored and moved back beside the split
+label after SplitText's smart wrapping; this preserves its existing margin and
+independent Tailwind translate.
+
+**The word gap is deliberate, not a fitted correction.** A normal collapsible
+space becomes a zero-width anonymous flex item after the surrounding words are
+turned into children of `LinkButton`'s `inline-flex`. SplitText therefore uses a
+space delimiter with a non-breaking-space replacement. Whitespace remains out
+of `split.chars`, Get started still has **10** animated glyphs, and its accessible
+name remains the ordinary string "Get started".
+
+### The motion
+
+Each link owns one paused timeline, built synchronously inside `useGSAP` and a
+named `gsap.matchMedia()` handler. Both `pointerenter` and `pointerleave` call
+`restart()` on that same timeline; no event callback creates a GSAP object and
+there is no `contextSafe`.
+
+One glyph takes **0.16 s** through four explicit transform-only quarters:
+`y 0 → -12 → 0 → 12 → 0` and `rotation 0 → 90 → 180 → 270 → 360`, then an
+explicit set lands it at `y: 0, rotation: 0`. Successive visible glyphs start
+**0.02 s** apart. Those authored values sit inside the recording's measured
+0.017–0.025 s onset band and produce **0.38 s for a twelve-glyph label**
+(`0.16 + 11 × 0.02`), inside the measured 0.37–0.40 s complete-pass band. The
+12 px vertical extrema are measured; `EASE` on the four quarters is a judgement
+because the recording cannot separate it from constant angular phase.
+
+The handler runs only when all four named conditions agree: `min-width: 48rem`,
+`hover: hover`, `pointer: fine`, and `prefers-reduced-motion: no-preference`.
+At 375px the desktop anchors remain unsplit; at 800 and 1280 they split on a
+fine hover pointer. Reduced motion and coarse/non-hover contexts leave the
+original text nodes intact and create no timelines.
+
+The auth label is both a `useGSAP` dependency with `revertOnUpdate: true` and
+the leaf's React key. Switching the mocked Better Auth session response from
+signed out to signed in replaced the old ten-character Get started split with
+one seven-character Account split, kept exactly five named links, and changed
+the destination from `/sign-in` to `/account`. Every native listener is removed
+by the match-media cleanup; `mm.revert()` restores the original SplitText DOM
+and kills the paused timelines on dependency change, breakpoint change and
+unmount.
+
+### Measured in the production build
+
+At 1280px, after fonts and the existing NavDrop had settled, the unsplit and
+split boxes were:
+
+| target | unsplit | split | absolute delta |
+| --- | ---: | ---: | ---: |
+| enclosing nav | 440.828px | 441.125px | **0.297px** |
+| Product | 60.609px | 60.656px | 0.047px |
+| Journal | 58.344px | 58.391px | 0.047px |
+| About | 46.219px | 46.250px | 0.031px |
+| Careers | 60.594px | 60.656px | 0.063px |
+| Get started + arrow | 103.063px | 103.172px | **0.109px** |
+
+Height and y stayed **16px / 22px** for every anchor, and all four inter-link
+gaps stayed exactly **28px**. The nav's right edge stayed at 1256px, so its x
+shift is the same 0.297px as its width delta and remains under the approved
+0.5px ceiling. A 5%-fuzz no-hover header comparison reported 108.809 weighted
+pixels; visual inspection shows only the expected subpixel glyph-edge
+rasterisation, with no changed line, spacing, colour or glass geometry.
+
+Frame-by-frame production sampling measured `y = -12…12` on all five links.
+Get started's ten-glyph pass carried visible motion through about **325ms**;
+the authored twelve-glyph equivalent is 380ms. Product, Journal and Careers
+settled in about 258–274ms and About in about 225ms, consistent with the same
+0.16s glyph loop plus a 0.02s stagger. Three rapid boundary replays at 55ms
+intervals still landed all ten CTA glyphs at `matrix(1, 0, 0, 1, 0, 0)` with
+no retained transform. The real Chromium fine-pointer check kept the CTA arrow
+at `translate: 6px` on hover, exactly the existing measured travel.
+
+The accessibility snapshot during the split reports Aetherfield home plus the
+five links with the names Product, Journal, About, Careers and Get started.
+Destinations remain `/`, `/journal`, `/about`, `/careers` and `/sign-in`; the
+mocked authenticated state reports Account at `/account`. At 375px there are
+zero split characters, at 800px there are 36, and reduced-motion emulation
+again reports zero.
+
+### Impact
+
+All **21** prerendered HTML files were compared against detached HEAD. The 19
+routes that render `SiteNav` gain exactly five `data-nav-wave=""` markers in
+their visible navbar markup; `_not-found` and `_global-error` gain none. The
+route table remains unchanged: the marketing/auth routes are still static and
+the six article plus three job-listing paths are still SSG. The clean-worktree
+comparison, with `.agents/` and `.claude/` excluded from both Tailwind scan
+roots, reports **zero remaining visible-markup differences after removing those
+95 markers**.
+
+Every representative route keeps its exact chunk count: 10 on `/`, `/about`,
+`/careers`, `/journal`, `/job-listing/data-scientist` and `/sign-in`; 9 on
+`/design-system` and the sampled article. Each gains **1,493 raw JS bytes** and
+**425–428 gzipped bytes**. The number of referenced chunks containing SplitText
+is unchanged on every sample (one normally, two on `/` and `/careers`, where
+their page motion already contributes another), while exactly one existing
+shared chunk gains the wave leaf. There is **no second GSAP or SplitText chunk**.
+The sole CSS chunk is byte-identical at **68,814 bytes**.
+
+### Non-goals held
+
+- No class string, destination, nav spacing, fitted glass, sticky behavior or
+  60px header geometry changed.
+- The wordmark and mobile menu have no split markers or hover timeline.
+- `NavDrop`, `SiteFooter`, `LinkButton` and `motion/register.ts` are unchanged;
+  the existing GSAP and SplitText registration is reused.
+- No dependency, token, global CSS rule, `will-change`, `clearProps`, blur,
+  opacity tween or layout property was added.
+
 ## `/job-listing/[slug]`'s two reveals
 
 Prompt 34, the last content route with no motion of its own. Two `Reveal` calls

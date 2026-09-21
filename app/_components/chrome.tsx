@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { DemoRequestDialog } from "./lead/demo-request-dialog";
 import { FooterMotion } from "./motion/footer-reveal";
+import { NavLinkWave } from "./motion/nav-link-wave";
 import { FooterTexture } from "./motion/footer-texture";
 import { NavDrop } from "./motion/nav-drop";
 import { NewsletterSubscribeDialog } from "./newsletter/subscribe-dialog";
@@ -36,6 +37,7 @@ export function SiteNav() {
   const [open, setOpen] = useState(false);
   const { data: session } = authClient.useSession();
   const isAuthenticated = Boolean(session?.user);
+  const accountLabel = isAuthenticated ? "Account" : "Get started";
 
   return (
     // Pinned, full-bleed frosted glass: the page scrolls underneath it. The
@@ -62,22 +64,31 @@ export function SiteNav() {
         </Link>
 
         {/* Desktop */}
-        <nav className="hidden items-center gap-7 md:flex">
+        <NavLinkWave
+          key={accountLabel}
+          label={accountLabel}
+          className="hidden items-center gap-7 md:flex"
+        >
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.label}
               href={item.href}
+              data-nav-wave=""
               className="font-sans text-nav font-bold text-ink hover:text-muted"
             >
               {item.label}
             </Link>
           ))}
           {isAuthenticated ? (
-            <LinkButton href="/account">Account</LinkButton>
+            <LinkButton href="/account" data-nav-wave="">
+              Account
+            </LinkButton>
           ) : (
-            <LinkButton href="/sign-in">Get started</LinkButton>
+            <LinkButton href="/sign-in" data-nav-wave="">
+              Get started
+            </LinkButton>
           )}
-        </nav>
+        </NavLinkWave>
 
         {/* Mobile toggle: + rotates into × */}
         <button
