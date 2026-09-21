@@ -221,20 +221,26 @@ export function SiteFooter() {
     <FooterMotion className="overflow-hidden bg-brand text-brand-ink">
       <div className="mx-auto flex max-w-page flex-col items-center gap-3 px-5 lg:px-6 py-6 text-center sm:flex-row sm:items-baseline sm:justify-between sm:text-left">
         <nav className="flex flex-wrap justify-center gap-x-7 gap-y-2">
-          {/* Labels only: the footer's link targets are unchanged pending review.
-              `data-footer-split` is per-link rather than on the `<nav>`: SplitText
+          {/* `data-footer-split` is per-link rather than on the `<nav>`: SplitText
               labels the element it splits and hides the pieces, so splitting the
               nav would leave every link without an accessible name. */}
-          {[...NAV_ITEMS.map((i) => i.label), "Get started"].map((item) => (
-            <a
-              key={item}
-              href="#"
+          {NAV_ITEMS.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
               data-footer-split=""
               className="font-sans text-p1 font-bold hover:opacity-70"
             >
-              {item}
-            </a>
+              {item.label}
+            </Link>
           ))}
+          <Link
+            href="/sign-in"
+            data-footer-split=""
+            className="font-sans text-p1 font-bold hover:opacity-70"
+          >
+            Get started
+          </Link>
         </nav>
         <p data-footer-split="" className="font-serif text-p2">
           © 2026 · All rights reserved

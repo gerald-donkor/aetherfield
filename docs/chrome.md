@@ -259,15 +259,23 @@ in `chrome.tsx`; the desktop nav and the mobile panel both read `NAV_ITEMS`, so
 both follow, and the panel's existing `onClick={() => setOpen(false)}` already
 closes the overlay on navigation.
 
-**The footer nav is deliberately untouched.** `SiteFooter` maps `NAV_ITEMS`'
-*labels* only and hardcodes `href="#"` for every item. Wiring those is a change
-to the settled footer and is a separate decision — do not fold it into a nav
-change.
+### Footer navigation destinations — prompt 137 (21 September 2026)
 
-No layout row moves at any breakpoint: the label's text and type are unchanged,
-so there is nothing to measure against the comps. Every page's prerendered HTML
-gains exactly two diffs (desktop and mobile `<a href="#">` → `<a href="/">`)
-with the same class strings.
+The settled footer now maps the existing `NAV_ITEMS` data directly to internal
+`Link` elements: Product → `/`, Journal → `/journal`, About → `/about`, and
+Careers → `/careers`. Its visible `Get started` link resolves to `/sign-in`,
+matching the logged-out navbar CTA. The footer remains static rather than
+session-aware, so its label does not change to Account.
+
+This replaces only the five placeholder `href` values. The navigation order,
+labels, class strings, `data-footer-split` markers, geometry, type, colours,
+texture, wordmark and motion treatment remain unchanged.
+
+When Product was wired in the navbar, no layout row moved at any breakpoint:
+the label's text and type were unchanged, so there was nothing to measure
+against the comps. That navbar change gave every page exactly two diffs (desktop
+and mobile `<a href="#">` → `<a href="/">`) with the same class strings. The
+later footer decision above adds its five deliberate anchor-destination diffs.
 
 ### Nav — Get started leads to account access
 
