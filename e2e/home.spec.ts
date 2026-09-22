@@ -12,6 +12,27 @@ test("renders the homepage heading", async ({ page }) => {
   ).toHaveCount(1);
 });
 
+test("links the homepage journal control to the journal index", async ({ page }) => {
+  await page.goto("/");
+
+  const viewAllArticles = page.getByRole("link", {
+    exact: true,
+    name: "View all articles",
+  });
+
+  await expect(viewAllArticles).toHaveAttribute("href", "/journal");
+  await viewAllArticles.click();
+
+  await expect(page).toHaveURL(/\/journal$/);
+  await expect(
+    page.getByRole("heading", {
+      exact: true,
+      level: 2,
+      name: "Latest articles",
+    }),
+  ).toHaveCount(1);
+});
+
 test("keeps the targets workspace behind sign-in", async ({ page }) => {
   await page.goto("/targets");
 

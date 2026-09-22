@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { FEATURED_ARTICLES } from "../../_content/articles";
 import { Reveal } from "../motion/reveal";
-import { Button, Meta } from "../primitives";
+import { ButtonLink, Meta } from "../primitives";
 import { Container } from "./container";
 import { JournalMark } from "./journal-mark";
 
@@ -71,14 +71,15 @@ export function Journal() {
               ))}
             </ul>
             <div className="mt-8 flex justify-center">
-              <Button
+              <ButtonLink
+                href="/journal"
                 size="secondary"
                 bullet={false}
                 className="w-full sm:w-auto"
                 data-reveal-item
               >
                 View all articles
-              </Button>
+              </ButtonLink>
             </div>
           </div>
         </div>

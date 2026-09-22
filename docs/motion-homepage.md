@@ -1,5 +1,35 @@
 # Homepage motion (`/` only, until prompt 24)
 
+## Prompt 143 — Homepage "View all articles" navigation
+
+The standalone control beneath the homepage's "From the journal" rows was an
+inert `Button`, despite being navigation to the existing `/journal` index. It
+now uses `ButtonLink href="/journal"`: the emitted interactive element is an
+anchor, while the shared primitive's secondary sizing (`h-[38px] px-3`),
+no-bullet treatment, text, wrapper, `data-reveal-item`, and homepage reveal
+behavior remain unchanged.
+
+`e2e/home.spec.ts` asserts the accessible link's exact href, activates it from
+the production application, and confirms `/journal` plus its stable `Latest
+articles` heading. (The route does not render a `Journal` h1; the masthead is a
+scaling SVG.)
+This deliberately does not couple the regression to an article-card link.
+
+The only intended prerendered-markup change is this homepage control's `button`
+to `a href="/journal"` substitution; `/journal` and every other route retain
+their markup and render modes.
+
+### Checks
+
+`npm run lint` and `npm run typecheck` exited 0 with no diagnostics. `npm test`
+passed **13 files, 318 tests**. `npm run build` compiled successfully and
+generated all **32** static pages, preserving `/` and `/journal` as static
+routes. `npm run test:e2e:local` exited 0 for Chromium and Firefox (the HTML
+reporter writes its result to the report rather than stdout); `git diff --check`
+exited 0. An isolated `agent-browser` production session found the control as a
+link named `View all articles` with href `/journal`, clicked it, reached
+`/journal`, and found the `Latest articles` heading.
+
 
 **Superseded in part.** Everything in this section still describes `/`
 accurately, but "GSAP, on the homepage and nowhere else" and the "no GSAP leak"
